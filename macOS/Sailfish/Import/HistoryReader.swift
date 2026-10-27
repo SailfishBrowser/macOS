@@ -86,7 +86,7 @@ enum ImportDatabase {
     try withCopy(of: file) { try rows(copy: $0, query, row) }
   }
 
-  private static func rows<T>(copy: URL, _ query: String, _ row: (Row) -> T?) throws -> [T] {
+  static func rows<T>(copy: URL, _ query: String, _ row: (Row) -> T?) throws -> [T] {
     var db: OpaquePointer?
     var statement: OpaquePointer?
     defer {

@@ -170,6 +170,24 @@ final class BrowserImportTests: XCTestCase {
     ])
   }
 
+  // A page's own icon wins over the one its site's pages share; a site is its scheme and whole host, in any case.
+  func testImportedFaviconsOfASiteAreItsOwnHostsAndAPagesOwnComesFirst() throws {
+    let database = try favicons("Default/Favicons", [
+      ("https://news.example/a", 1, 32, "news"),
+      ("https://news.example/b", 1, 32, "news"),
+      ("https://news.example/odd", 1, 32, "odd"),
+      ("https://news.example.org/a", 1, 32, "org"),
+      ("https://news.example.org/b", 1, 32, "org"),
+      ("https://news.example.org/c", 1, 32, "org"),
+      ("http://news.example/", 1, 32, "http"),
+    ])
+    let pages = ["https://news.example/odd", "https://NEWS.example/new", "https://news.example.org/new"]
+      .map { URL(string: $0)! }
+    XCTAssertEqual(ImportedFavicons.read([database], pages: pages).mapValues { String(decoding: $0, as: UTF8.self) }, [
+      pages[0]: "odd", pages[1]: "news", pages[2]: "org",
+    ])
+  }
+
   func testSavedImportedFaviconsAreThePagesImages() throws {
     let rep = NSBitmapImageRep(
       bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,

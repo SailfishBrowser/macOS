@@ -48,7 +48,13 @@ extension ImportClient: DependencyKey {
     },
     arcProfiles: { BrowserSources.chromiumProfiles($0.appending(path: "User Data"), .arc) },
     history: { browser, profile, into in
-      let entries = try await Task.detached { try HistoryReader.read(browser.historySource(profile)) }.value
+      let entries = try await Task.detached {
+        try HistoryReader.read(browser.historySource(profile)).map {
+          ECHistoryEntry(
+            urlString: $0.url, title: $0.title, visitCount: $0.visitCount, typedCount: $0.typedCount,
+            lastVisit: $0.lastVisit)
+        }
+      }.value
       return await Engine.shared.importHistory(entries, into: into)
     },
     favicons: { profiles, pages in
@@ -64,16 +70,25 @@ extension ImportClient: DependencyKey {
       let file = profile.folder.appending(path: "Login Data")
       // A profile that never saved one may have none.
       guard FileManager.default.fileExists(atPath: file.path) else { return 0 }
-      let passwords = try await Task.detached { try LoginsReader.passwords(file, key: key) }.value
-      return await Engine.shared.importPasswords(
-        passwords.map { ECPassword(urlString: $0.url, username: $0.username, password: $0.password) }, into: into)
+      let passwords = try await Task.detached {
+        try LoginsReader.passwords(file, key: key).map {
+          ECPassword(urlString: $0.url, username: $0.username, password: $0.password)
+        }
+      }.value
+      return await Engine.shared.importPasswords(passwords, into: into)
     },
     cookies: { browser, profile, key, into in
       let file = browser.cookiesFile(profile)
       // Safari's reader tells a missing file from one macOS keeps from Sailfish.
       guard key == nil || FileManager.default.fileExists(atPath: file.path) else { return 0 }
       let cookies = try await Task.detached {
-        try key.map { try LoginsReader.cookies(file, key: $0, now: .now) } ?? SafariCookiesReader.read(file, now: .now)
+        try (key.map { try LoginsReader.cookies(file, key: $0, now: .now) } ?? SafariCookiesReader.read(file, now: .now))
+          .map {
+            ECCookie(
+              name: $0.name, value: $0.value, domain: $0.domain, path: $0.path, creation: $0.creation,
+              expiry: $0.expiry, lastAccess: $0.lastAccess, secure: $0.isSecure, httpOnly: $0.isHTTPOnly,
+              sameSite: $0.sameSite)
+          }
       }.value
       return await Engine.shared.importCookies(cookies, into: into)
     },
@@ -91,13 +106,10 @@ extension ImportClient: DependencyKey {
   )
 }
 
+// The pages, passwords and cookies come made off the main thread; each profile's go to the engine in one call.
 extension Engine {
-  func importHistory(_ entries: [HistoryEntry], into profile: UUID) async -> Int {
-    await context(profile).importHistory(entries.map {
-      ECHistoryEntry(
-        urlString: $0.url, title: $0.title, visitCount: $0.visitCount, typedCount: $0.typedCount,
-        lastVisit: $0.lastVisit)
-    })
+  func importHistory(_ entries: [ECHistoryEntry], into profile: UUID) async -> Int {
+    await context(profile).importHistory(entries)
   }
 
   func importPasswords(_ passwords: [ECPassword], into profile: UUID) async -> Int {
@@ -107,13 +119,8 @@ extension Engine {
     }
   }
 
-  func importCookies(_ cookies: [ImportedCookie], into profile: UUID) async -> Int {
+  func importCookies(_ cookies: [ECCookie], into profile: UUID) async -> Int {
     let context = await context(profile)
-    let cookies = cookies.map {
-      ECCookie(
-        name: $0.name, value: $0.value, domain: $0.domain, path: $0.path, creation: $0.creation, expiry: $0.expiry,
-        lastAccess: $0.lastAccess, secure: $0.isSecure, httpOnly: $0.isHTTPOnly, sameSite: $0.sameSite)
-    }
     return await withCheckedContinuation { continuation in
       context.import(cookies) { continuation.resume(returning: $0) }
     }
