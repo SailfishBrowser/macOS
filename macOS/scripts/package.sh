@@ -30,7 +30,7 @@ IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n '
 cd "$ROOT"
 xcodegen -q
 xcodebuild -project Sailfish.xcodeproj -scheme Sailfish -configuration Release \
-  -derivedDataPath "$OUT/DerivedData" -destination generic/platform=macOS -skipMacroValidation -quiet build \
+  -derivedDataPath "$OUT/DerivedData" -clonedSourcePackagesDirPath "$OUT/SourcePackages" -destination generic/platform=macOS -skipMacroValidation -quiet build \
   ${VERSION:+MARKETING_VERSION=$VERSION} ${BUILD:+CURRENT_PROJECT_VERSION=$BUILD}
 
 if [ -n "$IDENTITY" ]; then
@@ -78,17 +78,6 @@ elif [ -n "$NOTARY_KEY" ]; then
 elif [ -n "$NOTARY_APPLE_ID" ]; then
   notary() { xcrun notarytool "$@" --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM_ID"; }
 fi
-NOTARIZE=0
-if [ -n "$IDENTITY" ] && command -v notary >/dev/null && notary history >/dev/null 2>&1; then
-  NOTARIZE=1
-  # The app is notarized and stapled on its own first, so the copy dragged out of the DMG carries its ticket
-  # and passes Gatekeeper offline; the DMG is then notarized and stapled as a second submission.
-  ZIP="$OUT/Sailfish-notary.zip"
-  ditto -c -k --keepParent "$APP" "$ZIP"
-  notary submit "$ZIP" --wait
-  rm -f "$ZIP"
-  xcrun stapler staple "$APP"
-fi
 
 STAGE="$OUT/dmg"
 rm -rf "$STAGE"
@@ -103,7 +92,9 @@ if [ -z "$IDENTITY" ]; then
   exit 0
 fi
 sign "$DMG"
-if [ $NOTARIZE = 1 ]; then
+# One submission: notarizing the DMG also issues the ticket of the app inside it. Only the DMG gets the ticket
+# stapled, so Gatekeeper looks the app's ticket up online the first time the copy dragged out of it opens.
+if command -v notary >/dev/null && notary history >/dev/null 2>&1; then
   notary submit "$DMG" --wait
   xcrun stapler staple "$DMG"
   spctl --assess --type open --context context:primary-signature -v "$DMG"

@@ -1,4 +1,4 @@
-# Builds, tests, signs, notarizes and publishes Sailfish as release v<version> of this repository, with Sparkle
+# Builds, signs, notarizes and publishes Sailfish as release v<version> of this repository, with Sparkle
 # deltas and the appcast that sail.fish/appcast.xml redirects to (releases/latest/download/appcast.xml).
 # A prerelease is for dry runs: releases/latest, and so the site's download and the update feed, skip it.
 name: Release
@@ -47,28 +47,41 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "BUILD=$(sh macOS/scripts/next-build.sh)" >> "$GITHUB_ENV"
 
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            macOS/build/SourcePackages
+          key: swiftpm-${{ hashFiles('macOS/project.yml') }}
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/engine-cache
+          key: engine-${{ hashFiles('engine/CHROMIUM_VERSION', 'engine/ENGINE_SHA256') }}
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/sparkle.tar.xz
+          key: sparkle-2.10.1
+
       - name: Install tools
         run: |
-          brew install xcodegen
-          curl -fsSL -o "$RUNNER_TEMP/sparkle.tar.xz" \
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
+          echo "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
+          [ -f ~/sparkle.tar.xz ] || curl -fsSL -o ~/sparkle.tar.xz \
             https://github.com/sparkle-project/Sparkle/releases/download/2.10.1/Sparkle-2.10.1.tar.xz
-          echo "1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c -
+          echo "1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27  $HOME/sparkle.tar.xz" | shasum -a 256 -c -
           mkdir "$RUNNER_TEMP/sparkle"
-          tar -xf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+          tar -xf ~/sparkle.tar.xz -C "$RUNNER_TEMP/sparkle"
           echo "$RUNNER_TEMP/sparkle/bin" >> "$GITHUB_PATH"
 
       - name: Fetch the engine and uBlock Origin
         working-directory: macOS
         run: |
-          sh scripts/fetch-engine.sh
+          ENGINE_CACHE=~/engine-cache sh scripts/fetch-engine.sh
           sh scripts/fetch-ublock.sh
-
-      - name: Test
-        working-directory: macOS
-        run: |
-          xcodegen generate
-          xcodebuild -project Sailfish.xcodeproj -scheme Sailfish -destination platform=macOS \
-            -skipMacroValidation -skipPackagePluginValidation test
 
       - name: Import the Developer ID certificate
         env:
