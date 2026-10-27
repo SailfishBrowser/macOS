@@ -1,0 +1,44 @@
+From: harunkkhan <harunkkhan1@gmail.com>
+Subject: [PATCH] Let the embedder show the extension install dialog
+
+Chrome's install dialog is a Views dialog on a browser window. EngineCore
+asks its embedder instead, through a replaceable default callback.
+---
+diff --git a/chrome/browser/extensions/extension_install_prompt.h b/chrome/browser/extensions/extension_install_prompt.h
+--- a/chrome/browser/extensions/extension_install_prompt.h
++++ b/chrome/browser/extensions/extension_install_prompt.h
+@@ -59,6 +59,9 @@
+   // Callback to show the default extension install dialog.
+   // The implementations of this function are platform-specific.
+   static ShowDialogCallback GetDefaultShowDialogCallback();
++  // Replaces the default dialog. EngineCore (//engine_core) asks its
++  // embedder.
++  static void SetDefaultShowDialogCallback(ShowDialogCallback callback);
+ 
+   // Returns the appropriate prompt type for the given `extension`.
+   // TODO(devlin): This method is yucky - callers probably only care about one
+diff --git a/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc b/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
+--- a/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
++++ b/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
+@@ -729,8 +729,21 @@
+ BEGIN_METADATA(ExtensionInstallDialogView)
+ END_METADATA
+ 
++namespace {
++ExtensionInstallPrompt::ShowDialogCallback* g_show_dialog_callback = nullptr;
++}  // namespace
++
+ // static
+ ExtensionInstallPrompt::ShowDialogCallback
+ ExtensionInstallPrompt::GetDefaultShowDialogCallback() {
++  if (g_show_dialog_callback) {
++    return *g_show_dialog_callback;
++  }
+   return base::BindRepeating(&ShowExtensionInstallDialogImpl);
+ }
++
++// static
++void ExtensionInstallPrompt::SetDefaultShowDialogCallback(
++    ShowDialogCallback callback) {
++  g_show_dialog_callback = new ShowDialogCallback(std::move(callback));
++}

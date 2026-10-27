@@ -1,0 +1,32 @@
+From: harunkkhan <harunkkhan1@gmail.com>
+Subject: [PATCH] Find tabs in extension windows without a browser
+
+EngineCore registers a WindowController for each of its embedder's
+windows. They have no BrowserWindowInterface, so tab lookups by id and
+the current window of a function must not require one.
+---
+diff --git a/chrome/browser/extensions/extension_tab_util.cc b/chrome/browser/extensions/extension_tab_util.cc
+--- a/chrome/browser/extensions/extension_tab_util.cc
++++ b/chrome/browser/extensions/extension_tab_util.cc
+@@ -647,7 +647,7 @@
+           : nullptr;
+ 
+   for (WindowController* window : *WindowControllerList::GetInstance()) {
+-    bool is_alive = window->GetBrowserWindowInterface() &&
++    bool is_alive = !window->GetBrowserWindowInterface() ||
+                     !window->GetBrowserWindowInterface()->IsDeleteScheduled();
+     bool profile_matches =
+         window->profile() == profile || window->profile() == incognito_profile;
+diff --git a/chrome/browser/extensions/chrome_extension_function_details.cc b/chrome/browser/extensions/chrome_extension_function_details.cc
+--- a/chrome/browser/extensions/chrome_extension_function_details.cc
++++ b/chrome/browser/extensions/chrome_extension_function_details.cc
+@@ -43,7 +43,8 @@
+             function_->dispatcher()->GetExtensionWindowController()) {
+       // Only return the found controller if it's not about to be deleted,
+       // otherwise fall through to finding another one.
+-      if (!window_controller->GetBrowserWindowInterface()
++      if (!window_controller->GetBrowserWindowInterface() ||
++          !window_controller->GetBrowserWindowInterface()
+                ->IsDeleteScheduled()) {
+         return window_controller;
+       }

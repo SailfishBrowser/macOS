@@ -1,0 +1,20 @@
+From: harunkkhan <harunkkhan1@gmail.com>
+Subject: [PATCH] Show no permission prompt without a browser window
+
+Chrome's permission bubbles anchor to a browser window. EngineCore's tabs
+have none, so their requests get no prompt and stay pending.
+---
+diff --git a/chrome/browser/ui/views/permissions/permission_prompt_factory.cc b/chrome/browser/ui/views/permissions/permission_prompt_factory.cc
+--- a/chrome/browser/ui/views/permissions/permission_prompt_factory.cc
++++ b/chrome/browser/ui/views/permissions/permission_prompt_factory.cc
+@@ -292,6 +292,10 @@
+ std::unique_ptr<permissions::PermissionPrompt> CreatePermissionPrompt(
+     content::WebContents* web_contents,
+     permissions::PermissionPrompt::Delegate* delegate) {
++  if (!GetBrowser(web_contents)) {
++    return nullptr;
++  }
++
+   if (delegate->ShouldDropCurrentRequestIfCannotShowQuietly() &&
+       IsFullScreenMode(web_contents)) {
+     return nullptr;

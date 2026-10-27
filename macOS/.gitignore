@@ -1,0 +1,8 @@
+Sailfish.xcodeproj/
+build/
+DerivedData/
+Frameworks/
+Extensions/
+
+# Private signing settings for package.sh and release.sh
+scripts/.env.local

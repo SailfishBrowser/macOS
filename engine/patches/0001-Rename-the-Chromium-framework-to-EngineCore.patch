@@ -1,0 +1,80 @@
+From: harunkkhan <harunkkhan1@gmail.com>
+Subject: [PATCH 1/2] Rename the Chromium framework to EngineCore
+
+The host app embeds the browser process as EngineCore.framework, so the
+framework bundle, its executable and the paths the helpers and the app
+loader use to find it, and the install names of libaperitif and the
+web app shortcut copier, are renamed.
+---
+diff --git a/chrome/BUILD.gn b/chrome/BUILD.gn
+--- a/chrome/BUILD.gn
++++ b/chrome/BUILD.gn
+@@ -486,7 +486,7 @@
+   }
+ } else if (is_mac) {
+   chrome_helper_name = chrome_product_full_name + " Helper"
+-  chrome_framework_name = chrome_product_full_name + " Framework"
++  chrome_framework_name = "EngineCore"
+   chrome_framework_version = chrome_version_full
+
+   verify_dynamic_libraries = !is_component_build && !is_asan && !is_ubsan_any
+diff --git a/chrome/app/chrome_exe_main_mac.cc b/chrome/app/chrome_exe_main_mac.cc
+--- a/chrome/app/chrome_exe_main_mac.cc
++++ b/chrome/app/chrome_exe_main_mac.cc
+@@ -182,14 +182,12 @@
+   // The helper lives within the versioned framework directory, so simply
+   // go up to find the main dylib.
+   static constexpr char entry_symbol[] = "ChromeMain";
+-  static constexpr char rel_path[] =
+-      "../../../../" PRODUCT_FULLNAME_STRING " Framework";
++  static constexpr char rel_path[] = "../../../../EngineCore";
+ #else                             // defined(HELPER_EXECUTABLE)
+   static constexpr char entry_symbol[] = "ChromeMain";
+   static constexpr char rel_path[] =
+-      "../Frameworks/" PRODUCT_FULLNAME_STRING
+-      " Framework.framework/Versions/" CHROME_VERSION_STRING
+-      "/" PRODUCT_FULLNAME_STRING " Framework";
++      "../Frameworks/EngineCore.framework/Versions/" CHROME_VERSION_STRING
++      "/EngineCore";
+ #endif                            // defined(RENDERER_HELPER_EXECUTABLE)
+
+   // Slice off the last part of the main executable path, and append the
+diff --git a/chrome/common/chrome_constants.cc b/chrome/common/chrome_constants.cc
+--- a/chrome/common/chrome_constants.cc
++++ b/chrome/common/chrome_constants.cc
+@@ -81,9 +81,9 @@
+
+ #if BUILDFLAG(IS_MAC)
+ const base::FilePath::CharType kFrameworkName[] =
+-    FPL(PRODUCT_FULLNAME_STRING " Framework.framework");
++    FPL("EngineCore.framework");
+ const base::FilePath::CharType kFrameworkExecutableName[] =
+-    FPL(PRODUCT_FULLNAME_STRING " Framework");
++    FPL("EngineCore");
+ const char kMacHelperSuffixAlerts[] = " (Alerts)";
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+diff --git a/chrome/browser/web_applications/os_integration/mac/BUILD.gn b/chrome/browser/web_applications/os_integration/mac/BUILD.gn
+--- a/chrome/browser/web_applications/os_integration/mac/BUILD.gn
++++ b/chrome/browser/web_applications/os_integration/mac/BUILD.gn
+@@ -42,7 +42,7 @@
+       # The helper is a standalone tool rather than a bundled app so the
+       # framework's install name does not work as-is. Rewrite it so the
+       # relative path is correct given the executable's location.
+-      "-Wcrl,installnametool,-change,@executable_path/../Frameworks/${chrome_product_full_name} Framework.framework/Versions/${chrome_version_full}/${chrome_product_full_name} Framework,@executable_path/../${chrome_product_full_name} Framework",
++      "-Wcrl,installnametool,-change,@executable_path/../Frameworks/EngineCore.framework/Versions/${chrome_version_full}/EngineCore,@executable_path/../EngineCore",
+     ]
+
+     if (is_asan || is_ubsan_any) {
+diff --git a/content/public/app/BUILD.gn b/content/public/app/BUILD.gn
+--- a/content/public/app/BUILD.gn
++++ b/content/public/app/BUILD.gn
+@@ -123,7 +123,7 @@
+         "-Wl,-rpath,@loader_path/../../../../../../..",
+       ]
+     } else {
+-      ldflags += [ "-Wl,-install_name,@executable_path/../Frameworks/$chrome_product_full_name Framework.framework/Versions/$chrome_version_full/Libraries/libaperitif.dylib" ]
++      ldflags += [ "-Wl,-install_name,@executable_path/../Frameworks/EngineCore.framework/Versions/$chrome_version_full/Libraries/libaperitif.dylib" ]
+     }
+
+     allow_circular_includes_from = [

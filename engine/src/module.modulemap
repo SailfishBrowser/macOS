@@ -1,0 +1,4 @@
+framework module EngineCore {
+  umbrella header "EngineCore.h"
+  export *
+}

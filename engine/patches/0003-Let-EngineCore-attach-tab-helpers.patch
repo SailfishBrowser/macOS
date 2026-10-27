@@ -1,0 +1,19 @@
+From: harunkkhan <harunkkhan1@gmail.com>
+Subject: [PATCH] Let EngineCore attach tab helpers
+
+The embedder owns its tabs, so the bridge attaches Chrome's tab helpers to
+each web contents it creates.
+---
+diff --git a/chrome/browser/ui/tab_helpers.h b/chrome/browser/ui/tab_helpers.h
+--- a/chrome/browser/ui/tab_helpers.h
++++ b/chrome/browser/ui/tab_helpers.h
+@@ -79,6 +79,9 @@
+   // Link Preview shows a preview of a page, then promote it as a new tab.
+   friend class PreviewTab;
+
++  // EngineCore (//engine_core) creates the tabs of its embedder.
++  friend class EngineCoreTabHelpers;
++
+   // FYI: Do NOT add any more friends here. The functions above are the ONLY
+   // ones that need to call AttachTabHelpers; if you think you do, re-read the
+   // design document linked above, especially the section "Reusing tab helpers".

@@ -1,0 +1,85 @@
+name: Sailfish
+options:
+  bundleIdPrefix: com.harunkkhan
+  deploymentTarget:
+    macOS: "15.0"
+packages:
+  ComposableArchitecture:
+    url: https://github.com/pointfreeco/swift-composable-architecture
+    exactVersion: 1.26.2
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.1
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    ARCHS: arm64
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Sailfish:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sailfish
+        excludes: [Resources/Reader]
+      # Mozilla's Readability and its license.
+      - path: Sailfish/Resources/Reader
+        buildPhase: resources
+      # uBlock Origin, from scripts/fetch-ublock.sh.
+      - path: Extensions/uBlock0.chromium
+        type: folder
+    dependencies:
+      - package: ComposableArchitecture
+      - package: Sparkle
+      - framework: Frameworks/EngineCore.framework
+        embed: true
+      - target: DockTile
+        copy:
+          destination: plugins
+    settings:
+      base:
+        # The ids and the data folder keep the first name, Browser, so installs keep their state, defaults and grants.
+        PRODUCT_BUNDLE_IDENTIFIER: com.harunkkhan.browser
+        PRODUCT_NAME: Sailfish
+        INFOPLIST_FILE: Sailfish/Info.plist
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        APP_NAME: Sailfish
+        DATA_FOLDER: Browser
+      # Dev and test runs keep their own defaults and Application Support folder.
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.harunkkhan.browser.debug
+          DATA_FOLDER: Browser Debug
+          # Tells the Debug app apart from Sailfish in the default browser list.
+          APP_NAME: Sailfish Dev
+  # The Dock tile plug-in: shows the icon chosen in Settings while the app is not running.
+  DockTile:
+    type: bundle
+    platform: macOS
+    sources: [DockTile, Sailfish/Settings/AppIcon.swift]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.harunkkhan.browser.docktile
+        WRAPPER_EXTENSION: docktileplugin
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSPrincipalClass: DockTilePlugIn
+        SWIFT_VERSION: "5.0"
+  SailfishTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - SailfishTests
+    dependencies:
+      - target: Sailfish
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        FRAMEWORK_SEARCH_PATHS: $(PROJECT_DIR)/Frameworks
+schemes:
+  Sailfish:
+    build:
+      targets:
+        Sailfish: all
+    test:
+      targets: [SailfishTests]

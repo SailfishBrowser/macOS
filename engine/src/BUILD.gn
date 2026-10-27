@@ -1,0 +1,86 @@
+config("exports") {
+  if (!is_component_build) {
+    inputs = [ "EngineCore.exports" ]
+    ldflags = [
+      "-Wl,-exported_symbols_list",
+      "-Wl," + rebase_path("EngineCore.exports", root_build_dir),
+    ]
+  }
+}
+
+bundle_data("framework_headers") {
+  sources = [ "EngineCore.h" ]
+  outputs = [ "{{bundle_contents_dir}}/Headers/{{source_file_part}}" ]
+}
+
+bundle_data("framework_module") {
+  sources = [ "module.modulemap" ]
+  outputs = [ "{{bundle_contents_dir}}/Modules/{{source_file_part}}" ]
+}
+
+source_set("engine_core") {
+  sources = [
+    "EngineCore.h",
+    "ec_autocomplete.mm",
+    "ec_browser_context.mm",
+    "ec_browser_context_private.h",
+    "ec_download.mm",
+    "ec_engine.mm",
+    "ec_extensions.mm",
+    "ec_history.mm",
+    "ec_logins.mm",
+    "ec_web_contents.mm",
+    "ec_web_contents_private.h",
+    "ec_window.mm",
+  ]
+  frameworks = [ "AppKit.framework" ]
+  all_dependent_configs = [ ":exports" ]
+  deps = [
+    ":framework_headers",
+    ":framework_module",
+    "//base",
+    "//chrome/browser",
+    "//chrome/browser:app_controller_mac",
+    "//chrome/browser:file_select_helper",
+    "//chrome/browser/autocomplete",
+    "//chrome/browser/extensions",
+    "//chrome/browser/favicon",
+    "//chrome/browser/history",
+    "//chrome/browser/password_manager/factories",
+    "//chrome/browser/picture_in_picture",
+    "//chrome/browser/profiles:profile",
+    "//chrome/browser/profiles:profile_manager",
+    "//chrome/browser/profiles/keep_alive",
+    "//chrome/browser/search_engines",
+    "//chrome/browser/ui:tab_helpers",
+    "//chrome/browser/ui/views/overlay",
+    "//chrome/common/extensions/api",
+    "//components/download/content/public",
+    "//components/download/public/common:public",
+    "//components/favicon/content",
+    "//components/favicon/core",
+    "//components/find_in_page",
+    "//components/history/core/browser",
+    "//components/input",
+    "//components/zoom",
+    "//components/keyed_service/core",
+    "//components/omnibox/browser",
+    "//components/password_manager/core/browser",
+    "//components/password_manager/core/browser/import:csv",
+    "//components/password_manager/core/browser/password_store:password_store_interface",
+    "//components/permissions",
+    "//components/search_engines",
+    "//components/sessions",
+    "//content/public/browser",
+    "//extensions/browser",
+    "//extensions/common",
+    "//net",
+    "//services/network/public/mojom:cookies_mojom",
+    "//skia",
+    "//third_party/blink/public/mojom:mojom_platform_headers",
+    "//third_party/metrics_proto",
+    "//ui/base",
+    "//ui/gfx",
+    "//url",
+  ]
+}

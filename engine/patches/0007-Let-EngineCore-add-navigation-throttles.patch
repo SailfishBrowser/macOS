@@ -1,0 +1,48 @@
+From: harunkkhan <harunkkhan1@gmail.com>
+Subject: [PATCH] Let EngineCore add navigation throttles
+
+The embedder decides where some of its tabs' link clicks open, which needs a
+navigation throttle; Chrome's content browser client is the only place that
+adds them.
+---
+diff --git a/chrome/browser/chrome_content_browser_client_navigation_throttles.cc b/chrome/browser/chrome_content_browser_client_navigation_throttles.cc
+--- a/chrome/browser/chrome_content_browser_client_navigation_throttles.cc
++++ b/chrome/browser/chrome_content_browser_client_navigation_throttles.cc
+@@ -282,6 +282,8 @@
+       registry, history_service));
+ }
+ 
++void (*g_engine_core_throttles)(content::NavigationThrottleRegistry&) = nullptr;
++
+ }  // namespace
+ 
+ void CreateAndAddChromeThrottlesForNavigation(
+@@ -637,6 +639,15 @@
+   glic::GlicGuestNavigationThrottle::MaybeCreateAndAdd(registry);
+ 
+   pwc::PwcNavigationThrottle::MaybeCreateAndAdd(registry);
++
++  if (g_engine_core_throttles) {
++    g_engine_core_throttles(registry);
++  }
++}
++
++void SetEngineCoreNavigationThrottles(
++    void (*add)(content::NavigationThrottleRegistry& registry)) {
++  g_engine_core_throttles = add;
+ }
+ 
+ void CreateAndAddChromeThrottlesForCommitWithoutUrlLoader(
+diff --git a/chrome/browser/chrome_content_browser_client_navigation_throttles.h b/chrome/browser/chrome_content_browser_client_navigation_throttles.h
+--- a/chrome/browser/chrome_content_browser_client_navigation_throttles.h
++++ b/chrome/browser/chrome_content_browser_client_navigation_throttles.h
+@@ -18,4 +18,8 @@
+ void CreateAndAddChromeThrottlesForCommitWithoutUrlLoader(
+     content::NavigationThrottleRegistry& registry);
+ 
++// EngineCore (//engine_core) adds its embedder's throttles after Chrome's.
++void SetEngineCoreNavigationThrottles(
++    void (*add)(content::NavigationThrottleRegistry& registry));
++
+ #endif  // CHROME_BROWSER_CHROME_CONTENT_BROWSER_CLIENT_NAVIGATION_THROTTLE_H_
+\ No newline at end of file

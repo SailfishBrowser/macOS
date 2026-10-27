@@ -1,0 +1,26 @@
+From: harunkkhan <harunkkhan1@gmail.com>
+Subject: [PATCH] Start the macOS notification service on first use
+
+Chrome starts each notification dispatcher's service at launch so that macOS
+asks for notification permission on Chrome's first start (crbug.com/40149365).
+The embedder asks when a page first shows a notification instead: every other
+entry point returns early while no service runs, and DisplayNotification starts
+it.
+---
+diff --git a/chrome/browser/notifications/mac/notification_dispatcher_mojo.cc b/chrome/browser/notifications/mac/notification_dispatcher_mojo.cc
+--- a/chrome/browser/notifications/mac/notification_dispatcher_mojo.cc
++++ b/chrome/browser/notifications/mac/notification_dispatcher_mojo.cc
+@@ -40,12 +40,7 @@
+ NotificationDispatcherMojo::NotificationDispatcherMojo(
+     std::unique_ptr<MacNotificationProviderFactory> provider_factory)
+     : provider_factory_(std::move(provider_factory)),
+-      next_service_restart_timer_delay_(kInitialServiceRestartTimerDelay) {
+-  // Force start the notification service once so we show the permission request
+-  // to users on the first start of Chrome.
+-  // TODO(crbug.com/40149365): Find a better time to ask for permissions.
+-  CheckIfServiceCanBeTerminated();
+-}
++      next_service_restart_timer_delay_(kInitialServiceRestartTimerDelay) {}
+ 
+ NotificationDispatcherMojo::~NotificationDispatcherMojo() = default;
+ 

@@ -1,0 +1,127 @@
+# Builds, tests, signs, notarizes and publishes Sailfish as release v<version> of this repository, with Sparkle
+# deltas and the appcast that sail.fish/appcast.xml redirects to (releases/latest/download/appcast.xml).
+# A prerelease is for dry runs: releases/latest, and so the site's download and the update feed, skip it.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version, e.g. 1.2.0
+        required: true
+      prerelease:
+        description: Publish as a prerelease (does not become latest)
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.repository == 'SailfishBrowser/macOS'
+    runs-on: macos-26
+    environment: release
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REQUESTED_VERSION: ${{ inputs.version || github.ref_name }}
+      PRERELEASE: ${{ inputs.prerelease && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.5.app
+
+      - name: Check the version
+        run: |
+          VERSION="${REQUESTED_VERSION#v}"
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || { echo "bad version $VERSION"; exit 1; }
+          if gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo "release v$VERSION exists"; exit 1; fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD=$(sh macOS/scripts/next-build.sh)" >> "$GITHUB_ENV"
+
+      - name: Install tools
+        run: |
+          brew install xcodegen
+          curl -fsSL -o "$RUNNER_TEMP/sparkle.tar.xz" \
+            https://github.com/sparkle-project/Sparkle/releases/download/2.10.1/Sparkle-2.10.1.tar.xz
+          echo "1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c -
+          mkdir "$RUNNER_TEMP/sparkle"
+          tar -xf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+          echo "$RUNNER_TEMP/sparkle/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch the engine and uBlock Origin
+        working-directory: macOS
+        run: |
+          sh scripts/fetch-engine.sh
+          sh scripts/fetch-ublock.sh
+
+      - name: Test
+        working-directory: macOS
+        run: |
+          xcodegen generate
+          xcodebuild -project Sailfish.xcodeproj -scheme Sailfish -destination platform=macOS \
+            -skipMacroValidation -skipPackagePluginValidation test
+
+      - name: Import the Developer ID certificate
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          PASSWORD="$(openssl rand -hex 24)"
+          echo "$DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security create-keychain -p "$PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 7200 "$KEYCHAIN"
+          security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$KEYCHAIN" -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/developer-id.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "$PASSWORD" "$KEYCHAIN" >/dev/null
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -n 's/.*"\(Developer ID Application: .*\)"$/\1/p' | head -n 1)"
+          [ -n "$IDENTITY" ] || { echo "no Developer ID Application identity in DEVELOPER_ID_P12"; exit 1; }
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build, sign and notarize
+        working-directory: macOS
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$ASC_KEY_ID" ]; then
+            echo "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+            export NOTARY_KEY="$RUNNER_TEMP/notary.p8" NOTARY_KEY_ID="$ASC_KEY_ID" NOTARY_ISSUER="$ASC_ISSUER_ID"
+          else
+            export NOTARY_APPLE_ID="$APPLE_ID" NOTARY_PASSWORD="$APPLE_APP_PASSWORD" NOTARY_TEAM_ID="$APPLE_TEAM_ID"
+          fi
+          sh scripts/package.sh
+          rm -f "$RUNNER_TEMP/notary.p8"
+          xcrun stapler validate build/Sailfish.dmg
+
+      - name: Publish
+        working-directory: macOS
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          export SPARKLE_KEY_FILE="$RUNNER_TEMP/sparkle.key"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$SPARKLE_KEY_FILE"
+          sh scripts/publish.sh "$VERSION" "$BUILD" build/Sailfish.dmg "$GITHUB_SHA"
+          rm "$SPARKLE_KEY_FILE"
+
+      - name: Clean up
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/sparkle.key"
