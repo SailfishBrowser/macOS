@@ -20,7 +20,11 @@ final class Shell: NSObject, NSMenuDelegate {
   private lazy var quitWarning = QuitWarning { [weak self] in self?.store.downloads.downloads.progress != nil }
   #if !DEBUG
     // Created at launch, as nothing may touch NSApp before ChromeMain.
-    private(set) lazy var updater = Updater { [weak self] in self?.quitWarning.bypass = true }
+    private(set) lazy var updater = Updater { [weak self] in
+      self?.quitWarning.bypass = true
+    } updateReady: { [weak self] in
+      self?.store.send(.updateReady($0))
+    }
   #endif
   private lazy var littleSailfishHotKey = LittleSailfishHotKey { [weak self] in self?.store.send(.newLittleSailfish) }
   private lazy var settings = makeSettingsWindow(store: store) { [weak self] url, profile in

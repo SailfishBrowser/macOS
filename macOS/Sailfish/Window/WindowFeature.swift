@@ -201,6 +201,8 @@ struct WindowFeature {
     case hideZoom
     // The page's zoom changed, from the engine: the indicator showing takes the new percent.
     case zoomChanged(Tab.ID, Int)
+    // The sidebar's Update ready pill: installs the downloaded update and relaunches.
+    case restartToUpdate
 
     static func tab(_ action: TabsFeature.Action, in space: Space.ID) -> Self {
       .spaces(.spaces(.element(id: space, action: action)))
@@ -239,6 +241,7 @@ struct WindowFeature {
 
   @Dependency(\.continuousClock) var clock
   @Dependency(\.date.now) var now
+  @Dependency(\.updates) var updates
   @Dependency(\.uuid) var uuid
   @Dependency(\.webEngine) var engine
 
@@ -543,6 +546,9 @@ struct WindowFeature {
       case .closeMiniPlayer:
         state.miniPlayer = nil
         return .none
+
+      case .restartToUpdate:
+        return .run { _ in await updates.install() }
 
       case let .zoomChanged(tab, percent):
         guard state.zoomIndicator != nil, (state.peek?.tab.id ?? state.spaces.selected.selectedTabID) == tab

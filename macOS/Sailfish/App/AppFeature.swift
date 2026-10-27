@@ -21,6 +21,7 @@ struct AppFeature {
     @Shared(.onboarding) var onboarding
     @Shared(.firstLaunch) var firstLaunch
     @Shared(.mediaFoldersAsked) var mediaFoldersAsked
+    @Shared(.readyUpdate) var readyUpdate
     // Spaces whose profile was missing on this computer at launch, reverted to Default; shown once, then cleared.
     var recoveredSpaces: [String] = []
     // The window last made key; its space is the globally last focused one, which a relaunch brings to the front.
@@ -150,6 +151,8 @@ struct AppFeature {
     case renameProfile(Profile.ID, name: String)
     case reopen
     case setArchiveAfter(Profile.ID, TimeInterval?)
+    // Sparkle downloaded this version, which installs on quit or from the sidebar's pill.
+    case updateReady(String)
     case windowClosed(WindowFeature.State.ID)
     case windowFocused(WindowFeature.State.ID)
     case windows(IdentifiedActionOf<WindowFeature>)
@@ -497,6 +500,10 @@ struct AppFeature {
 
       case let .windowFocused(id):
         state.focusedWindowID = id
+        return .none
+
+      case let .updateReady(version):
+        state.$readyUpdate.withLock { $0 = version }
         return .none
 
       case let .windowClosed(id):

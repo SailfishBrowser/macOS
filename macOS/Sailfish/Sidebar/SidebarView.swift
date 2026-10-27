@@ -75,6 +75,7 @@ struct SidebarView: View {
   @State private var freshSpace: Space.ID?
   @Shared(.showsPinnedHint) private var showsPinnedHint
   @Shared(.autoArchiveBanner) private var autoArchiveBanner
+  @Shared(.readyUpdate) private var readyUpdate
   // The sidebar's width, which each page of the favorites strip takes.
   @State private var width: CGFloat = 0
 
@@ -112,9 +113,14 @@ struct SidebarView: View {
         content
         sidebarBanner
         MiniPlayer(store: store)
+        if let readyUpdate {
+          UpdatePill(version: readyUpdate, theme: space.theme) { store.send(.restartToUpdate) }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
       }
       footer
     }
+    .animation(Motion.layout, value: readyUpdate)
     .overlay(alignment: .topLeading) {
       if case let .into(folder)? = drag?.shownTarget, drag?.isLanding == false, let frame = zones.frames[.folder(folder)] {
         // Fills the whole sidebar width behind the folder the row will go into.
