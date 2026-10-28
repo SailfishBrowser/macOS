@@ -25,6 +25,7 @@ final class AppFeatureTests: XCTestCase {
       $0.persistence.save = { _ in }
       $0.webEngine.create = { tab, profile, incognito in calls.withValue { $0.append("create \(tab) \(profile) \(incognito)") } }
       $0.webEngine.load = { _, _ in }
+      $0.webEngine.littleWindow = { _, _, _ in }
       $0.webEngine.close = { tab in calls.withValue { $0.append("close \(tab)") } }
       $0.webEngine.closeIncognito = { profile in calls.withValue { $0.append("closeIncognito \(profile)") } }
     }
