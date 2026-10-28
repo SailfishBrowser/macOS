@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds Release, signs Sailfish.app inside-out and packs it into build/Sailfish.dmg.
-# Usage: [VERSION=<x.y.z>] [BUILD=<n>] package.sh
+# Usage: [VERSION=<x.y.z[.n]>] [BUILD=<n>] package.sh
 #   VERSION and BUILD set CFBundleShortVersionString and CFBundleVersion, which Sparkle compares; release.sh passes them.
 #   Settings come from the environment, or from scripts/.env.local (gitignored), which is sourced when present:
 #   SIGN_IDENTITY: the codesigning identity (hardened runtime, timestamped). Empty picks the keychain's first

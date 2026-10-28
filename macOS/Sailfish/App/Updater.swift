@@ -20,18 +20,26 @@ final class Updater: NSObject, SPUUpdaterDelegate {
       self, selector: #selector(checkOnActivation), name: NSApplication.didBecomeActiveNotification, object: nil)
   }
 
+  // Whether an update changes X.Y.Z, missing parts counting as 0, rather than only a bug fix's fourth part.
+  static func isRelease(_ update: String, over running: String) -> Bool {
+    let release = { (version: String) in (version.split(separator: ".").map { Int($0) ?? 0 } + [0, 0, 0]).prefix(3) }
+    return release(update) != release(running)
+  }
+
   @objc private func checkOnActivation() {
     let updater = controller.updater
     if let last = updater.lastUpdateCheckDate, Date().timeIntervalSince(last) < Self.foregroundCheckGap { return }
     updater.checkForUpdatesInBackground()
   }
 
-  // A downloaded update waits for quit; the sidebar's pill offers to install it now. Returning true keeps Sparkle
-  // from also reminding with its own alert; it still installs on quit.
+  // A downloaded update waits for quit; for a release the sidebar's pill offers to install it now, while a bug fix
+  // installs silently. Returning true keeps Sparkle from also reminding with its own alert; it still installs on quit.
   func updater(
     _ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem,
     immediateInstallationBlock: @escaping () -> Void
   ) -> Bool {
+    let running = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as! String
+    guard Self.isRelease(item.displayVersionString, over: running) else { return true }
     MainActor.assumeIsolated {
       UpdateClient.ready = immediateInstallationBlock
       updateReady(item.displayVersionString)

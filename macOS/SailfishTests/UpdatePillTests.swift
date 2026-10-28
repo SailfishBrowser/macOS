@@ -13,6 +13,14 @@ final class UpdatePillTests: XCTestCase {
     }
   }
 
+  func testOnlyAReleaseShowsThePill() {
+    XCTAssertFalse(Updater.isRelease("0.1.6.1", over: "0.1.6"))
+    XCTAssertFalse(Updater.isRelease("0.1.6.2", over: "0.1.6.1"))
+    XCTAssertTrue(Updater.isRelease("0.1.7", over: "0.1.6"))
+    XCTAssertTrue(Updater.isRelease("0.1.7.1", over: "0.1.6"))
+    XCTAssertTrue(Updater.isRelease("0.1.7", over: "0.1.6.2"))
+  }
+
   func testRestartInstallsTheUpdate() async {
     let space = Space(id: UUID(1), name: "Home", profileID: UUID(2), createdAt: Date(timeIntervalSince1970: 0))
     let installs = LockIsolated(0)

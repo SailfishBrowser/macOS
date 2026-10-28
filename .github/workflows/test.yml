@@ -19,24 +19,24 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_26.5.app
 
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             macOS/build/SourcePackages
           key: swiftpm-${{ hashFiles('macOS/project.yml') }}
 
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/engine-cache
           key: engine-${{ hashFiles('engine/CHROMIUM_VERSION', 'engine/ENGINE_SHA256') }}
 
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: macOS/build/DerivedData
           key: deriveddata-test-xcode-26.5-${{ hashFiles('macOS/project.yml') }}
