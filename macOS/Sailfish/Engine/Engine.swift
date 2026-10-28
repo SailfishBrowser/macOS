@@ -168,6 +168,23 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     }
   }
 
+  // A Little Sailfish's page as a window of its own to the context's extensions, which the PDF viewer is one of:
+  // its tab had none, and the viewer left the page blank.
+  func syncLittleWindow(_ id: UUID, profile: UUID, tab: UUID) {
+    guard let contents = tabs[tab] else { return }
+    if windows[id] == nil {
+      let window = ECWindow(browserContext: loadedContext(profile, false))
+      window.delegate = windowDelegate
+      windows[id] = window
+    }
+    guard let window = windows[id] else { return }
+    window.tabs = [contents]
+    window.activeTab = contents
+    if !window.isFocused {
+      window.isFocused = true
+    }
+  }
+
   func closeWindows(except spaces: Set<UUID>) {
     for (space, window) in windows where !spaces.contains(space) {
       window.close()
@@ -350,6 +367,7 @@ extension WebEngineClient: DependencyKey {
   static let liveValue = Self(
     create: { await Engine.shared.create($0, $1, $2) },
     load: { await Engine.shared.load($0, $1) },
+    littleWindow: { await Engine.shared.syncLittleWindow($0, profile: $1, tab: $2) },
     goBack: { await Engine.shared.perform($0) { $0.goBack() } },
     goForward: { await Engine.shared.perform($0) { $0.goForward() } },
     goToEntry: { tab, index in await Engine.shared.goToEntry(tab, index) },

@@ -131,8 +131,9 @@ struct LittleSailfishFeature {
       id: uuid(), url: url, title: url.host() ?? url.absoluteString, placement: .unpinned, createdAt: now,
       lastActiveAt: now, isLive: true)
     state.tab = tab
-    return .run { [profile = state.profileID] _ in
+    return .run { [id = state.id, profile = state.profileID] _ in
       await engine.create(tab.id, profile, false)
+      await engine.littleWindow(id, profile, tab.id)
       await engine.load(tab.id, url)
     }
   }
