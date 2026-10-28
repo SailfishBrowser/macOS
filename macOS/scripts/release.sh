@@ -17,6 +17,7 @@ SHA="$(git -C "$TOP" rev-parse "${2:-HEAD}^{commit}")"
 
 fail() { echo "release.sh: $*" >&2; exit 1; }
 command -v generate_appcast >/dev/null || fail "Sparkle's generate_appcast is not on PATH"
+command -v dmgbuild >/dev/null || fail "dmgbuild is not on PATH (see package.sh)"
 gh auth status >/dev/null 2>&1 || fail "gh is missing or not signed in"
 security find-generic-password -s https://sparkle-project.org -a ed25519 >/dev/null 2>&1 ||
   fail "no Sparkle EdDSA key in the login keychain"

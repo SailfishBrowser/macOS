@@ -76,6 +76,9 @@ jobs:
           mkdir "$RUNNER_TEMP/sparkle"
           tar -xf ~/sparkle.tar.xz -C "$RUNNER_TEMP/sparkle"
           echo "$RUNNER_TEMP/sparkle/bin" >> "$GITHUB_PATH"
+          python3 -m venv "$RUNNER_TEMP/dmgbuild"
+          "$RUNNER_TEMP/dmgbuild/bin/pip" install -q dmgbuild==1.6.7
+          echo "$RUNNER_TEMP/dmgbuild/bin" >> "$GITHUB_PATH"
 
       - name: Fetch the engine and uBlock Origin
         working-directory: macOS

@@ -1,0 +1,12 @@
+{
+  "title": "Sailfish",
+  "icon": "build/DerivedData/Build/Products/Release/Sailfish.app/Contents/Resources/AppIcon.icns",
+  "background": "scripts/dmg/background.tiff",
+  "icon-size": 176,
+  "window": { "size": { "width": 800, "height": 428 } },
+  "format": "ULFO",
+  "contents": [
+    { "x": 200, "y": 205, "type": "file", "path": "build/DerivedData/Build/Products/Release/Sailfish.app" },
+    { "x": 600, "y": 205, "type": "link", "path": "/Applications" }
+  ]
+}

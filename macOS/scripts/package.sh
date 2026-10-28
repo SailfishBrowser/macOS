@@ -12,6 +12,8 @@
 #   NOTARY_APPLE_ID, NOTARY_PASSWORD, NOTARY_TEAM_ID: an Apple ID, an app-specific password for it and the team ID.
 #   An identity in a keychain that only the GUI session may use needs this script run inside that session, with the
 #   keychain unlocked (release.sh's SIGN_WRAPPER).
+#   Needs dmgbuild on PATH: python3 -m venv ~/.dmgbuild && ~/.dmgbuild/bin/pip install dmgbuild==1.6.7, then add
+#   ~/.dmgbuild/bin to PATH.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -f "$ROOT/scripts/.env.local" ]; then . "$ROOT/scripts/.env.local"; fi
@@ -79,13 +81,9 @@ elif [ -n "$NOTARY_APPLE_ID" ]; then
   notary() { xcrun notarytool "$@" --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM_ID"; }
 fi
 
-STAGE="$OUT/dmg"
-rm -rf "$STAGE"
-mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/Sailfish.app"
-ln -s /Applications "$STAGE/Applications"
-hdiutil create -quiet -ov -volname Sailfish -srcfolder "$STAGE" -format ULFO "$DMG"
-rm -rf "$STAGE"
+# dmgbuild writes the install window's layout (scripts/dmg/dmg.json) into the DMG's .DS_Store, without Finder.
+rm -f "$DMG"
+dmgbuild -s scripts/dmg/dmg.json Sailfish "$DMG" >/dev/null
 
 if [ -z "$IDENTITY" ]; then
   echo "Signed ad-hoc (no Developer ID Application identity); not notarized: $DMG"
