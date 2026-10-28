@@ -12,6 +12,9 @@ struct CommandBarView: View {
   let dismiss: () -> Void
   @FocusState private var isFocused: Bool
   @State private var backspaceMonitor: Any?
+  @State private var clickMonitor: Any?
+  // The panel's frame in the window, top-left origin, for telling a click outside it from one on it.
+  @State private var panelFrame = CGRect.zero
   @Environment(\.displayScale) private var displayScale
 
   // The chip before the field: Actions, or the site search Tab entered.
@@ -155,28 +158,28 @@ struct CommandBarView: View {
           }
         RoundedRectangle(cornerRadius: Style.radius).fill(.ultraThinMaterial)
         RoundedRectangle(cornerRadius: Style.radius).fill(Style.background)
-        RoundedRectangle(cornerRadius: Style.radius)
-          .fill(LinearGradient(colors: [Style.sheen, .clear], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.4)))
-        RoundedRectangle(cornerRadius: Style.radius).strokeBorder(Style.edgeGlow, lineWidth: 6).blur(radius: 5)
-          .clipShape(RoundedRectangle(cornerRadius: Style.radius))
       }
     }
     .overlay(
-      RoundedRectangle(cornerRadius: Style.radius - 1 / displayScale)
-        .strokeBorder(
-          LinearGradient(
-            stops: [.init(color: Style.specular, location: 0), .init(color: Style.innerLine, location: 0.25),
-              .init(color: Style.innerLine, location: 0.85), .init(color: Style.specular.opacity(0.5), location: 1)],
-            startPoint: .top, endPoint: .bottom),
-          lineWidth: 1)
+      RoundedRectangle(cornerRadius: Style.radius - 1 / displayScale).strokeBorder(Style.innerLine, lineWidth: 1)
         .padding(1 / displayScale))
     .overlay(RoundedRectangle(cornerRadius: Style.radius).strokeBorder(Style.outerLine, lineWidth: 1 / displayScale))
     // A site search or Actions glows in its color.
     .shadow(color: accent.opacity(mode == nil ? 0 : 0.6), radius: 24)
+    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { panelFrame = $0 }
     .onAppear {
       isFocused = true
       select(in: store.query, NSRange(location: 0, length: store.query.utf16.count))
       store.send(.appeared)
+      // A click anywhere else in the window closes the bar and goes on to what was clicked, as in Arc. A Little
+      // Sailfish bar has its close button instead.
+      if hasCloseButton { return }
+      clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
+        guard let window = event.window, window.isKeyWindow, let content = window.contentView else { return event }
+        let point = CGPoint(x: event.locationInWindow.x, y: content.bounds.height - event.locationInWindow.y)
+        if !panelFrame.contains(point) { dismiss() }
+        return event
+      }
       // The field editor takes Backspace and ⌘Return before onKeyPress. Backspace at the start leaves keyword mode,
       // with ⌘⌥ it removes the selected suggestion, and ⌘Return opens the row in a Little Sailfish.
       backspaceMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -194,7 +197,10 @@ struct CommandBarView: View {
         return nil
       }
     }
-    .onDisappear { backspaceMonitor.map(NSEvent.removeMonitor) }
+    .onDisappear {
+      backspaceMonitor.map(NSEvent.removeMonitor)
+      clickMonitor.map(NSEvent.removeMonitor)
+    }
     .onChange(of: store.inline) { selectInline() }
     // New matches redraw the field, which drops the selection of an inline completion kept while typing.
     .onChange(of: store.matchesQuery) { selectInline() }

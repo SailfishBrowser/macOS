@@ -12,8 +12,8 @@ extension ArcShortcuts {
   // Arc's names of commands titled otherwise in this menu bar.
   private static let titles = ["Tab Switcher (forward)": "Cycle Tab Forward", "Tab Switcher (backward)": "Cycle Tab Backward"]
 
-  // Each shortcut goes to the menu row of its name. One whose keys another row would keep is left out, as the
-  // Shortcuts pane refuses them.
+  // Each shortcut goes to the menu row of its name. Keys another row holds move over and leave that row without
+  // any, as in Arc and the Shortcuts pane; keys of an item that is not a row are left out.
   @MainActor
   init(_ shortcuts: [ArcData.Shortcut], menu: NSMenu, current: [String: KeyBinding]) {
     let owners = MenuShortcuts.owners(in: menu)
@@ -50,8 +50,12 @@ extension ArcShortcuts {
       guard
         let taken = items.first(where: { owner($0) != id && !keys($0).key.isEmpty && keys($0).normalized == binding })
       else { continue }
-      bindings[id] = nil
-      skipped.append("\(names[id]!) (keys of \(taken.title))")
+      if let other = owner(taken) {
+        bindings[other] = KeyBinding(key: "", modifiers: [])
+      } else {
+        bindings[id] = nil
+        skipped.append("\(names[id]!) (keys of \(taken.title))")
+      }
     }
     skipped.sort()
   }

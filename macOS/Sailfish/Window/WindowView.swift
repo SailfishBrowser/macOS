@@ -24,7 +24,9 @@ struct WindowView: View {
       if let commandBar = store.scope(state: \.commandBar, action: \.commandBar.presented) {
         GeometryReader { proxy in
           ZStack(alignment: .top) {
-            Color.black.opacity(0.001).onTapGesture { store.send(.commandBar(.dismiss)) }
+            // The page stays live under the bar: it scrolls and hovers, and a click on it closes the bar (the
+            // bar's own mouse monitor) and reaches the page.
+            Color.clear.allowsHitTesting(false)
             // The bar follows the window's appearance, light on light themes.
             CommandBarView(
               store: commandBar,

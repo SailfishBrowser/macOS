@@ -128,9 +128,14 @@ struct ShortcutsPane: View {
         return nil
       }
       let forms = [binding] + (KeyBinding.shifted(event).map { [$0] } ?? [])
-      if let taken = NSApp.mainMenu.flatMap({ MenuShortcuts.conflict(forms, for: id, in: $0) }) {
-        refusal = "Used by \(taken.title)"
-        return nil
+      // Keys another row holds move to this one and leave that row without any, as Arc's do; keys of an item
+      // that is not a row (the system's) are refused.
+      if let menu = NSApp.mainMenu, let taken = MenuShortcuts.conflict(forms, for: id, in: menu) {
+        guard let other = MenuShortcuts.row(taken).flatMap({ MenuShortcuts.owners(in: menu)[$0] }) else {
+          refusal = "Used by \(taken.title)"
+          return nil
+        }
+        $bindings.withLock { $0[other] = KeyBinding(key: "", modifiers: []) }
       }
       set(MenuShortcuts.defaults[id].map { forms.contains($0.normalized) } == true ? nil : binding, for: id)
       stopRecording()
@@ -158,12 +163,15 @@ struct ShortcutsPane: View {
     let keys: String
   }
 
-  // The menu bar's shown commands, one per row.
+  // The menu bar's commands, one per row: the shown ones, and the ones with keys but no menu item of their own
+  // (Cycle Tab Forward, Cycle Tab Backward), which Arc lists too. The hidden aliases of a shown row and the Go to
+  // Space items stay off the list.
   private static func shortcuts(in menu: NSMenu?) -> [Shortcut] {
     guard let menu else { return [] }
     let owners = MenuShortcuts.owners(in: menu)
     var seen = Set<String>()
-    return MenuShortcuts.commands(in: menu).filter { !$0.isHidden }
+    let commands = MenuShortcuts.commands(in: menu)
+    return (commands.filter { !$0.isHidden } + commands.filter { $0.isHidden && $0.action != #selector(WindowController.selectSpace(_:)) })
       .compactMap { item in
         guard let row = MenuShortcuts.row(item), let id = owners[row], seen.insert(row).inserted else { return nil }
         return Shortcut(id: id, title: item.title, keys: keys(item))

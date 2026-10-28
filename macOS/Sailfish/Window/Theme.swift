@@ -61,20 +61,17 @@ enum Theme {
     // Icons are centered 32 pt from the panel edge; text starts 20 pt after.
     static let iconLeading: CGFloat = 24
     static let textSpacing: CGFloat = 12
-    // The panel follows the space's theme: light themes get a light panel (body #F8F8F8, text #3C3D3F, placeholder
-    // #BBBBBB, separator #DEDFDF, rim #A4A4A4, inline selection #A5AAFF), dark ones the dark panel (over a purple
-    // space: row title #D1D1D2, row icon #BABABC, field icon white, info badge #050625 with a #8F8F9D ring).
-    // A glass tint over .ultraThinMaterial: enough of the blurred page shows through to read as glass, while text
-    // keeps its contrast on white, black and busy pages.
-    static let background = adaptive(Color(hex: 0x141517).opacity(0.55), Color(hex: 0xF8F8F8).opacity(0.7))
-    // A sheen down the top of the glass, and a soft glow inside its edge like light bent at a rim.
-    static let sheen = adaptive(.white.opacity(0.12), .white.opacity(0.5))
-    static let edgeGlow = adaptive(.white.opacity(0.16), .white.opacity(0.7))
-    // The rim: one device pixel of #030203, then a 1 pt specular line, brightest along the top edge.
-    static let outerLine = adaptive(Color(hex: 0x030203).opacity(0.8), Color(hex: 0xA4A4A4).opacity(0.8))
-    static let specular = adaptive(.white.opacity(0.7), .white)
-    static let innerLine = adaptive(.white.opacity(0.18), .white.opacity(0.6))
-    // The shadow: Gaussian sigma 47 pt, 25 pt down, 0.50 at full cover.
+    // Arc's panel follows the space's theme: light themes get a light panel (measured on Arc 1.170: body #F8F8F8,
+    // text #3C3D3F, placeholder #BBBBBB, separator #DEDFDF, rim #A4A4A4, inline selection #A5AAFF), dark ones the
+    // dark panel. The dark values are from the owner's Retina screenshot of Arc over a purple space: row title
+    // #D1D1D2, row icon #BABABC, field icon white, info badge #050625 with a #8F8F9D ring.
+    // Over .ultraThinMaterial, which passes 58% of the page's contrast: Arc lets 11% of the blurred page through, #151618
+    // over shot 13's black band, #2E2B24 over its sand and #1A181B over the owner's purple page.
+    static let background = adaptive(Color(hex: 0x141517).opacity(0.8), Color(hex: 0xF8F8F8).opacity(0.96))
+    // Arc's rim: one device pixel of #030203, then 1 pt of #4E4D4F.
+    static let outerLine = adaptive(Color(hex: 0x030203), Color(hex: 0xA4A4A4))
+    static let innerLine = adaptive(Color(hex: 0x4E4D4F), .white.opacity(0.5))
+    // Arc's shadow fitted on the owner's screenshot: Gaussian sigma 47 pt, 25 pt down, 0.50 at full cover.
     static let shadowOpacity = 0.5
     static let shadowRadius: CGFloat = 47
     static let shadowY: CGFloat = 24
