@@ -10,6 +10,9 @@
 #   NOTARY_PROFILE: a notarytool keychain profile, in NOTARY_KEYCHAIN (empty means the login keychain).
 #   NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER: an App Store Connect API key's .p8 file, its ID and its issuer ID.
 #   NOTARY_APPLE_ID, NOTARY_PASSWORD, NOTARY_TEAM_ID: an Apple ID, an app-specific password for it and the team ID.
+#   PROVISIONING_PROFILE: a Developer ID provisioning profile carrying the passkey entitlement
+#     (com.apple.developer.web-browser.public-key-credential); it is embedded in the app and the app is signed with
+#     scripts/entitlements/app-passkeys.plist. Empty signs with app.plist and no profile, so passkeys stay off.
 #   An identity in a keychain that only the GUI session may use needs this script run inside that session, with the
 #   keychain unlocked (release.sh's SIGN_WRAPPER).
 #   Needs dmgbuild on PATH: python3 -m venv ~/.dmgbuild && ~/.dmgbuild/bin/pip install dmgbuild==1.6.7, then add
@@ -70,7 +73,12 @@ sign "$SPARKLE"
 for plugin in "$APP"/Contents/PlugIns/*; do
   sign $FULL "$plugin"
 done
-sign $FULL --entitlements "$ENT/app.plist" "$APP"
+if [ -n "${PROVISIONING_PROFILE:-}" ]; then
+  cp "$PROVISIONING_PROFILE" "$APP/Contents/embedded.provisionprofile"
+  sign $FULL --entitlements "$ENT/app-passkeys.plist" "$APP"
+else
+  sign $FULL --entitlements "$ENT/app.plist" "$APP"
+fi
 codesign --verify --deep --strict "$APP"
 
 if [ -n "$NOTARY_PROFILE" ]; then
