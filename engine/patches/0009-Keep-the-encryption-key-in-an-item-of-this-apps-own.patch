@@ -1,0 +1,49 @@
+From: harunkkhan <harunkkhan1@gmail.com>
+Subject: [PATCH] Keep the encryption key in an item of this app's own
+
+Chromium keeps the key for saved passwords and cookies in the keychain item
+"Chromium Safe Storage". Each differently signed build of the embedder that
+reads it makes macOS ask, on every launch, whether to allow it. The item is
+named for this app instead, so the build that creates it reads it unasked;
+the key of an existing Chromium item is carried over once, so passwords and
+cookies saved by earlier builds stay readable.
+---
+diff --git a/components/os_crypt/common/keychain_password_mac.mm b/components/os_crypt/common/keychain_password_mac.mm
+--- a/components/os_crypt/common/keychain_password_mac.mm
++++ b/components/os_crypt/common/keychain_password_mac.mm
+@@ -35,10 +35,16 @@
+ const char kDefaultServiceName[] = "Chrome Safe Storage";
+ const char kDefaultAccountName[] = "Chrome";
+ #else
+-const char kDefaultServiceName[] = "Chromium Safe Storage";
+-const char kDefaultAccountName[] = "Chromium";
++const char kDefaultServiceName[] = "Sailfish Safe Storage";
++const char kDefaultAccountName[] = "Sailfish";
+ #endif
+ 
++// The item the embedder's earlier builds kept the key in, under Chromium's
++// names. Its key is carried over into the item named for this app, which
++// this app created and so may read without the keychain asking each launch.
++const char kPreviousServiceName[] = "Chromium Safe Storage";
++const char kPreviousAccountName[] = "Chromium";
++
+ // These values are persisted to logs. Entries should not be renumbered and
+ // numeric values should never be reused.
+ enum class FindGenericPasswordResult {
+@@ -104,6 +110,16 @@
+   }
+ 
+   if (password.error() == errSecItemNotFound) {
++    auto previous = keychain_->FindGenericPassword(kPreviousServiceName,
++                                                   kPreviousAccountName);
++    if (previous.has_value()) {
++      std::string carried(base::as_string_view(*previous));
++      if (keychain_->AddGenericPassword(GetServiceName(), GetAccountName(),
++                                        base::as_byte_span(carried)) == noErr) {
++        uma_result = FindGenericPasswordResult::kPasswordFound;
++        return carried;
++      }
++    }
+     uma_result = FindGenericPasswordResult::kPasswordNotFound;
+     return AddRandomPasswordToKeychain(*keychain_, GetServiceName(),
+                                        GetAccountName());
