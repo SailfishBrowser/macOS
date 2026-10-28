@@ -74,6 +74,12 @@
 	<string>DockTile.docktileplugin</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Sailfish uses Bluetooth to sign in with a passkey kept on your phone.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Sailfish lets the sites you allow use your camera, for video calls and photos.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Sailfish lets the sites you allow use your microphone, for calls and recordings.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Sailfish lets the sites you allow use your location, for maps and nearby results.</string>
 	<key>SUFeedURL</key>
 	<string>https://sail.fish/appcast.xml</string>
 	<key>SUPublicEDKey</key>
