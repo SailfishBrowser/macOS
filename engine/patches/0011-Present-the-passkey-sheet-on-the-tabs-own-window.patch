@@ -1,0 +1,26 @@
+From: harunkkhan <harunkkhan1@gmail.com>
+Subject: [PATCH] Present the passkey sheet on the tab's own window
+
+macOS's passkey sheet (iCloud Keychain, Touch ID) needs an NSWindow to attach
+to, which Chrome finds through the tab's views widget. EngineCore's tabs sit in
+AppKit windows with no widget, so the request had no window and the sheet
+could not be shown. The tab's top-level native window is used when there is
+no widget.
+---
+diff --git a/chrome/browser/webauthn/chrome_authenticator_request_delegate.cc b/chrome/browser/webauthn/chrome_authenticator_request_delegate.cc
+--- a/chrome/browser/webauthn/chrome_authenticator_request_delegate.cc
++++ b/chrome/browser/webauthn/chrome_authenticator_request_delegate.cc
+@@ -1256,6 +1256,13 @@
+     if (window) {
+       discovery_factory->set_nswindow(window);
+     }
++    return;
++  }
++  // EngineCore's tabs sit in AppKit windows with no views widget; the passkey
++  // sheet is presented on the tab's own window.
++  const gfx::NativeWindow window = web_contents->GetTopLevelNativeWindow();
++  if (window) {
++    discovery_factory->set_nswindow(window);
+   }
+ }
+ void ChromeAuthenticatorRequestDelegate::ConfigureICloudKeychain(

@@ -108,6 +108,17 @@ jobs:
           [ -n "$IDENTITY" ] || { echo "no Developer ID Application identity in DEVELOPER_ID_P12"; exit 1; }
           echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
+      # Set once Apple has granted the passkey entitlement: the base64 of a Developer ID provisioning profile for
+      # the App ID that carries it. Unset, the app is signed without it and passkeys stay off.
+      - name: Write the provisioning profile
+        env:
+          DEVELOPER_ID_PROVISIONING_PROFILE: ${{ secrets.DEVELOPER_ID_PROVISIONING_PROFILE }}
+        run: |
+          if [ -n "$DEVELOPER_ID_PROVISIONING_PROFILE" ]; then
+            echo "$DEVELOPER_ID_PROVISIONING_PROFILE" | base64 --decode > "$RUNNER_TEMP/sailfish.provisionprofile"
+            echo "PROVISIONING_PROFILE=$RUNNER_TEMP/sailfish.provisionprofile" >> "$GITHUB_ENV"
+          fi
+
       - name: Build, sign and notarize
         working-directory: macOS
         env:
