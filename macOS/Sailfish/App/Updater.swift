@@ -2,18 +2,28 @@ import AppKit
 import ComposableArchitecture
 import Sparkle
 
-// Sparkle checks the appcast daily, downloads updates in the background and installs them on quit. Install and
+// Sparkle checks the appcast hourly (its shortest interval) and whenever the app comes to the front a quarter hour
+// or more after the last check, downloads updates in the background and installs them on quit. Install and
 // Relaunch quits through NSApp.terminate(_:), so it tells the quit warning to stand aside.
 final class Updater: NSObject, SPUUpdaterDelegate {
   private let willRelaunch: @MainActor () -> Void
   private let updateReady: @MainActor (String) -> Void
   private(set) var controller: SPUStandardUpdaterController!
+  private static let foregroundCheckGap: TimeInterval = 15 * 60
 
   init(willRelaunch: @escaping @MainActor () -> Void, updateReady: @escaping @MainActor (String) -> Void) {
     self.willRelaunch = willRelaunch
     self.updateReady = updateReady
     super.init()
     controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(checkOnActivation), name: NSApplication.didBecomeActiveNotification, object: nil)
+  }
+
+  @objc private func checkOnActivation() {
+    let updater = controller.updater
+    if let last = updater.lastUpdateCheckDate, Date().timeIntervalSince(last) < Self.foregroundCheckGap { return }
+    updater.checkForUpdatesInBackground()
   }
 
   // A downloaded update waits for quit; the sidebar's pill offers to install it now. Returning true keeps Sparkle
