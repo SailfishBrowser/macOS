@@ -137,8 +137,20 @@ struct LittleSailfishView: View {
 
   // "Open in <space> ⌘O", with the ⌄ opening the Open In panel.
   private func openInButton(_ target: Space) -> some View {
+    OpenInButton(target: target, openIn: { openIn(target.id) }) { store.send(.setOpenInMenu(!store.isOpenInMenuShown)) }
+  }
+}
+
+// The Open in pill: each half lights on hover, as the sidebar's rows do.
+private struct OpenInButton: View {
+  let target: Space
+  let openIn: () -> Void
+  let toggleMenu: () -> Void
+  @State private var hovering: Bool? = nil
+
+  var body: some View {
     HStack(spacing: 0) {
-      Button { openIn(target.id) } label: {
+      Button(action: openIn) {
         HStack(spacing: 4) {
           Text("Open in").foregroundStyle(.secondary)
           Text(target.name).fontWeight(.semibold)
@@ -149,18 +161,24 @@ struct LittleSailfishView: View {
         .font(.system(size: 13))
         .padding(.horizontal, 8)
         .frame(height: 30)
+        .background(hovering == true ? Theme.hover : .clear)
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
-      Button { store.send(.setOpenInMenu(!store.isOpenInMenuShown)) } label: {
+      .onHover { hovering = $0 ? true : nil }
+      Button(action: toggleMenu) {
         Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
           .frame(width: 26, height: 30)
+          .background(hovering == false ? Theme.hover : .clear)
           .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
+      .onHover { hovering = $0 ? false : nil }
       .help("More Spaces")
     }
     .background(Theme.menu, in: RoundedRectangle(cornerRadius: 8))
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+    .animation(.easeOut(duration: 0.15), value: hovering)
     .fixedSize()
   }
 }
