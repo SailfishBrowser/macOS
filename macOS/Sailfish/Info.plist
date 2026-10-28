@@ -72,6 +72,8 @@
 	<string>Sailfish saves your downloads here and shows their images and videos in the Library's Media.</string>
 	<key>NSDockTilePlugIn</key>
 	<string>DockTile.docktileplugin</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Sailfish uses Bluetooth to sign in with a passkey kept on your phone.</string>
 	<key>SUFeedURL</key>
 	<string>https://sail.fish/appcast.xml</string>
 	<key>SUPublicEDKey</key>
