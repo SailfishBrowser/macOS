@@ -76,8 +76,15 @@ struct SidebarView: View {
   @Shared(.showsPinnedHint) private var showsPinnedHint
   @Shared(.autoArchiveBanner) private var autoArchiveBanner
   @Shared(.readyUpdate) private var readyUpdate
-  // The sidebar's width, which each page of the favorites strip takes.
-  @State private var width: CGFloat = 0
+  // The sidebar's width, which each page of the favorites strip takes. It starts at the width the sidebar is
+  // about to have: a sidebar sliding in is a fresh view, and a strip laid out at 0 until the first measurement
+  // drew the tiles bunched at the edge and moving apart while the sidebar was still on its way.
+  @State private var width: CGFloat
+
+  init(store: StoreOf<WindowFeature>) {
+    self.store = store
+    _width = State(initialValue: store.sidebar.visibleWidth)
+  }
 
   // Tab rows are 36 pt tall at a 41 pt pitch.
   private static let rowGap: CGFloat = 2.5
