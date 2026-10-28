@@ -21,6 +21,7 @@ final class OnboardingTests: XCTestCase {
       $0.webEngine.events = { .finished }
       $0.webEngine.create = { _, _, _ in }
       $0.webEngine.load = { _, _ in }
+      $0.webEngine.littleWindow = { _, _, _ in }
       $0.browserImport.isDefaultBrowser = { false }
     }
     store.exhaustivity = .off

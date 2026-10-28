@@ -68,6 +68,9 @@ extension Shell: @preconcurrency ECWindowDelegate {
       }
     }
     extensionWindowKeys = extensionWindowKeys.filter { spaces.contains($0.key) }
+    for little in store.littleSailfishes {
+      spaces.insert(little.id)
+    }
     Engine.shared.closeWindows(except: spaces)
   }
 

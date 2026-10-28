@@ -51,6 +51,8 @@ enum ZoomStep: Equatable, Sendable {
 struct WebEngineClient: Sendable {
   var create: @Sendable (_ tab: UUID, _ profile: UUID, _ incognito: Bool) async -> Void
   var load: @Sendable (_ tab: UUID, _ url: URL) async -> Void
+  // Makes the Little Sailfish `id` a window holding its page `tab`, for the context's extensions.
+  var littleWindow: @Sendable (_ id: UUID, _ profile: UUID, _ tab: UUID) async -> Void
   var goBack: @Sendable (_ tab: UUID) async -> Void
   var goForward: @Sendable (_ tab: UUID) async -> Void
   // Goes to the history entry at `index` in the tab's history, chosen in a back or forward menu.
