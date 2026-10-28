@@ -18,6 +18,8 @@ struct ImportClient: Sendable {
   var passwords: @Sendable (_ browser: SourceBrowser, _ profile: BrowserProfile, _ key: Data, _ into: Profile.ID) async throws -> Int
   // Safari's need no key.
   var cookies: @Sendable (_ browser: SourceBrowser, _ profile: BrowserProfile, _ key: Data?, _ into: Profile.ID) async throws -> Int
+  // Zen's: each container's go to the profile of its name, those of none to the first, and others are left out.
+  var containerCookies: @Sendable (_ profile: BrowserProfile, _ into: [String: Profile.ID], _ first: Profile.ID) async throws -> Int
   // A passwords CSV file, as Safari and the Passwords app export them.
   var passwordsFile: @Sendable (_ file: URL, _ into: Profile.ID) async throws -> Int
   var isDefaultBrowser: @Sendable () -> Bool = { false }
@@ -83,14 +85,20 @@ extension ImportClient: DependencyKey {
       guard key == nil || FileManager.default.fileExists(atPath: file.path) else { return 0 }
       let cookies = try await Task.detached {
         try (key.map { try LoginsReader.cookies(file, key: $0, now: .now) } ?? SafariCookiesReader.read(file, now: .now))
-          .map {
-            ECCookie(
-              name: $0.name, value: $0.value, domain: $0.domain, path: $0.path, creation: $0.creation,
-              expiry: $0.expiry, lastAccess: $0.lastAccess, secure: $0.isSecure, httpOnly: $0.isHTTPOnly,
-              sameSite: $0.sameSite)
-          }
+          .map { ECCookie($0) }
       }.value
       return await Engine.shared.importCookies(cookies, into: into)
+    },
+    containerCookies: { profile, profiles, first in
+      let containers = try await Task.detached {
+        Dictionary(grouping: try ZenReader.cookies(profile.folder, now: .now), by: \.container)
+      }.value
+      var count = 0
+      for (container, cookies) in containers {
+        guard let into = container.map({ profiles[$0] }) ?? first else { continue }
+        count += await Engine.shared.importCookies(cookies.map { ECCookie($0.cookie) }, into: into)
+      }
+      return count
     },
     passwordsFile: { file, into in
       let csv: String
@@ -104,6 +112,15 @@ extension ImportClient: DependencyKey {
     isDefaultBrowser: { Shell.isDefaultBrowser },
     makeDefaultBrowser: { await Shell.makeDefaultBrowser() }
   )
+}
+
+extension ECCookie {
+  convenience init(_ cookie: ImportedCookie) {
+    self.init(
+      name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, creation: cookie.creation,
+      expiry: cookie.expiry, lastAccess: cookie.lastAccess, secure: cookie.isSecure, httpOnly: cookie.isHTTPOnly,
+      sameSite: cookie.sameSite)
+  }
 }
 
 // The pages, passwords and cookies come made off the main thread; each profile's go to the engine in one call.
@@ -137,8 +154,8 @@ extension SharedKey where Self == AppStorageKey<Onboarding>.Default {
   static var onboarding: Self { Self[.appStorage("onboarding"), default: .undecided] }
 }
 
-// Import from another browser: pick one of those installed, then what to take. Arc's spaces come as they are; other
-// browsers' bookmarks become pinned tabs and folders of a new space, in the first profile.
+// Import from another browser: pick one of those installed, then what to take. Arc's and Zen's spaces come as they
+// are; other browsers' bookmarks become pinned tabs and folders of a new space, in the first profile.
 @Reducer
 struct ImportFeature {
   enum Step: Equatable {
@@ -263,19 +280,22 @@ struct ImportFeature {
         return .run { send in await send(.sourcesLoaded(browserImport.sources())) }
 
       case let .arc(.delegate(.import(data, shortcuts, included))):
-        let folder = state.arc!.folder
+        let arc = state.arc!
         state.step = .importing
+        let bookmarks = included.contains(.bookmarks) && data.bookmarks != nil ? 1 : 0
         let summary = Summary(
-          browser: .arc, spaces: included.contains(.spaces) ? data.spaces.count : 0,
+          browser: arc.browser, spaces: (included.contains(.spaces) ? data.spaces.count : 0) + bookmarks,
           tabs: Self.tabCount(data, included))
         let transfer = Transfer(
-          history: included.contains(.history), passwords: included.contains(.passwords),
-          cookies: included.contains(.cookies))
-        let profiles = browserImport.arcProfiles(folder)
+          history: included.contains(.history), passwords: arc.browser == .arc && included.contains(.passwords),
+          cookies: included.contains(.cookies), passwordsFile: included.contains(.passwords) ? arc.passwordsFile : nil)
+        // A Zen profile is one person's, as Arc's Default is.
+        let profiles =
+          arc.browser == .arc ? browserImport.arcProfiles(arc.folder) : arc.profiles.filter { $0.folder == arc.folder }
         return .concatenate(
           favicons(profiles, data),
-          .send(.delegate(.merge(data, shortcuts, included, from: .arc))),
-          self.transfer(.arc, profiles, transfer, summary, mapped: true)
+          .send(.delegate(.merge(data, shortcuts, included, from: arc.browser))),
+          self.transfer(arc.browser, profiles, transfer, summary, mapped: arc.browser == .arc)
         )
 
       case .arc(.delegate(.cancel)):
@@ -304,6 +324,11 @@ struct ImportFeature {
           return .none
         }
         guard let source = state.sources.first(where: { $0.browser == browser }) else { return .none }
+        if browser == .zen {
+          state.arc = ArcImportFeature.State(browser: .zen, folder: source.profiles[0].folder, profiles: source.profiles)
+          state.step = .arc
+          return .none
+        }
         state.options = Options(
           browser: browser, profiles: source.profiles, profile: source.profiles[0], spaceName: browser.rawValue)
         state.step = .options
@@ -437,8 +462,8 @@ struct ImportFeature {
   }
 
   // Each profile's history, passwords and cookies go to the first profile, or, from Arc, to the profile of its name
-  // the merge made; a profile without one is left out, so one person's data never lands in another's. A Chromium
-  // browser's key is asked for once, for all its profiles.
+  // the merge made; a profile without one is left out, so one person's data never lands in another's. Zen's cookies
+  // follow their containers so. A Chromium browser's key is asked for once, for all its profiles.
   private func transfer(
     _ browser: SourceBrowser, _ sources: [BrowserProfile], _ transfer: Transfer, _ summary: Summary, mapped: Bool
   ) -> Effect<Action> {
@@ -456,7 +481,7 @@ struct ImportFeature {
       summary.passwords = transfer.passwords || transfer.passwordsFile != nil ? 0 : nil
       summary.cookies = transfer.cookies ? 0 : nil
       var key: Data?
-      if browser != .safari, transfer.passwords || transfer.cookies, !sources.isEmpty {
+      if browser.safeStorage != nil, transfer.passwords || transfer.cookies, !sources.isEmpty {
         do {
           key = try await browserImport.safeStorageKey(browser)
         } catch {
@@ -472,7 +497,10 @@ struct ImportFeature {
         if transfer.passwords, let key {
           summary.passwords! += await count { try await browserImport.passwords(browser, source, key, target) }
         }
-        if transfer.cookies, key != nil || browser == .safari {
+        if transfer.cookies, browser == .zen {
+          let names = Dictionary(profiles.map { ($0.name, $0.id) }) { first, _ in first }
+          summary.cookies! += await count { try await browserImport.containerCookies(source, names, target) }
+        } else if transfer.cookies, key != nil || browser == .safari {
           summary.cookies! += await count { try await browserImport.cookies(browser, source, key, target) }
         }
       }
@@ -483,7 +511,7 @@ struct ImportFeature {
     }
   }
 
-  // The pages of the tabs and archived tabs.
+  // The pages of the tabs, archived tabs and bookmarks.
   static func pages(_ data: ArcData) -> [URL] {
     func pages(_ rows: [ArcData.Row]) -> [URL] {
       rows.flatMap { row in
@@ -494,7 +522,7 @@ struct ImportFeature {
       }
     }
     return data.spaces.flatMap { pages($0.pinned) + $0.today.map(\.url) } + data.favorites.flatMap { $0.tabs.map(\.url) }
-      + data.archive.map(\.url)
+      + data.archive.map(\.url) + pages(data.bookmarks?.pinned ?? [])
   }
 
   // The tabs among the rows, however deep.
@@ -513,6 +541,7 @@ struct ImportFeature {
       tabs += included.contains(.todayTabs) ? data.spaces.map(\.today.count).reduce(0, +) : 0
     }
     tabs += included.contains(.favorites) ? data.favorites.map(\.tabs.count).reduce(0, +) : 0
+    tabs += included.contains(.bookmarks) ? data.bookmarks.map { tabCount($0.pinned) } ?? 0 : 0
     return tabs
   }
 }

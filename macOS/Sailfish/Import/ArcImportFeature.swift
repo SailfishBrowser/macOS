@@ -83,6 +83,8 @@ struct ArcImportRecord: Equatable {
 struct ArcImportClient: Sendable {
   var defaultFolder: @Sendable () -> URL = { URL(filePath: NSHomeDirectory()) }
   var read: @Sendable (_ folder: URL) async throws -> ArcData
+  // A Zen profile's folder, as Arc's.
+  var readZen: @Sendable (_ profile: URL) async throws -> ArcData
   var shortcuts: @Sendable (_ shortcuts: [ArcData.Shortcut]) async -> ArcShortcuts = { _ in ArcShortcuts() }
   // Puts the saved shortcuts on the menu bar.
   var applyShortcuts: @Sendable () async -> Void
@@ -103,6 +105,7 @@ extension ArcImportClient: DependencyKey {
   static let liveValue = Self(
     defaultFolder: { ArcReader.defaultFolder(home: .homeDirectory) },
     read: { folder in try await Task.detached { try ArcReader.read(folder) }.value },
+    readZen: { profile in try await Task.detached { try ZenReader.read(profile, now: .now) }.value },
     shortcuts: { shortcuts in
       await MainActor.run {
         @Shared(.keyBindings) var current
@@ -113,10 +116,12 @@ extension ArcImportClient: DependencyKey {
   )
 }
 
+// Arc's import, and Zen's, which takes the same: a Zen profile in place of Arc's folder, its open tabs as Today tabs
+// and its essentials as favorites.
 @Reducer
 struct ArcImportFeature {
   enum Category: CaseIterable, Hashable, Sendable {
-    case spaces, pinnedTabs, todayTabs, favorites, shortcuts, archive, history, passwords, cookies
+    case spaces, pinnedTabs, todayTabs, favorites, bookmarks, shortcuts, archive, history, passwords, cookies
   }
 
   // Archived tabs taken, the newest: as many as the archive keeps histories for.
@@ -124,15 +129,27 @@ struct ArcImportFeature {
 
   @ObservableState
   struct State: Equatable {
+    var browser = SourceBrowser.arc
+    // Arc's data folder, or the Zen profile's.
     var folder: URL
+    // Zen's, to pick from.
+    var profiles: [BrowserProfile] = []
     var data: ArcData?
     var shortcuts = ArcShortcuts()
     var failure: ArcImportError?
     var included = Set(Category.allCases)
+    // Zen's passwords come from a CSV file its user exports.
+    var passwordsFile: URL?
 
-    // Pinned and Today tabs come with their spaces.
+    // Pinned and Today tabs come with their spaces. Only Arc has shortcuts and an archive, only Zen bookmarks.
     func isAvailable(_ category: Category) -> Bool {
-      category != .pinnedTabs && category != .todayTabs || included.contains(.spaces)
+      switch category {
+      case .pinnedTabs, .todayTabs: included.contains(.spaces)
+      case .shortcuts, .archive: browser == .arc
+      case .bookmarks: browser == .zen
+      case .passwords: browser == .arc || passwordsFile != nil
+      case .spaces, .favorites, .history, .cookies: true
+      }
     }
 
     func isIncluded(_ category: Category) -> Bool {
@@ -147,6 +164,7 @@ struct ArcImportFeature {
     case folderChosen(URL)
     case importTapped
     case loaded(Result<ArcData, ArcImportError>, ArcShortcuts)
+    case passwordsFileChosen(URL)
     case toggled(Category, Bool)
 
     @CasePathable
@@ -162,7 +180,7 @@ struct ArcImportFeature {
     Reduce { state, action in
       switch action {
       case .appeared:
-        return load(state.folder)
+        return load(state)
 
       case .cancelTapped:
         return .send(.delegate(.cancel))
@@ -174,7 +192,7 @@ struct ArcImportFeature {
         state.folder = folder
         state.data = nil
         state.failure = nil
-        return load(folder)
+        return load(state)
 
       case .importTapped:
         guard let data = state.data else { return .none }
@@ -190,6 +208,11 @@ struct ArcImportFeature {
         state.failure = failure
         return .none
 
+      case let .passwordsFileChosen(file):
+        state.passwordsFile = file
+        state.included.insert(.passwords)
+        return .none
+
       case let .toggled(category, isOn):
         if isOn {
           state.included.insert(category)
@@ -201,10 +224,10 @@ struct ArcImportFeature {
     }
   }
 
-  private func load(_ folder: URL) -> Effect<Action> {
-    .run { send in
+  private func load(_ state: State) -> Effect<Action> {
+    .run { [browser = state.browser, folder = state.folder] send in
       do {
-        let data = try await arcImport.read(folder)
+        let data = try await browser == .zen ? arcImport.readZen(folder) : arcImport.read(folder)
         await send(.loaded(.success(data), await arcImport.shortcuts(data.shortcuts)))
       } catch {
         await send(.loaded(.failure(error as? ArcImportError ?? .unreadable), ArcShortcuts()))
@@ -222,8 +245,8 @@ extension ArcImportFeature {
   }
 
   // Adds what was chosen to the current state: Arc's profiles by name (its Default is the first profile), its
-  // spaces after the window's, favorites the profile lacks by page, the newest archived tabs that fit and the
-  // shortcuts. The pages stay unloaded until opened.
+  // spaces after the window's, then Zen's bookmarks as one more, favorites the profile lacks by page, the newest
+  // archived tabs that fit and the shortcuts. The pages stay unloaded until opened.
   static func merge(
     _ data: ArcData, _ shortcuts: ArcShortcuts, _ included: Set<Category>, into spaces: inout SpacesFeature.State,
     uuid: UUIDGenerator, now: Date
@@ -262,19 +285,27 @@ extension ArcImportFeature {
       }
     }
 
+    func addSpace(_ arc: ArcData.Space, pinned: Bool, today: Bool) {
+      var space = Space(
+        id: uuid(), name: arc.name, profileID: profile(arc.profile), createdAt: now, icon: arc.icon, theme: arc.theme)
+      if pinned {
+        add(arc.pinned, to: .pinned, in: &space)
+      }
+      if today {
+        space.ownTabs.append(contentsOf: arc.today.map { tab($0, .unpinned) })
+      }
+      spaces.spaces.append(space)
+      record.spaces.append(space.id)
+      record.tabs.formUnion(space.ownTabs.ids)
+    }
+
     if included.contains(.spaces) {
       for arc in data.spaces {
-        var space = Space(id: uuid(), name: arc.name, profileID: profile(arc.profile), createdAt: now, icon: arc.icon)
-        if included.contains(.pinnedTabs) {
-          add(arc.pinned, to: .pinned, in: &space)
-        }
-        if included.contains(.todayTabs) {
-          space.ownTabs.append(contentsOf: arc.today.map { tab($0, .unpinned) })
-        }
-        spaces.spaces.append(space)
-        record.spaces.append(space.id)
-        record.tabs.formUnion(space.ownTabs.ids)
+        addSpace(arc, pinned: included.contains(.pinnedTabs), today: included.contains(.todayTabs))
       }
+    }
+    if included.contains(.bookmarks), let bookmarks = data.bookmarks {
+      addSpace(bookmarks, pinned: true, today: false)
     }
     if included.contains(.favorites) {
       for group in data.favorites where !group.tabs.isEmpty {

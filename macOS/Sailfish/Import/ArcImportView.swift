@@ -1,24 +1,35 @@
 import AppKit
 import ComposableArchitecture
 import SwiftUI
+import UniformTypeIdentifiers
 
-// What an Arc folder holds, by kind, each kind with a checkbox, as the import sheets of other browsers list theirs.
+// What an Arc folder or a Zen profile holds, by kind, each kind with a checkbox, as the import sheets of other
+// browsers list theirs.
 struct ArcImportView: View {
   let store: StoreOf<ArcImportFeature>
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text("Import from Arc").font(.headline)
-      HStack {
-        Text((store.folder.path as NSString).abbreviatingWithTildeInPath)
-          .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
-        Spacer()
-        Button("Choose Folder…") { chooseFolder() }
+      Text("Import from \(store.browser.rawValue)").font(.headline)
+      if store.browser == .arc {
+        HStack {
+          Text((store.folder.path as NSString).abbreviatingWithTildeInPath)
+            .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+          Spacer()
+          Button("Choose Folder…") { chooseFolder() }
+        }
+      } else if store.profiles.count > 1 {
+        Picker("Profile", selection: Binding(get: { store.folder }, set: { store.send(.folderChosen($0)) })) {
+          ForEach(store.profiles) { Text($0.name).tag($0.folder) }
+        }
       }
       if let data = store.data {
         contents(data)
       } else if let failure = store.failure {
-        Text(failure == .notFound ? "No Arc data in this folder." : "The Arc data couldn't be read.")
+        Text(
+          failure == .notFound
+            ? store.browser == .arc ? "No Arc data in this folder." : "No Zen 1.18 or later data in this profile."
+            : "The \(store.browser.rawValue) data couldn't be read.")
       } else {
         ProgressView().controlSize(.small)
       }
@@ -38,12 +49,17 @@ struct ArcImportView: View {
   private func contents(_ data: ArcData) -> some View {
     let pinned = data.spaces.flatMap(\.pinned)
     let profiles = Set(data.spaces.map(\.profile)).count
+    let isArc = store.browser == .arc
     return Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
       row(.spaces, "Spaces", profiles > 1 ? "\(data.spaces.count) in \(profiles) profiles" : "\(data.spaces.count)")
       row(.pinnedTabs, "Pinned Tabs", count(pinned), indented: true)
-      row(.todayTabs, "Today Tabs", "\(data.spaces.map(\.today.count).reduce(0, +))", indented: true)
-      row(.favorites, "Favorites", "\(data.favorites.map(\.tabs.count).reduce(0, +))")
-      row(.shortcuts, "Shortcuts", "\(store.shortcuts.bindings.count)")
+      row(.todayTabs, isArc ? "Today Tabs" : "Open Tabs", "\(data.spaces.map(\.today.count).reduce(0, +))", indented: true)
+      row(.favorites, isArc ? "Favorites" : "Essentials", "\(data.favorites.map(\.tabs.count).reduce(0, +))")
+      if isArc {
+        row(.shortcuts, "Shortcuts", "\(store.shortcuts.bindings.count)")
+      } else {
+        row(.bookmarks, "Bookmarks", count(data.bookmarks?.pinned ?? []))
+      }
       if !store.shortcuts.skipped.isEmpty {
         GridRow {
           Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
@@ -52,11 +68,28 @@ struct ArcImportView: View {
             .gridCellColumns(2)
         }
       }
-      row(.archive, "Archived Tabs", archiveCount(data.archive.count))
+      if isArc {
+        row(.archive, "Archived Tabs", archiveCount(data.archive.count))
+      }
       row(.history, "History", "")
-      row(.passwords, "Passwords", "")
+      if isArc {
+        row(.passwords, "Passwords", "")
+      } else {
+        GridRow {
+          toggle(.passwords, "Passwords")
+          Spacer()
+          Button("Choose File…") { choosePasswordsFile() }
+        }
+        GridRow {
+          Text(
+            store.passwordsFile?.lastPathComponent
+              ?? "Other apps can't read Zen's passwords. In Zen open about:logins, choose Export Passwords… from its menu, choose that file here, then delete it once imported."
+          )
+          .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).gridCellColumns(3)
+        }
+      }
       row(.cookies, "Cookies", "")
-      if store.state.isIncluded(.passwords) || store.state.isIncluded(.cookies) {
+      if isArc, store.state.isIncluded(.passwords) || store.state.isIncluded(.cookies) {
         GridRow {
           SafeStorageNote(service: SourceBrowser.arc.safeStorage!).gridCellColumns(3)
         }
@@ -76,13 +109,16 @@ struct ArcImportView: View {
 
   private func row(_ category: ArcImportFeature.Category, _ title: String, _ count: String, indented: Bool = false) -> some View {
     GridRow {
-      Toggle(title, isOn: Binding(get: { store.state.isIncluded(category) }, set: { store.send(.toggled(category, $0)) }))
-        .toggleStyle(.checkbox)
-        .disabled(!store.state.isAvailable(category))
-        .padding(.leading, indented ? 20 : 0)
+      toggle(category, title).padding(.leading, indented ? 20 : 0)
       Spacer()
       Text(count).foregroundStyle(.secondary).monospacedDigit().gridColumnAlignment(.trailing)
     }
+  }
+
+  private func toggle(_ category: ArcImportFeature.Category, _ title: String) -> some View {
+    Toggle(title, isOn: Binding(get: { store.state.isIncluded(category) }, set: { store.send(.toggled(category, $0)) }))
+      .toggleStyle(.checkbox)
+      .disabled(!store.state.isAvailable(category))
   }
 
   // The tabs, and the folders among them.
@@ -114,5 +150,14 @@ struct ArcImportView: View {
     panel.prompt = "Choose"
     guard panel.runModal() == .OK, let folder = panel.url else { return }
     store.send(.folderChosen(folder))
+  }
+
+  private func choosePasswordsFile() {
+    let panel = NSOpenPanel()
+    panel.allowedContentTypes = [.commaSeparatedText]
+    panel.message = "Choose the passwords file you exported from Zen."
+    panel.prompt = "Choose"
+    guard panel.runModal() == .OK, let file = panel.url else { return }
+    store.send(.passwordsFileChosen(file))
   }
 }

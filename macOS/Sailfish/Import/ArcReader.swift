@@ -3,7 +3,7 @@ import Foundation
 
 // What an Arc data folder holds that this browser takes: its spaces with their pinned rows and Today tabs, each
 // profile's favorites, the archive and the shortcuts the user changed. macOS/scripts/arc-import/dump_sidebar.py
-// describes the files.
+// describes the files. ZenReader makes one of a Zen profile.
 struct ArcData: Equatable, Sendable {
   struct Tab: Equatable, Sendable {
     var url: URL
@@ -25,6 +25,8 @@ struct ArcData: Equatable, Sendable {
     var profile: String?
     var pinned: [Row]
     var today: [Tab]
+    // Zen's; Arc's spaces have the default.
+    var theme = SpaceTheme()
   }
 
   struct Favorites: Equatable, Sendable {
@@ -55,6 +57,8 @@ struct ArcData: Equatable, Sendable {
   // Newest first.
   var archive: [Archived] = []
   var shortcuts: [Shortcut] = []
+  // Zen's, as pinned rows of a space of their own.
+  var bookmarks: Space?
 }
 
 enum ArcImportError: Error, Equatable {

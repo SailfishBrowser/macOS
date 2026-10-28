@@ -291,8 +291,8 @@ struct BrowserIcon: View {
 
   var body: some View {
     let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: browser.bundleID)
-    // A browser removed but for its data shows none.
-    Image(nsImage: app.map { NSWorkspace.shared.icon(forFile: $0.path) } ?? NSImage())
+    // Zen's is bundled; another browser removed but for its data shows none.
+    (browser == .zen ? Image("zen") : Image(nsImage: app.map { NSWorkspace.shared.icon(forFile: $0.path) } ?? NSImage()))
       .resizable()
       .frame(width: 24, height: 24)
   }
