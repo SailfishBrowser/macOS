@@ -216,7 +216,8 @@ struct PendingLogin: Equatable, Identifiable, Sendable {
     let view = page.webView
     let point = rect.map { rect in
       let zoom = view.pageZoom
-      let bottom = (rect[1] + rect[3]) * zoom + 4
+      // 4 points below the field: the menu's frame starts 5 points above the point it is given.
+      let bottom = (rect[1] + rect[3]) * zoom + 9
       return NSPoint(x: rect[0] * zoom, y: view.isFlipped ? bottom : view.bounds.height - bottom)
     }
     MenuPopUp(menu: menu, point: point ?? NSEvent.mouseLocation, view: point == nil ? nil : view).show()
