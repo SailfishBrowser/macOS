@@ -11,6 +11,8 @@ struct Toast: Equatable, Identifiable {
     case editShortcut
     // Tidy Downloads' Undo: the download takes back its original name.
     case revertDownloadName(Download.ID)
+    // "Save password for {site}?": saves the login typed into a WebKit page.
+    case saveLogin(PendingLogin.ID)
   }
 
   // The dark pill at the bottom, or the accent pill at the page's top right.
@@ -154,6 +156,7 @@ struct ToastView: View {
     case .goToTab: "Go there"
     case .editShortcut: "Edit the shortcut ↗"
     case .revertDownloadName: "Undo"
+    case .saveLogin: "Save"
     }
   }
 }

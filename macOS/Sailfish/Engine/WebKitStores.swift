@@ -35,8 +35,8 @@ import WebKit
     dropIncognitoWarmView(profile: profile)
   }
 
-  // A new configuration on the profile's store, with the page scripts installed. Each page adds itself as the
-  // `sailfish` message handler of its configuration's content controller.
+  // A new configuration on the profile's store, with the page and password scripts installed. Each page adds itself as
+  // the message handler of both scripts' worlds in its configuration's content controller.
   static func configuration(profile: UUID, incognito: Bool) -> WKWebViewConfiguration {
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = store(profile: profile, incognito: incognito)
@@ -56,6 +56,16 @@ import WebKit
         in: WebKitPageScript.world))
     controller.addUserScript(
       WKUserScript(source: WebKitPageScript.pageWorld, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+    controller.addUserScript(
+      WKUserScript(
+        source: PasswordFill.script, injectionTime: .atDocumentEnd, forMainFrameOnly: false, in: PasswordFill.world))
+    if WebKitPasskeys.isEntitled {
+      WebKitPasskeys.requestAccess()
+    } else {
+      controller.addUserScript(
+        WKUserScript(
+          source: WebKitPasskeys.hidingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+    }
     return configuration
   }
 }

@@ -49,6 +49,7 @@ import WebKit
     super.init()
     webView.page = self
     fresh.userContentController.add(self, contentWorld: WebKitPageScript.world, name: "sailfish")
+    fresh.userContentController.add(self, contentWorld: PasswordFill.world, name: PasswordFill.handlerName)
     ContentBlocker.apply(to: fresh.userContentController)
     // The window's two-finger swipe switches spaces.
     webView.allowsBackForwardNavigationGestures = false
@@ -153,6 +154,9 @@ import WebKit
   }
 
   func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+    if message.name == PasswordFill.handlerName {
+      return PasswordFill.handle(message, page: self)
+    }
     guard let body = PageScriptMessage(message.body) else { return }
     let isMainFrame = message.frameInfo.isMainFrame
     switch body {

@@ -194,6 +194,17 @@ struct AppFeature {
       case let .windows(.element(_, .toastAction(.revertDownloadName(id)))):
         return .send(.downloads(.revertName(id)))
 
+      // A login typed into a WebKit page: the window showing its tab, or the last focused one, offers to save it.
+      case let .engine(.loginSubmitted(tab, login)):
+        guard let window = state.window(showing: tab)?.id ?? toastWindow(state) else {
+          return .run { _ in await engine.dropLogin(login.id) }
+        }
+        let toast = WindowFeature.Action.showToast("Save password for \(login.site)?", .saveLogin(login.id))
+        return .send(.windows(.element(id: window, action: toast)))
+
+      case let .windows(.element(_, .toastAction(.saveLogin(id)))):
+        return .run { _ in await engine.saveLogin(id) }
+
       case .downloads(.reverted):
         guard let window = toastWindow(state) else { return .none }
         return .send(.windows(.element(id: window, action: .showToast("Download name reverted!"))))
@@ -516,7 +527,12 @@ struct AppFeature {
         return .none
 
       case let .windowClosed(id):
-        guard let window = state.windows.remove(id: id), window.isIncognito else { return .none }
+        guard let window = state.windows.remove(id: id) else { return .none }
+        // Incognito tabs never offer to save a login, so only a regular window can close on one.
+        guard window.isIncognito else {
+          guard case let .saveLogin(login) = window.toast?.action else { return .none }
+          return .run { _ in await engine.dropLogin(login) }
+        }
         let profile = window.spaces.selected.profileID
         let tabs = window.spaces.spaces.flatMap(\.tabs).filter(\.isLive).map(\.id)
         let isLast = !state.windows.contains { $0.isIncognito && $0.spaces.selected.profileID == profile }

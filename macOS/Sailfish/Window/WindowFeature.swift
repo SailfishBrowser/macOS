@@ -507,20 +507,23 @@ struct WindowFeature {
         return .send(.showToast(placement == .pinned ? "Pinned Tab to \(space.name)" : "Un-Pinned Tab from \(space.name)"))
 
       case let .showToast(message, action, tap, placement):
+        let replaced = state.toast
         let toast = Toast(
           id: uuid(), message: message, action: action, tap: tap, placement: placement,
           undoDepth: action == .undo ? state.undoStack.count : nil)
         state.toast = toast
-        return .run { send in
-          try await clock.sleep(for: Toast.duration)
-          await send(.dismissToast(toast.id), animation: Motion.layout)
-        }
-        .cancellable(id: ToastDismissal(window: state.id), cancelInFlight: true)
+        return .merge(
+          dropLogin(of: replaced),
+          .run { send in
+            try await clock.sleep(for: Toast.duration)
+            await send(.dismissToast(toast.id), animation: Motion.layout)
+          }
+          .cancellable(id: ToastDismissal(window: state.id), cancelInFlight: true))
 
       case let .dismissToast(id):
-        guard state.toast?.id == id else { return .none }
+        guard let toast = state.toast, toast.id == id else { return .none }
         state.toast = nil
-        return .cancel(id: ToastDismissal(window: state.id))
+        return .merge(dropLogin(of: toast), .cancel(id: ToastDismissal(window: state.id)))
 
       case let .zoom(step):
         // With a Peek open the keys zoom its page, not the tab under it.
@@ -577,8 +580,8 @@ struct WindowFeature {
             .cancel(id: ToastDismissal(window: state.id)),
             space == state.spaces.selectedID ? .none : .send(.spaces(.select(space))),
             .send(.tab(.select(tab), in: space)))
-        case .editShortcut, .revertDownloadName:
-          // The window opens the Shortcuts pane; the app renames the download back.
+        case .editShortcut, .revertDownloadName, .saveLogin:
+          // The window opens the Shortcuts pane; the app renames the download back or saves the login.
           return .cancel(id: ToastDismissal(window: state.id))
         }
 
@@ -809,6 +812,12 @@ struct WindowFeature {
     let switchSpace: Effect<Action> = space == state.spaces.selectedID ? .none : .send(.spaces(.select(space)))
     let select: TabsFeature.Action = .select(tab)
     return .concatenate(switchSpace, .send(.tab(select, in: space)))
+  }
+
+  // A save-password toast going unanswered forgets its login.
+  private func dropLogin(of toast: Toast?) -> Effect<Action> {
+    guard case let .saveLogin(login) = toast?.action else { return .none }
+    return .run { _ in await engine.dropLogin(login) }
   }
 
   static func archivedMessage(_ count: Int) -> String {

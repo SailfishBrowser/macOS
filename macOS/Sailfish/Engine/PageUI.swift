@@ -347,7 +347,7 @@ extension Engine {
   }
 }
 
-private final class ActionMenuItem: NSMenuItem {
+final class ActionMenuItem: NSMenuItem {
   private let handler: () -> Void
 
   init(_ title: String, isEnabled: Bool = true, isOn: Bool = false, _ handler: @escaping () -> Void) {
