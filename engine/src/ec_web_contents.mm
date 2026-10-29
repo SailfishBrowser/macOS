@@ -66,6 +66,7 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/navigation_throttle_registry.h"
+#include "content/public/browser/reload_type.h"
 #include "content/public/browser/picture_in_picture_window_controller.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host.h"
@@ -78,7 +79,10 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/apple/url_conversions.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/http/http_request_headers.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/cpp/data_element.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/blink/public/common/context_menu_data/context_menu_data.h"
@@ -86,6 +90,7 @@
 #include "third_party/blink/public/mojom/choosers/file_chooser.mojom.h"
 #include "third_party/blink/public/mojom/context_menu/context_menu.mojom-shared.h"
 #include "third_party/blink/public/mojom/link_to_text/link_to_text.mojom.h"
+#include "third_party/blink/public/mojom/loader/referrer.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
@@ -632,6 +637,74 @@ class OtherSiteLinkThrottle : public content::NavigationThrottle {
   const char* GetNameForLogging() override { return "OtherSiteLinkThrottle"; }
 };
 
+// Asks the shell whether a navigation the user started should be made
+// elsewhere, before its request leaves, and cancels it if so. Redirects are
+// not asked about.
+class HandoffThrottle : public content::NavigationThrottle {
+ public:
+  using content::NavigationThrottle::NavigationThrottle;
+
+  static void MaybeCreateAndAdd(content::NavigationThrottleRegistry& registry) {
+    content::NavigationHandle& handle = registry.GetNavigationHandle();
+    ECWebContents* owner = [ECWebContents fromContents:handle.GetWebContents()];
+    bool user_started =
+        (!handle.IsRendererInitiated() || handle.HasUserGesture()) &&
+        handle.GetReloadType() == content::ReloadType::NONE &&
+        !handle.IsHistory() &&
+        handle.GetRestoreType() == content::RestoreType::kNotRestored;
+    if ([owner.delegate respondsToSelector:@selector
+                        (webContents:shouldHandOffNavigation:)] &&
+        handle.IsInPrimaryMainFrame() && !handle.IsSameDocument() &&
+        handle.GetURL().SchemeIsHTTPOrHTTPS() && user_started) {
+      registry.AddThrottle(std::make_unique<HandoffThrottle>(registry));
+    }
+  }
+
+  ThrottleCheckResult WillStartRequest() override {
+    content::NavigationHandle* handle = navigation_handle();
+    ECWebContents* owner = [ECWebContents fromContents:handle->GetWebContents()];
+    NSMutableURLRequest* request =
+        [NSMutableURLRequest requestWithURL:net::NSURLWithGURL(handle->GetURL())];
+    if (handle->IsPost()) {
+      request.HTTPMethod = @"POST";
+      NSMutableData* body = [NSMutableData data];
+      if (scoped_refptr<network::ResourceRequestBody> post =
+              handle->GetPostData()) {
+        for (const network::DataElement& element : *post->elements()) {
+          if (const auto* bytes =
+                  element.TryAs<network::DataElementBytes>()) {
+            [body appendBytes:bytes->bytes().data()
+                       length:bytes->bytes().size()];
+          }
+        }
+      }
+      request.HTTPBody = body;
+      if (std::optional<std::string> type =
+              handle->GetRequestHeaders().GetHeader(
+                  net::HttpRequestHeaders::kContentType)) {
+        [request setValue:base::SysUTF8ToNSString(*type)
+            forHTTPHeaderField:@"Content-Type"];
+      }
+    }
+    const GURL& referrer = handle->GetReferrer().url;
+    if (referrer.is_valid()) {
+      [request setValue:base::SysUTF8ToNSString(referrer.spec())
+          forHTTPHeaderField:@"Referer"];
+    }
+    return [owner.delegate webContents:owner shouldHandOffNavigation:request]
+               ? CANCEL_AND_IGNORE
+               : PROCEED;
+  }
+
+  const char* GetNameForLogging() override { return "HandoffThrottle"; }
+};
+
+// The other-site throttle comes first, so Peek keeps priority.
+void AddNavigationThrottles(content::NavigationThrottleRegistry& registry) {
+  OtherSiteLinkThrottle::MaybeCreateAndAdd(registry);
+  HandoffThrottle::MaybeCreateAndAdd(registry);
+}
+
 }  // namespace
 
 @implementation ECContextMenu {
@@ -818,7 +891,7 @@ class OtherSiteLinkThrottle : public content::NavigationThrottle {
 
 + (void)initialize {
   if (self == [ECWebContents class]) {
-    SetEngineCoreNavigationThrottles(&OtherSiteLinkThrottle::MaybeCreateAndAdd);
+    SetEngineCoreNavigationThrottles(&AddNavigationThrottles);
   }
 }
 

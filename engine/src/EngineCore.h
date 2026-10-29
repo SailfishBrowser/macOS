@@ -390,6 +390,17 @@ EC_EXPORT
 // The page asked to be shown, e.g. by its Picture in Picture window's back to
 // tab button. The shell selects its tab.
 - (void)webContentsDidRequestActivation:(ECWebContents*)contents;
+// Asked before the request of a navigation the user started in the page
+// leaves: a link click or form submission with a user gesture, or a
+// loadURL:, loadRequest: or new tab load that is not a reload, history step
+// or restore; only for http and https URLs in the page itself, never for a
+// redirect. YES cancels the navigation, which the shell then makes
+// elsewhere. `request` has the URL, the method, a POST's body (without its
+// files) and Content-Type, and the referrer as its Referer header. Answer at
+// once; the shell must not navigate or close the web contents inside the
+// call.
+- (BOOL)webContents:(ECWebContents*)contents
+    shouldHandOffNavigation:(NSURLRequest*)request;
 // The Chrome Web Store asks to install an extension. `permissions` are the
 // warnings Chrome lists for it. Without this method installs are refused.
 - (void)webContents:(ECWebContents*)contents
