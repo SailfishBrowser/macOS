@@ -345,6 +345,8 @@ extension WebEngineClient: DependencyKey {
     findAsTyped: { tab, string, requested in await Engine.shared.find(tab, requested) { $0.find(string) } },
     stopFinding: { tab, requested in await Engine.shared.find(tab, requested) { $0.stopFinding() } },
     cancelDownload: { await Engine.shared.cancelDownload($0) },
+    saveLogin: { await PasswordFill.save($0) },
+    dropLogin: { await PasswordFill.drop($0) },
     zoom: { tab, step in await Engine.shared.zoom(tab, step) },
     saveSessions: { await Engine.shared.saveSessions() },
     keepSessions: {

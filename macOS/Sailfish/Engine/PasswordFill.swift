@@ -2,15 +2,23 @@ import AppKit
 @preconcurrency import EngineCore
 import WebKit
 
-// Saved Chromium logins on WebKit pages: filled into sign-in forms and offered under a focused username field.
+// A login typed into a WebKit page that its window offers to save. Its username and password stay with PasswordFill.
+struct PendingLogin: Equatable, Identifiable, Sendable {
+  let id: UUID
+  let site: String
+}
+
+// Saved Chromium logins on WebKit pages: filled into sign-in forms, offered under a focused username field, and saved
+// from a toast when typed.
 @MainActor enum PasswordFill {
   static let world = WKContentWorld.world(name: "SailfishPasswords")
   // The message handler's name in `world`.
   static let handlerName = "passwords"
 
   // Runs at document end in every frame. It numbers each sign-in form (a rendered password field, the only one of its
-  // form, and the nearest rendered text or email input before it) and reports it, and reports a username field focused
-  // by the user with its rectangle in the top frame where it can be measured.
+  // form, and the nearest rendered text or email input before it) and reports it, reports a username field focused by
+  // the user with its rectangle in the top frame where it can be measured, and reports the username and password of a
+  // submitted form, or of a typed password when the page goes away.
   static let script = """
     (() => {
       const post = (body) => webkit.messageHandlers.\(handlerName).postMessage(body);
@@ -61,6 +69,18 @@ import WebKit
         if (event.target !== (entry.username || entry.password)) return;
         post({ type: "focus", form, rect: rectOf(event.target) });
       }, true);
+      let reported = "";
+      const report = (scope) => {
+        const password = passwords(scope).filter((input) => input.value).pop();
+        if (!password) return;
+        const username = usernameFor(password)?.value ?? "";
+        const key = username + "\\n" + password.value;
+        if (key === reported) return;
+        reported = key;
+        post({ type: "submit", username, password: password.value });
+      };
+      document.addEventListener("submit", (event) => report(event.target), true);
+      addEventListener("pagehide", () => report(document), true);
       let scheduled = false;
       new MutationObserver(() => {
         if (scheduled) return;
@@ -86,6 +106,9 @@ import WebKit
       scan();
     })();
     """
+
+  // Logins typed and offered for saving, until their toast is answered.
+  private static var pending: [PendingLogin.ID: (profile: UUID, url: URL, username: String, password: String)] = [:]
 
   // A saved login as `loginsForURL:` gives it.
   private struct Login: Sendable {
@@ -117,8 +140,29 @@ import WebKit
         else { return }
         showMenu(saved, page, frame, form: form, rect: rect?.count == 4 ? rect : nil)
       }
+    case "submit":
+      guard !engine.incognitoTabs.contains(tab), let profile = engine.tabProfiles[tab],
+        let username = body["username"] as? String, let password = body["password"] as? String, !password.isEmpty
+      else { return }
+      Task {
+        let saved = await logins(context, origin)
+        guard !saved.contains(where: { $0.isExactMatch && $0.username == username && $0.password == password })
+        else { return }
+        let login = PendingLogin(id: UUID(), site: engine.siteOf(origin))
+        pending[login.id] = (profile, origin, username, password)
+        Engine.continuation.yield(.loginSubmitted(tab: tab, login: login))
+      }
     default: return
     }
+  }
+
+  static func save(_ id: PendingLogin.ID) {
+    guard let login = pending.removeValue(forKey: id) else { return }
+    Engine.shared.contexts[login.profile]?.addLogin(for: login.url, username: login.username, password: login.password)
+  }
+
+  static func drop(_ id: PendingLogin.ID) {
+    pending[id] = nil
   }
 
   // The frame's origin as a URL, for http and https frames only.

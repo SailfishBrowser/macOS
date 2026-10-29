@@ -46,6 +46,8 @@ enum WebEngineEvent: Equatable, Sendable {
   // The page's zoom percent changed: a zoom step, or a navigation to a site with a remembered zoom.
   case zoomChanged(tab: UUID, percent: Int)
   case downloaded(Download)
+  // A login typed into a WebKit page that the profile's store does not hold, for its window to offer saving.
+  case loginSubmitted(tab: UUID, login: PendingLogin)
 }
 
 enum ZoomStep: Equatable, Sendable {
@@ -80,6 +82,9 @@ struct WebEngineClient: Sendable {
   var findAsTyped: @Sendable (_ tab: UUID, _ string: String, _ requested: ContinuousClock.Instant) async -> Void
   var stopFinding: @Sendable (_ tab: UUID, _ requested: ContinuousClock.Instant) async -> Void
   var cancelDownload: @Sendable (_ id: Download.ID) async -> Void
+  // Saves the login a toast offered to save, or forgets it when the toast goes unanswered.
+  var saveLogin: @Sendable (_ id: PendingLogin.ID) async -> Void
+  var dropLogin: @Sendable (_ id: PendingLogin.ID) async -> Void
   // Steps the page's zoom and returns its percent afterwards, nil without a page.
   var zoom: @Sendable (_ tab: UUID, _ step: ZoomStep) async -> Int?
   // Saves the live tabs' histories.
