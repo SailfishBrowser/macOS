@@ -105,6 +105,17 @@ EC_EXPORT
      downloadDidUpdate:(ECDownload*)download;
 @end
 
+@class ECCookie;
+
+@protocol ECCookieDelegate <NSObject>
+// A cookie under one of the context's observedCookieDomains was set
+// (`removed` NO) or was deleted, expired or evicted (`removed` YES). The
+// removal half of an overwrite and partitioned cookies are not reported.
+- (void)browserContext:(ECBrowserContext*)context
+       cookieDidChange:(ECCookie*)cookie
+               removed:(BOOL)removed;
+@end
+
 EC_EXPORT
 @interface ECBrowserContext : NSObject
 // Loads, or creates, the profile at `path`, a directory inside the user data
@@ -124,6 +135,11 @@ EC_EXPORT
 @property(copy) NSURL* downloadDirectory;
 @property BOOL searchSuggestEnabled;
 @property(weak, nullable) id<ECExtensionsDelegate> extensionsDelegate;
+// Changes to cookies under these registrable domains (the domain itself or
+// any subdomain) are reported to cookieDelegate, on the main thread. Empty,
+// the default, observes nothing.
+@property(weak, nullable) id<ECCookieDelegate> cookieDelegate;
+@property(copy) NSArray<NSString*>* observedCookieDomains;
 // Closes the context's web contents, then releases the profile. Closing an
 // incognito context discards its data.
 - (void)close;
@@ -223,6 +239,19 @@ EC_EXPORT
 // Sets the cookies in the profile's cookie store, as another browser's sites
 // set them. `completion` gets how many it took, on the main thread.
 - (void)importCookies:(NSArray<ECCookie*>*)cookies
+           completion:(void (^)(NSInteger count))completion;
+@end
+
+@interface ECBrowserContext (Cookies)
+// The context's unexpired, unpartitioned cookies under the registrable
+// domains (the domain itself or any subdomain), HttpOnly ones included, in
+// `completion` on the main thread.
+- (void)cookiesForDomains:(NSArray<NSString*>*)domains
+               completion:(void (^)(NSArray<ECCookie*>* cookies))completion;
+// Deletes the context's unpartitioned cookies with each cookie's name,
+// domain and path, whatever their value. `completion` gets how many it
+// deleted, on the main thread.
+- (void)deleteCookies:(NSArray<ECCookie*>*)cookies
            completion:(void (^)(NSInteger count))completion;
 @end
 

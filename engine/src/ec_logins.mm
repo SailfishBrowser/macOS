@@ -1,6 +1,7 @@
 #import "engine_core/ec_browser_context_private.h"
 
 #include <algorithm>
+#include <tuple>
 
 #include "base/barrier_callback.h"
 #include "base/strings/sys_string_conversions.h"
@@ -97,7 +98,34 @@
   return self;
 }
 
+// net::CookieSameSite has the values of the sameSite property.
+- (instancetype)initWithCanonicalCookie:(const net::CanonicalCookie&)cookie {
+  return [self
+      initWithName:base::SysUTF8ToNSString(cookie.Name())
+             value:base::SysUTF8ToNSString(cookie.Value())
+            domain:base::SysUTF8ToNSString(cookie.Domain())
+              path:base::SysUTF8ToNSString(cookie.Path())
+          creation:cookie.CreationDate().ToNSDate()
+            expiry:cookie.IsPersistent() ? cookie.ExpiryDate().ToNSDate() : nil
+        lastAccess:cookie.LastAccessDate().ToNSDate()
+            secure:cookie.SecureAttribute()
+          HTTPOnly:cookie.IsHttpOnly()
+          sameSite:static_cast<NSInteger>(cookie.SameSite())];
+}
+
 @end
+
+bool CookieIsUnderDomains(const net::CanonicalCookie& cookie,
+                          NSArray<NSString*>* domains) {
+  std::string host = cookie.DomainWithoutDot();
+  for (NSString* domain in domains) {
+    std::string name = base::SysNSStringToUTF8(domain);
+    if (host == name || host.ends_with("." + name)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 @implementation ECBrowserContext (Logins)
 
@@ -181,6 +209,73 @@
             },
             done));
   }
+}
+
+@end
+
+@implementation ECBrowserContext (Cookies)
+
+- (void)cookiesForDomains:(NSArray<NSString*>*)domains
+               completion:(void (^)(NSArray<ECCookie*>*))completion {
+  NSArray<NSString*>* scope = [domains copy];
+  self.profile->GetDefaultStoragePartition()
+      ->GetCookieManagerForBrowserProcess()
+      ->GetAllCookies(base::BindOnce(
+          ^(const std::vector<net::CanonicalCookie>& all) {
+            base::Time now = base::Time::Now();
+            NSMutableArray<ECCookie*>* cookies = [NSMutableArray array];
+            for (const net::CanonicalCookie& cookie : all) {
+              if (!cookie.IsPartitioned() && !cookie.IsExpired(now) &&
+                  CookieIsUnderDomains(cookie, scope)) {
+                [cookies addObject:[[ECCookie alloc]
+                                       initWithCanonicalCookie:cookie]];
+              }
+            }
+            completion(cookies);
+          }));
+}
+
+// DeleteCanonicalCookie deletes only a cookie whose value is unchanged, so
+// this deletes the stored cookies with the given keys.
+- (void)deleteCookies:(NSArray<ECCookie*>*)cookies
+           completion:(void (^)(NSInteger))completion {
+  std::vector<std::tuple<std::string, std::string, std::string>> keys;
+  for (ECCookie* cookie in cookies) {
+    keys.emplace_back(base::SysNSStringToUTF8(cookie.name),
+                      base::SysNSStringToUTF8(cookie.domain),
+                      base::SysNSStringToUTF8(cookie.path));
+  }
+  network::mojom::CookieManager* manager =
+      self.profile->GetDefaultStoragePartition()
+          ->GetCookieManagerForBrowserProcess();
+  manager->GetAllCookies(base::BindOnce(
+      [](network::mojom::CookieManager* manager,
+         std::vector<std::tuple<std::string, std::string, std::string>> keys,
+         void (^completion)(NSInteger),
+         const std::vector<net::CanonicalCookie>& all) {
+        std::vector<const net::CanonicalCookie*> matches;
+        for (const net::CanonicalCookie& cookie : all) {
+          if (!cookie.IsPartitioned() &&
+              std::ranges::find(keys, std::make_tuple(cookie.Name(),
+                                                      cookie.Domain(),
+                                                      cookie.Path())) !=
+                  keys.end()) {
+            matches.push_back(&cookie);
+          }
+        }
+        if (matches.empty()) {
+          completion(0);
+          return;
+        }
+        auto done = base::BarrierCallback<bool>(
+            matches.size(), base::BindOnce(^(std::vector<bool> results) {
+              completion(std::ranges::count(results, true));
+            }));
+        for (const net::CanonicalCookie* cookie : matches) {
+          manager->DeleteCanonicalCookie(*cookie, done);
+        }
+      },
+      base::Unretained(manager), std::move(keys), completion));
 }
 
 @end
