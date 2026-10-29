@@ -49,6 +49,7 @@ import WebKit
     super.init()
     webView.page = self
     fresh.userContentController.add(self, contentWorld: WebKitPageScript.world, name: "sailfish")
+    ContentBlocker.apply(to: fresh.userContentController)
     // The window's two-finger swipe switches spaces.
     webView.allowsBackForwardNavigationGestures = false
     webView.allowsMagnification = true

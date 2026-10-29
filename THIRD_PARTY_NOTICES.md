@@ -18,6 +18,21 @@ Copyright Raymond Hill and contributors. GNU General Public License v3.0. It is 
 unchanged except for an added manifest `key`; its license is `LICENSE.txt` in
 `Sailfish.app/Contents/Resources/uBlock0.chromium`. Source: https://github.com/gorhill/uBlock/tree/1.75.0
 
+## Filter lists
+
+WebKit pages block ads and trackers with the filter lists uBlock Origin enables by default, which Sailfish converts
+into WebKit content rule lists. The first copies come with the bundled uBlock Origin, and newer ones are fetched from
+the addresses in its `assets/assets.json`. Each list keeps its own license.
+
+- The uBlock filters for ads, badware risks, privacy, quick fixes and unbreak, https://github.com/uBlockOrigin/uAssets.
+  GNU General Public License v3.0.
+- EasyList and EasyPrivacy, https://easylist.to. GNU General Public License v3.0 or Creative Commons
+  Attribution-ShareAlike 3.0 Unported.
+- The Online Malicious URL Blocklist, https://gitlab.com/malware-filter/urlhaus-filter, built from URLhaus data by
+  abuse.ch. CC0 1.0.
+- Peter Lowe's Ad and tracking server list, https://pgl.yoyo.org/adservers/. Under its own terms,
+  https://pgl.yoyo.org/adservers/policy.php.
+
 ## Readability
 
 `macOS/Sailfish/Resources/Reader` contains Readability 0.6.0 by Mozilla, https://github.com/mozilla/readability.

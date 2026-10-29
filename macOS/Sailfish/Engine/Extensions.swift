@@ -47,17 +47,21 @@ extension Engine {
   // uBlock Origin, from scripts/fetch-ublock.sh.
   static let adBlocker = Bundle.main.path(forResource: "uBlock0.chromium", ofType: nil)!
 
+  // Chromium pages block with uBlock Origin itself, and WebKit pages with its lists as content rules.
   func applyAdBlocking(_ context: ECBrowserContext) {
     @Shared(.blocksAds) var blocksAds
     if blocksAds {
       context.loadBuiltInExtension(atPath: Self.adBlocker)
+      ContentBlocker.start()
     } else {
       context.unloadBuiltInExtensions()
+      ContentBlocker.stop()
     }
   }
 
   func adBlockingDidChange() {
     contexts.values.forEach(applyAdBlocking)
+    ContentBlocker.applyToLivePages()
   }
 }
 
