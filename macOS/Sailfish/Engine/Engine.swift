@@ -235,14 +235,18 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     context.close()
   }
 
-  // Closes the profile's context, then has the engine delete its data.
-  func deleteProfile(_ profile: UUID) {
+  // Closes the profile's context and pages, then has the engine delete its data and removes its WebKit store and
+  // folder.
+  func deleteProfile(_ profile: UUID) async {
     if let context = contexts.removeValue(forKey: profile) {
       Autocomplete.forget(context)
       closeTabs(of: context)
       context.close()
     }
     ECBrowserContext.deleteProfile(atPath: Self.userDataDir + "/" + profile.uuidString)
+    try? FileManager.default.removeItem(at: URL.dataDirectory.appending(path: "WebKit/\(profile.uuidString)"))
+    await WebKitStores.retireStore(profile: profile)
+    await WebKitStoreRemovals.remove(profile)
   }
 
   private func closeTabs(of context: ECBrowserContext) {
@@ -339,6 +343,7 @@ extension WebEngineClient: DependencyKey {
     discard: { await Engine.shared.discard($0) },
     closeIncognito: { await Engine.shared.closeIncognito($0) },
     deleteProfile: { await Engine.shared.deleteProfile($0) },
+    removeDeletedStores: { await WebKitStoreRemovals.removePending() },
     find: { tab, string, forward, requested in
       await Engine.shared.find(tab, requested) { $0.find(string, forward: forward) }
     },

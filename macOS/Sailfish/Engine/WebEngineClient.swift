@@ -74,6 +74,8 @@ struct WebEngineClient: Sendable {
   var discard: @Sendable (_ tab: UUID) async -> Void = { _ in }
   var closeIncognito: @Sendable (_ profile: UUID) async -> Void
   var deleteProfile: @Sendable (_ profile: UUID) async -> Void
+  // Removes the WebKit stores of deleted profiles that were still in use when they were deleted.
+  var removeDeletedStores: @Sendable () async -> Void = {}
   // Searches carry the time they were asked for; one older than the last the engine ran is dropped.
   var find: @Sendable (_ tab: UUID, _ string: String, _ forward: Bool, _ requested: ContinuousClock.Instant) async -> Void
   // Finds the string as typed: a changed string starts a new search, the same one keeps the active match.

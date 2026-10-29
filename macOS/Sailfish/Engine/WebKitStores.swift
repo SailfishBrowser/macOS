@@ -34,6 +34,14 @@ import WebKit
     incognitoStores[profile] = nil
   }
 
+  // Takes a deleted profile's store out of use, with its data removed: a page of the profile gets a store that keeps
+  // nothing from here on, so nothing writes to the old one while it is removed.
+  static func retireStore(profile: UUID) async {
+    let store = stores[profile]
+    stores[profile] = .nonPersistent()
+    await store?.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+  }
+
   // A new configuration on the profile's store, with the page scripts installed. Each page adds itself as the
   // `sailfish` message handler of its configuration's content controller.
   static func configuration(profile: UUID, incognito: Bool) -> WKWebViewConfiguration {
