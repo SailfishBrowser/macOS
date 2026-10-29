@@ -21,6 +21,8 @@ import WebKit
   private var isProvisional = false
   // Set when a terminated content process reloads the page, until a load finishes.
   private var reloadedAfterTermination = false
+  // Set while the page, shown again, waits to come back into the window.
+  private var showsOnReturn = false
   private static let textDirectiveCharacters = CharacterSet(
     charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._~")
 
@@ -31,8 +33,10 @@ import WebKit
     let fresh = WebKitStores.configuration(profile: profile, incognito: incognito)
     let configuration = configuration ?? fresh
     configuration.userContentController = fresh.userContentController
-    webView = WKWebView(frame: .zero, configuration: configuration)
+    let webView = PageWebView(frame: .zero, configuration: configuration)
+    self.webView = webView
     super.init()
+    webView.movedToWindow = { [weak self] in self?.movedToWindow() }
     fresh.userContentController.add(self, contentWorld: WebKitPageScript.world, name: "sailfish")
     // The window's two-finger swipe switches spaces.
     webView.allowsBackForwardNavigationGestures = false
@@ -40,7 +44,8 @@ import WebKit
     webView.isInspectable = !incognito
     webView.navigationDelegate = self
     webView.uiDelegate = self
-    // Clear until its first paint, as a new Chromium page is, so the card or the page this one replaces shows through.
+    // Clear until its first content is on screen, as a new Chromium page is, so the card or the page this one replaces
+    // shows through.
     webView.alphaValue = 0
     observations = [
       observe(\.url), observe(\.title), observe(\.isLoading), observe(\.estimatedProgress), observe(\.canGoBack),
@@ -150,24 +155,31 @@ import WebKit
       }
     case let .hover(url): Engine.shared.webKitPage(self, hovered: url)
     case let .selection(text): Engine.shared.webKitPage(self, selected: text)
-    case .painted: painted()
+    case .painted: showWhenDrawn()
     }
   }
 
-  // The page's first content on screen, or a load that failed, shows its view.
-  private func painted() {
-    webView.alphaValue = 1
+  // Shows the view once WebKit has put the page's pending drawing on screen, which a snapshot taken after screen
+  // updates waits for; one point of it costs nothing.
+  private func showWhenDrawn() {
+    let configuration = WKSnapshotConfiguration()
+    configuration.rect = CGRect(x: 0, y: 0, width: 1, height: 1)
+    configuration.snapshotWidth = 1
+    webView.takeSnapshot(with: configuration) { [weak self] _, _ in self?.webView.alphaValue = 1 }
   }
 
-  // Shown again by Back or Forward: clear until its next frame, as its content returns a frame or two after its
+  // Shown again by Back or Forward: clear until it has drawn again, as its content returns a frame or two after its
   // view comes back to the window. A page still in the window, under the one that replaced it, shows at once.
   func reshow() {
     guard webView.alphaValue > 0, webView.window == nil else { return }
     webView.alphaValue = 0
-    webView.callAsyncJavaScript(
-      "await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))", arguments: [:],
-      in: nil, in: WebKitPageScript.world
-    ) { [weak self] _ in self?.painted() }
+    showsOnReturn = true
+  }
+
+  private func movedToWindow() {
+    guard showsOnReturn else { return }
+    showsOnReturn = false
+    showWhenDrawn()
   }
 
   // MARK: Navigation
@@ -223,12 +235,12 @@ import WebKit
 
   func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
     isProvisional = false
-    painted()
+    webView.alphaValue = 1
   }
 
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
     isProvisional = false
-    painted()
+    webView.alphaValue = 1
   }
 
   // HTTP Basic and Digest ask for a name and password; server trust and everything else are left to macOS, so an
@@ -446,6 +458,18 @@ import WebKit
     case .paste: NSApp.sendAction(#selector(NSText.paste(_:)), to: webView, from: nil)
     case .pasteAndMatchStyle: NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: webView, from: nil)
     case .selectAll: NSApp.sendAction(#selector(NSText.selectAll(_:)), to: webView, from: nil)
+    }
+  }
+}
+
+// The page's web view, which tells it when it comes into a window.
+final class PageWebView: WKWebView {
+  var movedToWindow: (() -> Void)?
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if window != nil {
+      movedToWindow?()
     }
   }
 }

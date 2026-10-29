@@ -198,14 +198,15 @@ enum WebKitPageScript {
   document.addEventListener("mouseout", (e) => e.relatedTarget || hover(""), true);
 
   if (isTop) {
-    // A frame after the one that shows the page's first content, or after its load when it shows none.
-    const painted = () => requestAnimationFrame(() => requestAnimationFrame(() => post("painted")));
+    // The page's first content, or for a page that shows none, two frames after its load.
     new PerformanceObserver((list, observer) => {
       if (!list.getEntriesByName("first-contentful-paint").length) return;
       observer.disconnect();
-      painted();
+      post("painted");
     }).observe({ type: "paint", buffered: true });
-    addEventListener("load", painted, { once: true });
+    addEventListener("load", () => requestAnimationFrame(() => requestAnimationFrame(() => post("painted"))), {
+      once: true,
+    });
 
     let selected = "";
     let pending = false;
@@ -407,7 +408,7 @@ enum PageScriptMessage {
   case selection(String)
   // The main frame's icons, best first.
   case icons([URL])
-  // The main frame's first content is on screen.
+  // The main frame painted its first content.
   case painted
 
   init?(_ body: Any) {
