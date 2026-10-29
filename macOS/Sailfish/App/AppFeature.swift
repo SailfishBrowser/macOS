@@ -201,7 +201,7 @@ struct AppFeature {
 
       // A login typed into a WebKit page: the window showing its tab, or the last focused one, offers to save it.
       case let .engine(.loginSubmitted(tab, login)):
-        guard let window = state.window(showing: tab)?.id ?? toastWindow(state) else {
+        guard let window = state.window(showing: tab)?.id ?? state.toastWindowID else {
           return .run { _ in await engine.dropLogin(login.id) }
         }
         let toast = WindowFeature.Action.showToast("Save password for \(login.site)?", .saveLogin(login.id))
