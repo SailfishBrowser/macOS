@@ -333,7 +333,7 @@ extension WebEngineClient: DependencyKey {
     goToEntry: { tab, entry in await Engine.shared.goToEntry(tab, entry) },
     reload: { await Engine.shared.reload($0) },
     stop: { await Engine.shared.stop($0) },
-    setMuted: { tab, muted in await Engine.shared.perform(tab) { $0.isMuted = muted } },
+    setMuted: { tab, muted in await Engine.shared.setMuted(tab, muted) },
     media: { tab, command in await PictureInPicture.perform(command, on: tab) },
     close: { await Engine.shared.close($0) },
     discard: { await Engine.shared.discard($0) },

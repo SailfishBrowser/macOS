@@ -32,6 +32,8 @@ import AppKit
   func go(to index: Int)
   func reload()
   func pauseMedia()
+  // Whether the page's sound is muted, set as the tab's mute.
+  var isMuted: Bool { get set }
   func close()
 }
 

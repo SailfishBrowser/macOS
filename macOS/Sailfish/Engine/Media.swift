@@ -34,6 +34,9 @@ enum PictureInPicture {
   private static let inset: CGFloat = 10
 
   static func perform(_ command: MediaCommand, on tab: UUID) {
+    if let page = Engine.shared.page(tab) as? WebKitPage {
+      return page.perform(command)
+    }
     Engine.shared.perform(tab) { contents in
       switch command {
       case .play: contents.playMedia()

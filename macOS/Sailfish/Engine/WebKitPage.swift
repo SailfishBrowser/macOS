@@ -21,6 +21,8 @@ import WebKit
   private var isProvisional = false
   // Set when a terminated content process reloads the page, until a load finishes.
   private var reloadedAfterTermination = false
+  // The page's media and mute, which WebKitMedia.swift keeps.
+  var mediaState = WebKitMediaState()
   private static let textDirectiveCharacters = CharacterSet(
     charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._~")
 
@@ -59,7 +61,8 @@ import WebKit
   var page: WebPage {
     WebPage(
       url: webView.url, title: title, favicon: favicon, isLoading: webView.isLoading, canGoBack: webView.canGoBack,
-      canGoForward: webView.canGoForward, pages: [PageRecord(id: id, engine: .webkit)], shownPage: 0)
+      canGoForward: webView.canGoForward, isAudible: isAudible, isMuted: isMuted, media: media,
+      pages: [PageRecord(id: id, engine: .webkit)], shownPage: 0)
   }
 
   // The page's title, or its URL while it has none, as Chromium's.
@@ -136,14 +139,17 @@ import WebKit
   }
 
   func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-    guard message.frameInfo.isMainFrame, let body = PageScriptMessage(message.body) else { return }
+    guard let body = PageScriptMessage(message.body) else { return }
+    let isMainFrame = message.frameInfo.isMainFrame
     switch body {
-    case let .icons(icons):
+    case let .icons(icons) where isMainFrame:
       if let icon = icons.first {
         fetchFavicon(icon)
       }
-    case let .hover(url): Engine.shared.webKitPage(self, hovered: url)
-    case let .selection(text): Engine.shared.webKitPage(self, selected: text)
+    case let .hover(url) where isMainFrame: Engine.shared.webKitPage(self, hovered: url)
+    case let .selection(text) where isMainFrame: Engine.shared.webKitPage(self, selected: text)
+    case let .media(frame, report): receive(report, frame: frame, from: message.frameInfo)
+    case .icons, .hover, .selection: break
     }
   }
 
@@ -190,6 +196,7 @@ import WebKit
 
   func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
     isProvisional = false
+    mediaDidCommit()
     Engine.shared.pageDidCommit(
       self, url: committedURL, isNewNavigation: navigationType != .backForward && navigationType != .reload)
   }

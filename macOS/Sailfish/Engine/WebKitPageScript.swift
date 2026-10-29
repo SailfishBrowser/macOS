@@ -37,6 +37,8 @@ enum WebKitPageScript {
   };
   const playing = (m) => !m.paused && !m.ended;
   const audible = (m) => playing(m) && !m.muted && m.volume > 0;
+  // Media the tab's mute silences still counts as sound, as a muted Chromium tab stays audible.
+  const sounding = (m) => playing(m) && (!m.muted || mutedByUs.has(m)) && m.volume > 0;
   const applyMute = (m) => {
     if (muted && !m.muted) {
       m.muted = true;
@@ -70,10 +72,12 @@ enum WebKitPageScript {
     pagePosition.at = Date.now();
   };
   let queued = false;
+  let reported = false;
   const report = () => {
     queued = false;
+    reported = true;
     const list = allMedia();
-    post("media", { playing: list.some(audible), muted });
+    post("media", { audible: list.some(sounding), muted });
     const m = active(list);
     const session = navigator.mediaSession;
     const fromSession = sessionState();
@@ -172,6 +176,10 @@ enum WebKitPageScript {
     },
     true,
   );
+  // A document that reported media takes it with it when it goes; one restored from the back-forward cache reports
+  // again.
+  addEventListener("pagehide", () => reported && post("media", null));
+  addEventListener("pageshow", (e) => e.persisted && schedule());
   const pip = (on) => post("pip", { active: on });
   document.addEventListener("enterpictureinpicture", () => pip(true), true);
   document.addEventListener("leavepictureinpicture", () => pip(false), true);
@@ -398,6 +406,8 @@ enum PageScriptMessage {
   case selection(String)
   // The main frame's icons, best first.
   case icons([URL])
+  // A report on a frame's media, from any frame, with the id the frame's script gave itself.
+  case media(frame: String, MediaReport)
 
   init?(_ body: Any) {
     guard let body = body as? [String: Any], let kind = body["kind"] as? String else { return nil }
@@ -405,7 +415,9 @@ enum PageScriptMessage {
     case let ("hover", href as String): self = .hover(URL(string: href))
     case let ("selection", text as String): self = .selection(text)
     case let ("icons", hrefs as [String]): self = .icons(hrefs.compactMap { URL(string: $0) })
-    default: return nil
+    case let (kind, data):
+      guard let frame = body["frame"] as? String, let report = MediaReport(kind, data) else { return nil }
+      self = .media(frame: frame, report)
     }
   }
 }
