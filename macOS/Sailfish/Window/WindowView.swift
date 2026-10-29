@@ -105,6 +105,9 @@ struct WindowView: View {
     ZStack(alignment: .topLeading) {
       browser(isFloating: isFloating, background: background, library: (shown: shown, push: push))
     }
+    // The page's frame changes at once, never with an animation that shares the update, such as the toast's: a web
+    // view resized through an animation keeps its content offset from its view.
+    .transaction(value: isPageFullScreen) { $0.animation = nil }
     .frame(width: size.width - narrow, height: size.height)
     .offset(x: push)
     // The Library is opaque over the sidebar and moves by its whole width, so its trailing edge stays the
@@ -150,7 +153,7 @@ struct WindowView: View {
   ) -> some View {
     let theme = themePreview ?? store.spaces.selected.theme
     HStack(spacing: 0) {
-      if !isFloating {
+      if !isFloating, !isPageFullScreen {
         SidebarView(store: store)
           .frame(width: store.sidebar.width)
           .overlay(alignment: .trailing) { resizeHandle }
@@ -180,11 +183,11 @@ struct WindowView: View {
             FindBar(store: find).padding(10).padding(.top, isUnderToolbar ? DeveloperBar.height : 0)
           }
         }
-        .padding([.top, .bottom, .trailing], 10)
-        .padding(.leading, isFloating ? 10 : 0)
+        .padding([.top, .bottom, .trailing], isPageFullScreen ? 0 : 10)
+        .padding(.leading, isFloating && !isPageFullScreen ? 10 : 0)
     }
 
-    if isFloating {
+    if isFloating, !isPageFullScreen {
       Color.clear
         .frame(width: 10)
         .frame(maxHeight: .infinity)
@@ -218,6 +221,11 @@ struct WindowView: View {
           .zIndex(1)
       }
     }
+  }
+
+  // A page in element full screen fills the window alone.
+  private var isPageFullScreen: Bool {
+    store.spaces.selected.selectedTabID.flatMap { Engine.shared.fullScreenPages[$0] } != nil
   }
 
   // The sidebar resizes by dragging its trailing edge.

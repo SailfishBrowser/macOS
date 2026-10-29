@@ -32,6 +32,8 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   // Tabs whose page has an article, and the article of each tab showing Reader View.
   var readerable: Set<UUID> = []
   var readers: [UUID: ReaderArticle] = [:]
+  // The page of each tab showing an element full screen, which fills the window, and the origin that asked.
+  var fullScreenPages: [UUID: (page: ECWebContents, origin: URL?)] = [:]
   // How far each loading tab's page has loaded, 0 to 1, shown by the load dash above the page card.
   var loadProgress: [UUID: Double] = [:]
   // Each recently shown tab's page as it last looked, for the tab switcher's cards; the newest last.
@@ -272,6 +274,19 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   func webContents(_ contents: ECWebContents, didChangeLoadProgress progress: Double) {
     guard let tab = shownTab(of: contents) else { return }
     loadProgress[tab] = progress
+  }
+
+  // Only the shown page of a tab in a browser window goes full screen; Little Sailfish and pages behind leave at once.
+  func webContents(_ contents: ECWebContents, didEnterFullscreenForOrigin origin: URL?) {
+    guard let tab = shownTab(of: contents), !littleSailfishTabs.contains(tab) else {
+      return contents.exitFullscreen(resizingView: false)
+    }
+    fullScreenPages[tab] = (contents, origin)
+  }
+
+  func webContentsDidExitFullscreen(_ contents: ECWebContents) {
+    guard let tab = tab(of: contents), fullScreenPages[tab]?.page === contents else { return }
+    fullScreenPages[tab] = nil
   }
 
   // Required by the protocol; the engine calls the one with modifier flags instead, so this never runs.
