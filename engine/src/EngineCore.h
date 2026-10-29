@@ -488,6 +488,9 @@ EC_EXPORT
 @property(weak, nullable) id<ECWebContentsDelegate> delegate;
 
 - (void)loadURL:(NSURL*)url;
+// Loads the request as a link the user followed: its URL, its Referer header
+// as the referrer and, for a POST, its body with its Content-Type.
+- (void)loadRequest:(NSURLRequest*)request;
 - (void)goBack;
 - (void)goForward;
 // Goes to the entry at `offset` from the current page, as ⌘[ and ⌘] with a

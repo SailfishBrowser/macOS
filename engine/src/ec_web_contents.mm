@@ -1355,6 +1355,32 @@ void AddNavigationThrottles(content::NavigationThrottleRegistry& registry) {
                                      ui::PAGE_TRANSITION_TYPED, std::string());
 }
 
+// A link the user followed (a browser-initiated link transition), so the
+// handoff throttle asks about it.
+- (void)loadRequest:(NSURLRequest*)request {
+  if (!_contents) {
+    return;
+  }
+  content::NavigationController::LoadURLParams params(
+      net::GURLWithNSURL(request.URL));
+  params.transition_type = ui::PAGE_TRANSITION_LINK;
+  if (NSString* referrer = [request valueForHTTPHeaderField:@"Referer"]) {
+    params.referrer =
+        content::Referrer(GURL(base::SysNSStringToUTF8(referrer)),
+                          network::mojom::ReferrerPolicy::kDefault);
+  }
+  if ([request.HTTPMethod isEqualToString:@"POST"]) {
+    params.load_type = content::NavigationController::LOAD_TYPE_HTTP_POST;
+    params.post_data = network::ResourceRequestBody::CreateFromCopyOfBytes(
+        base::apple::NSDataToSpan(request.HTTPBody ?: [NSData data]));
+    if (NSString* type = [request valueForHTTPHeaderField:@"Content-Type"]) {
+      params.extra_headers = std::string(net::HttpRequestHeaders::kContentType) +
+                             ": " + base::SysNSStringToUTF8(type);
+    }
+  }
+  _contents->GetController().LoadURLWithParams(params);
+}
+
 - (void)goBack {
   if (self.canGoBack) {
     _contents->GetController().GoBack();
