@@ -187,20 +187,30 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   }
 
   func zoom(_ tab: UUID, _ step: ZoomStep) -> Int? {
+    if let page = page(tab) as? WebKitPage {
+      return zoom(page, of: tab, step)
+    }
     guard let contents = self.contents(tab) else { return nil }
     switch step {
     case .in: contents.zoomIn()
     case .out: contents.zoomOut()
     case .reset: contents.resetZoom()
     }
+    if let host = contents.url?.host(), let context = tabContexts[tab] {
+      applyZoom(contents.zoomPercent, host: host, in: context)
+    }
     return contents.zoomPercent
   }
 
   // Runs a search asked for at `requested` unless a later one already ran.
-  func find(_ tab: UUID, _ requested: ContinuousClock.Instant, _ operation: (ECWebContents) -> Void) {
+  func find(_ tab: UUID, _ requested: ContinuousClock.Instant, _ operation: FindOperation) {
     if let last = findRequests[tab], requested < last { return }
     findRequests[tab] = requested
-    perform(tab, operation)
+    if let page = page(tab) as? WebKitPage {
+      page.finder.perform(operation, in: page)
+    } else if let contents = contents(tab) {
+      operation.perform(on: contents)
+    }
   }
 
   func close(_ tab: UUID) {
@@ -349,10 +359,10 @@ extension WebEngineClient: DependencyKey {
     closeIncognito: { await Engine.shared.closeIncognito($0) },
     deleteProfile: { await Engine.shared.deleteProfile($0) },
     find: { tab, string, forward, requested in
-      await Engine.shared.find(tab, requested) { $0.find(string, forward: forward) }
+      await Engine.shared.find(tab, requested, .find(string, forward: forward))
     },
-    findAsTyped: { tab, string, requested in await Engine.shared.find(tab, requested) { $0.find(string) } },
-    stopFinding: { tab, requested in await Engine.shared.find(tab, requested) { $0.stopFinding() } },
+    findAsTyped: { tab, string, requested in await Engine.shared.find(tab, requested, .findAsTyped(string)) },
+    stopFinding: { tab, requested in await Engine.shared.find(tab, requested, .stop) },
     cancelDownload: { await Engine.shared.cancelDownload($0) },
     zoom: { tab, step in await Engine.shared.zoom(tab, step) },
     saveSessions: { await Engine.shared.saveSessions() },

@@ -24,6 +24,7 @@ import WebKit
   private var isProvisional = false
   // Set when a terminated content process reloads the page, until a load finishes.
   private var reloadedAfterTermination = false
+  let finder = WebKitFind()
   private static let textDirectiveCharacters = CharacterSet(
     charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._~")
 
@@ -193,6 +194,7 @@ import WebKit
 
   func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
     isProvisional = false
+    Engine.shared.webKitPageDidCommit(self)
     Engine.shared.pageDidCommit(
       self, url: committedURL, isNewNavigation: navigationType != .backForward && navigationType != .reload)
   }
