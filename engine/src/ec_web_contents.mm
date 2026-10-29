@@ -319,6 +319,54 @@ class WebContentsDelegateBridge : public content::WebContentsDelegate,
     PictureInPictureWindowManager::GetInstance()->ExitPictureInPicture();
   }
 
+  // Element full screen. Content reads the state back within the request to
+  // grant it to the page, so it changes before the shell hears of it.
+  bool CanEnterFullscreenModeForTab(
+      content::RenderFrameHost* requesting_frame) override {
+    return [owner_.delegate
+        respondsToSelector:@selector(webContents:didEnterFullscreenForOrigin:)];
+  }
+
+  void EnterFullscreenModeForTab(
+      content::RenderFrameHost* requesting_frame,
+      const blink::mojom::FullscreenOptions& options) override {
+    fullscreen_ = true;
+    NSURL* origin = net::NSURLWithGURL(
+        requesting_frame->GetLastCommittedOrigin().GetURL());
+    __weak ECWebContents* owner = owner_;
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(^{
+          if (owner.contents && owner.contents->IsFullscreen()) {
+            [owner.delegate webContents:owner
+                didEnterFullscreenForOrigin:origin];
+          }
+        }));
+  }
+
+  void ExitFullscreenModeForTab(content::WebContents* source) override {
+    fullscreen_ = false;
+    __weak ECWebContents* owner = owner_;
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(^{
+          if (owner.contents) {
+            [owner.delegate webContentsDidExitFullscreen:owner];
+          }
+        }));
+  }
+
+  bool IsFullscreenForTabOrPending(
+      const content::WebContents* web_contents) override {
+    return fullscreen_;
+  }
+
+  content::FullscreenState GetFullscreenState(
+      const content::WebContents* web_contents) const override {
+    content::FullscreenState state;
+    state.target_mode = fullscreen_ ? content::FullscreenMode::kContent
+                                    : content::FullscreenMode::kWindowed;
+    return state;
+  }
+
   void MediaStartedPlaying(const MediaPlayerInfo& video_type,
                            const content::MediaPlayerId& id) override {
     ReportMediaChange();
@@ -604,6 +652,7 @@ class WebContentsDelegateBridge : public content::WebContentsDelegate,
   std::shared_ptr<DialogClosedCallback> dialog_callback_;
   NSEventModifierFlags last_modifier_flags_ = 0;
   base::TimeTicks last_interaction_;
+  bool fullscreen_ = false;
   __weak ECWebContents* owner_;
 };
 
@@ -1146,6 +1195,12 @@ void AddNavigationThrottles(content::NavigationThrottleRegistry& registry) {
           GetOrCreateVideoPictureInPictureController(_contents.get())
               ->GetWindowForTesting());
   return window ? window->GetNativeWindow().GetNativeNSWindow() : nil;
+}
+
+- (void)exitFullscreenResizingView:(BOOL)resizingView {
+  if (_contents && _contents->IsFullscreen()) {
+    _contents->ExitFullscreen(resizingView);
+  }
 }
 
 - (BOOL)isSecure {
