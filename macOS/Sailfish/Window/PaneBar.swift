@@ -38,8 +38,8 @@ struct PaneBar: View {
         BarButton(systemName: "slider.horizontal.2.square") { showsControls = true }
           .help("Site Controls")
           .popover(isPresented: $showsControls, arrowEdge: .bottom) {
-            if let contents = Engine.shared.tabs[tab.id] {
-              SiteControls(space: space, tab: tab.id, contents: contents, url: tab.url, open: open)
+            if Engine.shared.page(tab.id) != nil {
+              SiteControls(space: space, tab: tab.id, url: tab.url, open: open)
             }
           }
         Menu { options } label: {
@@ -78,10 +78,10 @@ struct PaneBar: View {
       pageColor = nil
       generation += 1
       let load = generation
-      guard !tab.isLoading, let contents = Engine.shared.tabs[tab.id] else { return }
+      guard !tab.isLoading, let page = Engine.shared.page(tab.id) else { return }
       try? await Task.sleep(for: .milliseconds(300))
       guard !Task.isCancelled else { return }
-      contents.snapshot { image in
+      page.snapshot { image in
         guard load == generation, let image, let color = Self.topColor(image) else { return }
         pageColor = color
       }

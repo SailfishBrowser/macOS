@@ -43,7 +43,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   // Each space as a window to its context's extensions (chrome.windows), by space.
   @ObservationIgnored var windows: [UUID: ECWindow] = [:]
   // Each tab's last reported page; Chromium reports several times per load, mostly without change.
-  @ObservationIgnored private var lastPages: [UUID: WebPage] = [:]
+  @ObservationIgnored private(set) var lastPages: [UUID: WebPage] = [:]
   @ObservationIgnored weak var windowDelegate: (any ECWindowDelegate)?
   // The context of each tab's web contents, released before their context closes.
   @ObservationIgnored private var tabContexts: [UUID: ECBrowserContext] = [:]
@@ -56,11 +56,11 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
 
   // Keeps the page as it looks now, as Chrome does for a tab about to be hidden, scaled to the switcher's card.
   func captureThumbnail(_ tab: UUID) {
-    guard let contents = tabs[tab], !littleSailfishTabs.contains(tab) else { return }
-    contents.snapshot { [weak self] image in
+    guard let page = self.page(tab), !littleSailfishTabs.contains(tab) else { return }
+    page.snapshot { [weak self] image in
       guard let image else { return }
       Task { @MainActor in
-        guard let self, self.tabs[tab] != nil else { return }
+        guard let self, self.page(tab) != nil else { return }
         self.thumbnails[tab] = image.scaled(toWidth: TabSwitcher.thumbnailSize.width * 2)
         self.thumbnailOrder.removeAll { $0 == tab }
         self.thumbnailOrder.append(tab)
@@ -80,7 +80,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     if let pending = pendingSheets.removeValue(forKey: tab) {
       DispatchQueue.main.async { pending.forEach { $0() } }
     }
-    return tabs[tab]?.view
+    return page(tab)?.view
   }
 
   func create(_ tab: UUID, _ profile: UUID, _ incognito: Bool) async {
@@ -350,12 +350,54 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
       .peekRequested(tab: tab, url: url, at: CGPoint(x: point.x, y: view.isFlipped ? point.y : view.bounds.height - point.y)))
   }
 
+  // The page the tab shows.
+  func page(_ tab: UUID) -> (any TabPage)? {
+    tabs[tab]
+  }
+
+  func backEntries(_ tab: UUID) -> [HistoryEntry] {
+    tabs[tab].map { historyEntries($0.backEntries, of: tab) } ?? []
+  }
+
+  func forwardEntries(_ tab: UUID) -> [HistoryEntry] {
+    tabs[tab].map { historyEntries($0.forwardEntries, of: tab) } ?? []
+  }
+
+  private func historyEntries(_ entries: [ECNavigationEntry], of tab: UUID) -> [HistoryEntry] {
+    entries.map { HistoryEntry(page: tab, index: $0.index, url: $0.url, title: $0.title) }
+  }
+
   // The entry is looked up again by its index, as the menu's copy may be stale.
-  func goToEntry(_ tab: UUID, _ index: Int) {
+  func goToEntry(_ tab: UUID, _ entry: HistoryEntry) async {
     guard let contents = tabs[tab],
-      let entry = (contents.backEntries + contents.forwardEntries).first(where: { $0.index == index })
+      let current = (contents.backEntries + contents.forwardEntries).first(where: { $0.index == entry.index })
     else { return }
-    contents.go(to: entry)
+    contents.go(to: current)
+  }
+
+  func goBack(_ tab: UUID) async {
+    tabs[tab]?.goBack()
+  }
+
+  func goForward(_ tab: UUID) async {
+    tabs[tab]?.goForward()
+  }
+
+  func reload(_ tab: UUID) async {
+    tabs[tab]?.reload()
+  }
+
+  func stop(_ tab: UUID) async {
+    tabs[tab]?.stop()
+  }
+
+  // The permissions the user allowed or blocked for the site of the tab's page.
+  func sitePermissions(_ tab: UUID) -> [String: Bool] {
+    tabs[tab]?.sitePermissions.mapValues(\.boolValue) ?? [:]
+  }
+
+  func setSitePermission(_ tab: UUID, _ key: String, allowed: Bool) {
+    tabs[tab]?.setSitePermission(key, allowed: allowed)
   }
 
   func tab(of contents: ECWebContents) -> UUID? {
@@ -368,11 +410,11 @@ extension WebEngineClient: DependencyKey {
     create: { await Engine.shared.create($0, $1, $2) },
     load: { await Engine.shared.load($0, $1) },
     littleWindow: { await Engine.shared.syncLittleWindow($0, profile: $1, tab: $2) },
-    goBack: { await Engine.shared.perform($0) { $0.goBack() } },
-    goForward: { await Engine.shared.perform($0) { $0.goForward() } },
-    goToEntry: { tab, index in await Engine.shared.goToEntry(tab, index) },
-    reload: { await Engine.shared.perform($0) { $0.reload() } },
-    stop: { await Engine.shared.perform($0) { $0.stop() } },
+    goBack: { await Engine.shared.goBack($0) },
+    goForward: { await Engine.shared.goForward($0) },
+    goToEntry: { tab, entry in await Engine.shared.goToEntry(tab, entry) },
+    reload: { await Engine.shared.reload($0) },
+    stop: { await Engine.shared.stop($0) },
     setMuted: { tab, muted in await Engine.shared.perform(tab) { $0.isMuted = muted } },
     media: { tab, command in await PictureInPicture.perform(command, on: tab) },
     close: { await Engine.shared.close($0) },

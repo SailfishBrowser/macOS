@@ -85,13 +85,13 @@ enum MediaVolume {
 
 extension Engine {
   func mediaVolume(_ tab: UUID, _ done: @escaping @MainActor (Double) -> Void) {
-    tabs[tab]?.evaluateJavaScript(MediaVolume.read) { result in
+    page(tab)?.evaluateJavaScript(MediaVolume.read) { result in
       MainActor.assumeIsolated { result.flatMap(Double.init).map(done) }
     }
   }
 
   func setMediaVolume(_ tab: UUID, _ volume: Double) {
-    tabs[tab]?.evaluateJavaScript(MediaVolume.set(volume)) { _ in }
+    page(tab)?.evaluateJavaScript(MediaVolume.set(volume)) { _ in }
   }
 
   func webContentsDidRequestActivation(_ contents: ECWebContents) {

@@ -55,8 +55,8 @@ struct WebEngineClient: Sendable {
   var littleWindow: @Sendable (_ id: UUID, _ profile: UUID, _ tab: UUID) async -> Void
   var goBack: @Sendable (_ tab: UUID) async -> Void
   var goForward: @Sendable (_ tab: UUID) async -> Void
-  // Goes to the history entry at `index` in the tab's history, chosen in a back or forward menu.
-  var goToEntry: @Sendable (_ tab: UUID, _ index: Int) async -> Void
+  // Goes to a history entry of the tab, chosen in a back or forward menu.
+  var goToEntry: @Sendable (_ tab: UUID, _ entry: HistoryEntry) async -> Void
   var reload: @Sendable (_ tab: UUID) async -> Void
   var stop: @Sendable (_ tab: UUID) async -> Void
   var setMuted: @Sendable (_ tab: UUID, _ muted: Bool) async -> Void
