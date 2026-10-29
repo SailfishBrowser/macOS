@@ -49,19 +49,22 @@ extension Engine {
       self.webContents(contents, requestsPermissions: permissions, forOrigin: origin, completionHandler: completionHandler)
     }) { return }
     guard let tab = tab(of: contents) else { return completionHandler(false) }
-    // Asks "Allow http://… to access your location?".
+    permissionRequests[tab] = PermissionRequest(
+      message: Self.permissionMessage(permissions, origin), isLocation: permissions == ["geolocation"]
+    ) { [weak self] allowed in
+      self?.permissionRequests[tab] = nil
+      completionHandler(allowed)
+    }
+  }
+
+  // Asks "Allow http://… to access your location?".
+  static func permissionMessage(_ permissions: [String], _ origin: URL) -> String {
     let asks = permissions.map { name in
       let text = Self.permissions[name]?.ask ?? name
       return text.prefix(1).lowercased() + text.dropFirst()
     }
     let site = origin.absoluteString.hasSuffix("/") ? String(origin.absoluteString.dropLast()) : origin.absoluteString
-    permissionRequests[tab] = PermissionRequest(
-      message: "Allow \(site) to \(ListFormatter.localizedString(byJoining: asks))?",
-      isLocation: permissions == ["geolocation"]
-    ) { [weak self] allowed in
-      self?.permissionRequests[tab] = nil
-      completionHandler(allowed)
-    }
+    return "Allow \(site) to \(ListFormatter.localizedString(byJoining: asks))?"
   }
 
   // Shown as a dialog centered over the dimmed page.
