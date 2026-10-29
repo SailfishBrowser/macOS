@@ -286,20 +286,20 @@ private struct PageHost: NSViewRepresentable {
     container.onMouseDown = onMouseDown
     // A page moving between places (a Peek closing, a split forming) belongs to the newest container;
     // older ones take it back only once it is free.
-    guard container.subviews != [view], context.coordinator.isNew || view.superview == nil else { return }
+    guard container.page !== view, context.coordinator.isNew || view.superview == nil || view.superview === container
+    else { return }
     context.coordinator.isNew = false
     // The page leaving the container is kept as it looked, for the tab switcher.
-    container.subviews.first.map { Engine.shared.captureThumbnail(of: $0) }
+    container.page.map { Engine.shared.captureThumbnail(of: $0) }
     view.autoresizingMask = []
-    container.subviews = [view]
-    container.fitPage()
+    container.show(view)
   }
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
   static func dismantleNSView(_ container: WebContainer, coordinator: Coordinator) {
     // A page whose container goes (a new tab's page is not made yet) is kept as it looked, for the tab switcher.
-    container.subviews.first.map { Engine.shared.captureThumbnail(of: $0) }
+    container.page.map { Engine.shared.captureThumbnail(of: $0) }
     container.subviews = []
   }
 
@@ -311,6 +311,8 @@ private struct PageHost: NSViewRepresentable {
 // Reports clicks in the page, which the page's own view takes.
 final class WebContainer: NSView {
   var onMouseDown: (() -> Void)?
+  // Watches a clear page (a WebKit page before its first paint) for the moment it shows.
+  private var clearPage: NSKeyValueObservation?
   // Set as the layout changes, before the card's animated frame. A wider page is applied at once, so a ⌘S hide has it
   // drawn behind the card's clip before its motion starts; a narrower one waits for the card's first moving frame.
   var restingWidth: CGFloat? {
@@ -320,14 +322,34 @@ final class WebContainer: NSView {
 
   override func resizeSubviews(withOldSize oldSize: NSSize) { fitPage() }
 
+  // The page shown, on top.
+  var page: NSView? { subviews.last }
+
+  // Shows the tab's page in place of the one before it, which stays underneath, as it looks, while the new page is
+  // clear, so a switch between the tab's pages shows no empty frame; the new page takes the clicks.
+  func show(_ view: NSView) {
+    let showing = subviews.last { $0.alphaValue > 0 && $0 !== view }
+    subviews = [view.alphaValue == 0 ? showing : nil, view].compactMap { $0 }
+    fitPage()
+    clearPage = subviews.count > 1
+      ? view.observe(\.alphaValue) { [weak self] _, _ in MainActor.assumeIsolated { self?.uncover() } } : nil
+  }
+
+  private func uncover() {
+    guard let page, page.alphaValue > 0 else { return }
+    clearPage = nil
+    subviews = [page]
+  }
+
   // The page takes the width it comes to rest at, pinned to the card's leading edge and clipped by the card, so a ⌘S
   // lays the engine out once and its new layout lands mid-slide. On a show the narrower page moves with
   // the edge and the card is wider than it until the motion ends; that strip shows the page's own background
   // color, which the engine keeps on its view's backing layer. Before the layout has reported, the page fills the card.
   func fitPage() {
-    guard let page = subviews.first else { return }
-    page.frame = NSRect(x: 0, y: 0, width: restingWidth ?? bounds.width, height: bounds.height)
-    layer?.backgroundColor = page.subviews.first?.layer?.backgroundColor
+    for view in subviews {
+      view.frame = NSRect(x: 0, y: 0, width: restingWidth ?? bounds.width, height: bounds.height)
+    }
+    layer?.backgroundColor = page?.subviews.first?.layer?.backgroundColor
   }
 
   override func viewDidMoveToWindow() {
