@@ -530,10 +530,49 @@ final class WebKitWebView: WKWebView {
     self.init(frame: .zero, configuration: configuration)
   }
 
+  // WebKit offers the page every shortcut first and passes one back to the app only on the page's answer, so a busy or
+  // hung content process would hold the app's shortcuts. A shortcut goes to the page once a script's result shows its
+  // process can answer, and to the main menu when the process cannot answer in time.
+  private static let answerTime: Duration = .milliseconds(250)
+  private var waiting: [Int: NSEvent] = [:]
+  private var waitCount = 0
+  private let offered = NSHashTable<NSEvent>.weakObjects()
+
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     if window != nil {
       page?.movedToWindow()
+    }
+  }
+
+  override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    // WebKit passes back a shortcut the page left as the current event, with AppKit's variants of it such as ⌘+ for ⌘=.
+    guard NSApp.currentEvent.map(offered.contains) != true, window?.firstResponder === self,
+      let menu = NSApp.mainMenu, MenuShortcuts.binds(event, in: menu)
+    else { return super.performKeyEquivalent(with: event) }
+    waitCount += 1
+    let wait = waitCount
+    waiting[wait] = event
+    evaluateJavaScript("0", in: nil, in: WebKitPageScript.world) { [weak self] result in
+      guard let self, let event = waiting.removeValue(forKey: wait) else { return }
+      // The script fails when no process is left to answer.
+      if case .success = result { offer(event) } else { _ = NSApp.mainMenu?.performKeyEquivalent(with: event) }
+    }
+    Task { [weak self] in
+      try? await Task.sleep(for: Self.answerTime)
+      guard let self, let event = waiting.removeValue(forKey: wait),
+        NSApp.mainMenu?.performKeyEquivalent(with: event) != true
+      else { return }
+      offer(event)
+    }
+    return true
+  }
+
+  // The page has the shortcut first, and the menu has it if the view no longer takes keys.
+  private func offer(_ event: NSEvent) {
+    offered.add(event)
+    if !super.performKeyEquivalent(with: event) {
+      _ = NSApp.mainMenu?.performKeyEquivalent(with: event)
     }
   }
 
