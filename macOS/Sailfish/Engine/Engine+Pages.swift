@@ -185,8 +185,8 @@ extension Engine {
     page(tab)?.stop()
   }
 
-  // Shows the tab's page at `index` and reports it at once. A page that is not alive is made from its saved history
-  // and loads it; one without saved history is dropped instead.
+  // Shows the tab's page at `index`, muted as the tab is, and reports it at once. A page that is not alive is made
+  // from its saved history and loads it; one without saved history is dropped instead.
   private func show(_ tab: UUID, _ index: Int) {
     guard let pages = pageRecords[tab], let hidden = shownRecord(tab) else { return }
     let record = pages[index]
@@ -197,6 +197,9 @@ extension Engine {
     }
     hold(tab, hidden.id)
     livePages[hidden.id]?.pauseMedia()
+    if let page = livePages[record.id], let muted = livePages[hidden.id]?.isMuted, page.isMuted != muted {
+      page.isMuted = muted
+    }
     shownPages[tab] = index
     hoveredLinks[tab] = nil
     selections[tab] = nil
