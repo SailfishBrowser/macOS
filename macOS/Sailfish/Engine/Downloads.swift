@@ -1,6 +1,7 @@
 @preconcurrency import EngineCore
 
-// A download's ID is its context's index in downloadContexts and its identifier there.
+// A download's ID is its context's index in downloadContexts and its identifier there; a WebKit page's download's
+// is "wk/<n>".
 extension Engine: @preconcurrency ECDownloadDelegate {
   func browserContext(_ context: ECBrowserContext, downloadDidUpdate download: ECDownload) {
     Self.continuation.yield(.downloaded(Download(
@@ -11,7 +12,9 @@ extension Engine: @preconcurrency ECDownloadDelegate {
   }
 
   func cancelDownload(_ id: Download.ID) {
-    let parts = id.split(separator: "/").map { UInt32($0)! }
+    guard !id.hasPrefix("wk/") else { return WebKitDownloads.shared.cancel(id) }
+    let parts = id.split(separator: "/").compactMap { UInt32($0) }
+    guard parts.count == 2, downloadContexts.indices.contains(Int(parts[0])) else { return }
     downloadContexts[Int(parts[0])].cancelDownload(parts[1])
   }
 }

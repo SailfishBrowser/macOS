@@ -7,6 +7,8 @@ import WebKit
 // A tab's page rendered by WebKit, owning one web view.
 @MainActor final class WebKitPage: NSObject, TabPage, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
   let id: UUID
+  let profile: UUID
+  let incognito: Bool
   let webView: WKWebView
   // Called on every change of the page's URL, title, loading, progress, history or security, and of its favicon.
   var onUpdate: (@MainActor (WebKitPage) -> Void)?
@@ -28,6 +30,8 @@ import WebKit
   // and with it the opener's message handler, so the popup's page takes a controller of its own.
   init(id: UUID, profile: UUID, incognito: Bool, configuration: WKWebViewConfiguration?) {
     self.id = id
+    self.profile = profile
+    self.incognito = incognito
     let fresh = WebKitStores.configuration(profile: profile, incognito: incognito)
     let configuration = configuration ?? fresh
     configuration.userContentController = fresh.userContentController
@@ -156,6 +160,9 @@ import WebKit
     _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
     decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
   ) {
+    if WebKitDownloads.isDownload(action) {
+      return decisionHandler(.download)
+    }
     let engine = Engine.shared
     guard action.targetFrame?.isMainFrame == true, let tab = engine.tab(of: self), let url = action.request.url else {
       return decisionHandler(.allow)
