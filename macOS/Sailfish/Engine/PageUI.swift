@@ -302,7 +302,10 @@ extension Engine {
         [
           ActionMenuItem("Save As…") { page.savePage() },
           ActionMenuItem("Print…") { page.printPage() },
-        ] + (page.translationLanguage.map { [ActionMenuItem("Translate to \($0)") { page.translate() }] } ?? []),
+        ] + (page.translationLanguage.map { [ActionMenuItem("Translate to \($0)") { page.translate() }] } ?? [])
+          + (otherEngine(tab).map { engine in
+            [ActionMenuItem("Open Page in \(engine.name)") { Task { await self.reopen(tab, in: engine) } }]
+          } ?? []),
       ]
       // View Page Source is grouped with Inspect.
       developer.append(ActionMenuItem("View Page Source") { open(URL(string: "view-source:" + url.absoluteString)!) })

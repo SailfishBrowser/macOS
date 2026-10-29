@@ -487,6 +487,8 @@ struct TabsFeature {
     case setIcon(Tab.ID, String?)
     // Shows a tab beside another (and the other's split) at a pane index, or at the right, and selects it.
     case split(Tab.ID, beside: Tab.ID, at: Int? = nil)
+    // Open Page in WebKit or Chromium: the tab's page again in that engine, kept there while it stays on the site.
+    case switchEngine(Tab.ID, PageEngineKind)
     case stop
     case toggleMute(Tab.ID)
     case toggleFolder(Folder.ID)
@@ -977,6 +979,9 @@ struct TabsFeature {
         return edited(.iconChanged(id, from: tab.icon), if: icon != tab.icon)
       case let .split(id, beside, index):
         return split(id, beside: beside, at: index, &state)
+
+      case let .switchEngine(id, kind):
+        return .run { _ in await engine.switchEngine(id, kind) }
 
       case .stop:
         return navigate(state, engine.stop)

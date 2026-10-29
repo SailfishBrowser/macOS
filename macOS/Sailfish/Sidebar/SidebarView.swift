@@ -1801,8 +1801,8 @@ struct SidebarView: View {
       .disabled(below.isEmpty)
   }
 
-  // Order: Copy Link, Share | Change Icon, Rename, Mute, Edit Pinned Page | Open in Split View, Duplicate, Move to |
-  // Archive Tab and Archive Tabs Below, or Remove Favorite.
+  // Order: Copy Link, Share | Change Icon, Rename, Mute, Edit Pinned Page | Open in Split View, Duplicate, Open Page
+  // in WebKit or Chromium, Move to | Archive Tab and Archive Tabs Below, or Remove Favorite.
   @ViewBuilder private func tabMenu(_ tab: Tab) -> some View {
     let app = tab.placement == .favorite ? PreviewApp(tab.pinnedURL ?? tab.url) : nil
     if app == .calendar {
@@ -1849,6 +1849,9 @@ struct SidebarView: View {
     Button("Open in Split View") { splitBeside.map { send(.split(tab.id, beside: $0)) } }
       .disabled(splitBeside == nil)
     Button("Duplicate") { send(.duplicate(tab.id)) }
+    if let engine = Engine.shared.otherEngine(tab.id) {
+      Button("Open Page in \(engine.name)") { send(.switchEngine(tab.id, engine)) }
+    }
     // An incognito window has no favorites.
     if tab.placement != .favorite, !store.isIncognito {
       Button("Favorite Tab") { send(.move(tab.id, .favorite, before: nil)) }

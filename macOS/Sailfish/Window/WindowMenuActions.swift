@@ -100,6 +100,12 @@ extension WindowController: NSMenuItemValidation {
     store.send(.tab(.togglePinnedSection, in: space.id), animation: Motion.row)
   }
 
+  // Open Page in WebKit or Chromium: the shown page again in the other engine.
+  @objc func openPageInOtherEngine(_ sender: Any?) {
+    guard let tab = space.selectedTabID, let engine = Engine.shared.otherEngine(tab) else { return }
+    store.send(.tab(.switchEngine(tab, engine), in: space.id))
+  }
+
   @objc func reloadBypassingCache(_ sender: Any?) {
     space.selectedTabID.flatMap { Engine.shared.page($0) }?.reloadBypassingCache()
   }
@@ -346,6 +352,10 @@ extension WindowController: NSMenuItemValidation {
       let isShown = Engine.shared.readers[tab] != nil
       item.title = isShown ? "Hide Reader View" : "Show Reader View"
       return isShown || Engine.shared.readerable.contains(tab)
+    case #selector(openPageInOtherEngine(_:)):
+      let engine = space.selectedTabID.flatMap { Engine.shared.otherEngine($0) }
+      item.title = "Open Page in \((engine ?? .webkit).name)"
+      return engine != nil
     case #selector(useSelectionForFind(_:)):
       return space.selectedTabID.flatMap { Engine.shared.selections[$0] } != nil
     // Enabled for any loaded page, as in Chrome: the page keeps a selection the engine never reported, such as

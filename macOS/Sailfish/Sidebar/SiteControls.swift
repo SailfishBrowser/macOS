@@ -15,6 +15,7 @@ struct SiteControls: View {
     let _ = revision
     let page = Engine.shared.page(tab)
     let permissions = Engine.shared.sitePermissions(tab)
+    let otherEngine = Engine.shared.otherEngine(tab)
     VStack(alignment: .leading, spacing: 0) {
       // Shot 57: 49 pt tiles 7 apart.
       HStack(spacing: 7) {
@@ -69,6 +70,10 @@ struct SiteControls: View {
           Button("Copy Link") { copyLink(url) }
           Button("Save Page…") { page?.savePage() }
           Button("Print…") { page?.printPage() }
+          if let otherEngine {
+            Divider()
+            Button("Open Page in \(otherEngine.name)") { Task { await Engine.shared.reopen(tab, in: otherEngine) } }
+          }
         } label: {
           Image(systemName: "ellipsis")
             .font(.system(size: 12, weight: .semibold))
