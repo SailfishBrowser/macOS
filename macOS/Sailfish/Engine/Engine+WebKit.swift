@@ -66,6 +66,7 @@ extension Engine {
       // A typed URL keeps Chromium's typed transition; a link or form from a WebKit page carries its body and
       // referrer.
       let contents = makeContents(tab, page: record.id, context)
+      showWhenDrawn(contents)
       if request.attribution == .user {
         contents.loadURL(url)
       } else {

@@ -484,6 +484,11 @@ EC_EXPORT
 // a back, forward or history entry step.
 - (void)webContents:(ECWebContents*)contents
     didCommitNavigationIsHistory:(BOOL)isHistory;
+// The view drew a frame of the page's document: the first frame with content
+// of each document a navigation commits, and the first frame drawn each time
+// the view is shown again (moved into a window, uncovered) after its document
+// drew. The frame is on screen, or reaches it on the display's next refresh.
+- (void)webContentsDidPresentFirstFrame:(ECWebContents*)contents;
 // A string a frame's script passed to the postMessage() of the object named
 // `name` (addMessageObjectNamed:). `origin` is the frame's origin, nil when
 // it is opaque, as a data: page's, or local, as a file: page's. Messages

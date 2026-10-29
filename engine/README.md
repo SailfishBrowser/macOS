@@ -327,6 +327,15 @@ changes what an existing call does.
   read and write the profile's `HostZoomMap` level for the host, converted
   as `ZoomController::GetZoomPercent` converts it; the default percentage
   clears the host's level.
+- `webContentsDidPresentFirstFrame:` lets the shell keep the page it
+  replaces on screen until a Chromium page has drawn. It is sent from
+  `DidFirstVisuallyNonEmptyPaint`, which Blink reports from the presentation
+  feedback of the primary page's first frame with content, and, when
+  `OnVisibilityChanged` turns `VISIBLE` after that paint, once a one-pixel
+  `CopyFromSurface` has completed. Showing the view gives it a new
+  compositor and a new surface id; the copy request marks the page's surface
+  damaged and is taken only when the display draws that id or a newer one,
+  so it completes on the first frame that draws the page.
 
 ## Main-world scripts
 
