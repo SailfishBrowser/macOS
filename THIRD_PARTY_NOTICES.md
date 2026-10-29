@@ -24,6 +24,19 @@ unchanged except for an added manifest `key`; its license is `LICENSE.txt` in
 Copyright (c) 2010 Arc90 Inc. Apache License 2.0 (`Readability-0.6.0-LICENSE.md` beside it). The test fixtures
 in `macOS/SailfishTests/Fixtures/Reader` include a page from its test suite.
 
+## Ardia
+
+Four files in `macOS/Sailfish/Engine` are adapted from Ardia's own source files at commit a01a909,
+https://github.com/mantrakp04/ardia. Ardia, Copyright 2026 Mantra Patel. Apache License 2.0, the license of
+Sailfish ([LICENSE](LICENSE)). Sailfish changed each of them, and each keeps Ardia's copyright line at its top.
+Ardia's engine patches and its bundled uBlock Origin are GPL-3.0, and Sailfish uses neither.
+
+- `WebKitPageScript.swift`, from `packages/ardiacore/ios/WebKitPageScript.swift`
+- `WebKitDownloads.swift`, from `packages/ardiacore/ios/WebKitDownloads.swift`
+- `WebKitStoreRemovals.swift`, from `packages/ardiacore/ios/WebKitStoreRemovals.swift`
+- `ProtectedMedia.swift`, from the protected-media detector in `packages/ardiacore/ios/page_script.js`, lines 763
+  to 833
+
 ## Sparkle
 
 Sparkle 2.10.1, https://sparkle-project.org. Copyright (c) 2006-2013 Andy Matuschak, (c) 2009-2013 Elgato

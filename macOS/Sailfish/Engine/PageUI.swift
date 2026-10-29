@@ -45,6 +45,9 @@ extension Engine {
     _ contents: ECWebContents, requestsPermissions permissions: [String], forOrigin origin: URL,
     completionHandler: @escaping (Bool) -> Void
   ) {
+    if defers(contents, {
+      self.webContents(contents, requestsPermissions: permissions, forOrigin: origin, completionHandler: completionHandler)
+    }) { return }
     guard let tab = tab(of: contents) else { return completionHandler(false) }
     // Asks "Allow http://… to access your location?".
     let asks = permissions.map { name in
@@ -67,6 +70,11 @@ extension Engine {
     _ contents: ECWebContents, runJavaScriptDialog type: ECJavaScriptDialogType, message: String,
     defaultText: String, completionHandler: @escaping (Bool, String) -> Void
   ) {
+    if defers(contents, {
+      self.webContents(
+        contents, runJavaScriptDialog: type, message: message, defaultText: defaultText,
+        completionHandler: completionHandler)
+    }) { return }
     guard let tab = tab(of: contents) else { return completionHandler(false, "") }
     let host = contents.url?.host().map { host in contents.url?.port.map { "\(host):\($0)" } ?? host }
     dialogs[tab] = PageDialog(
@@ -82,6 +90,11 @@ extension Engine {
     _ contents: ECWebContents, runFileChooserWithAcceptTypes acceptTypes: [String], allowsMultiple: Bool,
     directory: Bool, completionHandler: @escaping ([URL]?) -> Void
   ) {
+    if defers(contents, {
+      self.webContents(
+        contents, runFileChooserWithAcceptTypes: acceptTypes, allowsMultiple: allowsMultiple, directory: directory,
+        completionHandler: completionHandler)
+    }) { return }
     guard let tab = tab(of: contents) else { return completionHandler(nil) }
     let panel = NSOpenPanel()
     panel.canChooseFiles = !directory
@@ -96,14 +109,14 @@ extension Engine {
   }
 
   // Shows `sheet` on the tab's window once the tab is on screen; a closed tab is answered with `.abort`.
-  private func present(
+  func present(
     _ sheet: NSWindow, for tab: UUID,
     _ begin: @escaping (NSWindow, @escaping (NSApplication.ModalResponse) -> Void) -> Void,
     completion: @escaping (NSApplication.ModalResponse) -> Void
   ) {
-    guard let page = self.page(tab) else { return completion(.abort) }
+    guard let id = shownRecord(tab)?.id, let page = self.page(tab) else { return completion(.abort) }
     guard let window = page.view.window else {
-      pendingSheets[tab, default: []].append { [weak self] in
+      pendingSheets[id, default: []].append { [weak self] in
         self?.present(sheet, for: tab, begin, completion: completion)
       }
       return
@@ -116,12 +129,12 @@ extension Engine {
   }
 
   func webContents(_ contents: ECWebContents, didFindMatches matches: Int, activeMatch: Int) {
-    guard let tab = tab(of: contents) else { return }
+    guard let tab = shownTab(of: contents) else { return }
     Self.continuation.yield(.found(tab: tab, matches: matches, activeMatch: activeMatch))
   }
 
   func webContentsDidChangeZoom(_ contents: ECWebContents) {
-    guard let tab = tab(of: contents) else { return }
+    guard let tab = shownTab(of: contents) else { return }
     Self.continuation.yield(.zoomChanged(tab: tab, percent: contents.zoomPercent))
   }
 
@@ -130,6 +143,11 @@ extension Engine {
     _ contents: ECWebContents, requestsInstallOfExtensionNamed name: String, icon: NSImage?, permissions: [String],
     completionHandler: @escaping (Bool) -> Void
   ) {
+    if defers(contents, {
+      self.webContents(
+        contents, requestsInstallOfExtensionNamed: name, icon: icon, permissions: permissions,
+        completionHandler: completionHandler)
+    }) { return }
     guard let tab = tab(of: contents) else { return completionHandler(false) }
     let alert = NSAlert()
     alert.messageText = "Add “\(name)”?"
@@ -145,20 +163,19 @@ extension Engine {
   }
 
   func webContents(_ contents: ECWebContents, didUpdateTargetURL url: URL?) {
-    guard let tab = tab(of: contents) else { return }
+    guard let tab = shownTab(of: contents) else { return }
     // Written only on change, so repeated events do not invalidate the views reading it.
     if hoveredLinks[tab] != url { hoveredLinks[tab] = url }
   }
 
   func webContents(_ contents: ECWebContents, didChangeSelection selectionText: String) {
-    guard let tab = tab(of: contents) else { return }
+    guard let tab = shownTab(of: contents) else { return }
     let selection = selectionText.isEmpty ? nil : selectionText
     if selections[tab] != selection { selections[tab] = selection }
   }
 
   func webContentsDidRequestClose(_ contents: ECWebContents) {
-    guard let tab = tab(of: contents) else { return }
-    Self.continuation.yield(.closeRequested(tab: tab))
+    closeRequested(by: contents)
   }
 
   func webContents(_ contents: ECWebContents, showContextMenu menu: ECContextMenu) {

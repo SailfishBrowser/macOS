@@ -39,7 +39,7 @@ extension SnapshotWriter where Value == Snapshot {
 }
 
 extension SnapshotWriter where Value == Set<UUID> {
-  // The tabs whose saved history the Sessions folder keeps.
+  // The pages whose saved history the Sessions and WebKitSessions folders keep.
   static var sessions: SnapshotWriter {
     SnapshotWriter { ids in
       @Dependency(\.webEngine) var engine

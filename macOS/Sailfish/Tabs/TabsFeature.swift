@@ -32,10 +32,21 @@ struct Tab: Codable, Equatable, Identifiable {
   var openerID: Tab.ID?
   // The group a Today tab is in.
   var groupID: TabGroup.ID?
+  // The tab's pages once its page has reported them (see `pages`), and the one it shows.
+  var savedPages: [PageRecord]?
+  var shownPage = 0
 
   enum CodingKeys: String, CodingKey {
     case id, url, title, placement, pinnedURL, customTitle, icon, createdAt, lastActiveAt, groupID
+    case savedPages = "pages", shownPage
   }
+
+  // A tab whose page never reported has one page, Chromium's, under the tab's id.
+  var pages: [PageRecord] {
+    get { savedPages ?? [PageRecord(id: id, engine: .chromium)] }
+    set { savedPages = newValue }
+  }
+  var engine: PageEngineKind { pages[shownPage].engine }
 
   var displayTitle: String { customTitle ?? title }
   // A pinned tab that navigated away from its pinned URL.
@@ -48,7 +59,7 @@ struct Tab: Codable, Equatable, Identifiable {
   var page: WebPage {
     WebPage(
       url: url, title: title, favicon: favicon, isLoading: isLoading, canGoBack: canGoBack, canGoForward: canGoForward,
-      isAudible: isAudible, isMuted: isMuted, media: media)
+      isAudible: isAudible, isMuted: isMuted, media: media, pages: pages, shownPage: shownPage)
   }
 
   mutating func update(_ page: WebPage) {
@@ -64,6 +75,27 @@ struct Tab: Codable, Equatable, Identifiable {
     isAudible = page.isAudible
     isMuted = page.isMuted
     media = page.media
+    pages = page.pages
+    shownPage = page.shownPage
+  }
+}
+
+// Tabs saved before tabs had pages decode with one Chromium page under the tab's id.
+extension Tab {
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(UUID.self, forKey: .id)
+    url = try container.decode(URL.self, forKey: .url)
+    title = try container.decode(String.self, forKey: .title)
+    placement = try container.decode(Placement.self, forKey: .placement)
+    pinnedURL = try container.decodeIfPresent(URL.self, forKey: .pinnedURL)
+    customTitle = try container.decodeIfPresent(String.self, forKey: .customTitle)
+    icon = try container.decodeIfPresent(String.self, forKey: .icon)
+    createdAt = try container.decode(Date.self, forKey: .createdAt)
+    lastActiveAt = try container.decode(Date.self, forKey: .lastActiveAt)
+    groupID = try container.decodeIfPresent(TabGroup.ID.self, forKey: .groupID)
+    savedPages = try container.decodeIfPresent([PageRecord].self, forKey: .savedPages)
+    shownPage = try container.decodeIfPresent(Int.self, forKey: .shownPage) ?? 0
   }
 }
 
@@ -787,16 +819,16 @@ struct TabsFeature {
         // A link from a grouped tab joins its group, as in Chromium.
         tab.groupID = state.tabs[id: opener]?.groupID
         state.tabs.insert(tab, at: index)
-        return .merge(.send(.delegate(.openedInBackground(tab.id))), .run { [id = tab.id, profile = state.profileID, incognito = state.isIncognito] _ in
-          await engine.create(id, profile, incognito)
-          await engine.load(id, url)
+        return .merge(.send(.delegate(.openedInBackground(tab.id))), .run { [tab, profile = state.profileID, incognito = state.isIncognito] _ in
+          await engine.create(tab.id, profile, incognito, tab.pages, tab.shownPage)
+          await engine.load(tab.id, url)
         })
 
       case let .preload(id):
         guard let tab = state.tabs[id: id], !tab.isLive else { return .none }
         state.tabs[id: id]?.isLive = true
         return .run { [profile = state.profileID, incognito = state.isIncognito] _ in
-          await engine.create(id, profile, incognito)
+          await engine.create(id, profile, incognito, tab.pages, tab.shownPage)
           await engine.load(id, tab.url)
         }
 
@@ -1285,7 +1317,7 @@ struct TabsFeature {
     }
     return .merge(tabs.map { tab in
       .run { [profile = state.profileID, incognito = state.isIncognito] _ in
-        await engine.create(tab.id, profile, incognito)
+        await engine.create(tab.id, profile, incognito, tab.pages, tab.shownPage)
         if tab.isMuted {
           await engine.setMuted(tab.id, true)
         }

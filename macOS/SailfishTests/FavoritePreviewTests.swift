@@ -16,7 +16,7 @@ final class FavoritePreviewTests: XCTestCase {
     let store = TestStore(initialState: space) {
       TabsFeature()
     } withDependencies: {
-      $0.webEngine.create = { _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _ in }
       $0.webEngine.load = { _, url in loaded.withValue { $0.append(url) } }
     }
 

@@ -20,6 +20,19 @@ import AppKit
   func showConsole()
   func inspectElement()
   func perform(_ command: EditCommand)
+  // What the tab's page list drives: the page's own history, its state as the tab reports it, and its end.
+  var loadProgress: Double { get }
+  var canGoBack: Bool { get }
+  var canGoForward: Bool { get }
+  var sessionState: Data? { get }
+  func history(of page: UUID) -> PageHistory
+  func webPage(pages: [PageRecord], shown: Int) -> WebPage
+  func goBack()
+  func goForward()
+  func go(to index: Int)
+  func reload()
+  func pauseMedia()
+  func close()
 }
 
 enum EditCommand {
@@ -32,6 +45,13 @@ struct HistoryEntry: Equatable, Sendable {
   let index: Int
   let url: URL
   let title: String
+}
+
+// A page's own history, nearest first, with the entry it is at.
+struct PageHistory {
+  let back: [HistoryEntry]
+  let current: HistoryEntry?
+  let forward: [HistoryEntry]
 }
 
 // What a page's context menu was opened on.
@@ -72,6 +92,27 @@ extension ECWebContents: TabPage {
 
   func printPage() {
     self.print()
+  }
+
+  func history(of page: UUID) -> PageHistory {
+    let back = backEntries
+    let entry = { (item: ECNavigationEntry) in HistoryEntry(page: page, index: item.index, url: item.url, title: item.title) }
+    return PageHistory(
+      back: back.map(entry),
+      current: url.map { HistoryEntry(page: page, index: back.first.map { $0.index + 1 } ?? 0, url: $0, title: title) },
+      forward: forwardEntries.map(entry))
+  }
+
+  func webPage(pages: [PageRecord], shown: Int) -> WebPage {
+    WebPage(
+      url: url, title: title, favicon: favicon, isLoading: isLoading, canGoBack: canGoBack, canGoForward: canGoForward,
+      isAudible: isAudible, isMuted: isMuted, media: media, pages: pages, shownPage: shown)
+  }
+
+  // The entry is looked up again by its index, as a menu's copy may be stale.
+  func go(to index: Int) {
+    guard let entry = (backEntries + forwardEntries).first(where: { $0.index == index }) else { return }
+    go(to: entry)
   }
 
   func perform(_ command: EditCommand) {

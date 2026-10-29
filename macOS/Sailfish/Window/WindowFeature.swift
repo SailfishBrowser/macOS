@@ -165,7 +165,8 @@ struct WindowFeature {
     // The archived tab comes back under a new id once its history is copied to it.
     case archivedHistoryCopied(ArchivedTab.ID, to: Tab.ID)
     // Undo reopens a closed Peek as the same tab, so that its saved history comes back.
-    case peek(URL, from: Tab.ID, at: CGPoint, reusing: Tab.ID? = nil)
+    // Undo brings back a closed Peek's tab, with its pages.
+    case peek(URL, from: Tab.ID, at: CGPoint, reusing: Tab? = nil)
     case peekUpdated(WebPage)
     case showCommandBar
     // New Split: the command bar, whose page opens beside the selected tab.
@@ -347,17 +348,21 @@ struct WindowFeature {
 
       case let .peek(url, source, origin, reused):
         let previous = state.peek?.tab.id
-        let tab = Tab(
-          id: reused ?? uuid(), url: url, title: url.host() ?? url.absoluteString, placement: .unpinned, createdAt: now,
-          lastActiveAt: now, isLive: true)
+        var tab = Tab(
+          id: reused?.id ?? uuid(), url: url, title: url.host() ?? url.absoluteString, placement: .unpinned,
+          createdAt: now, lastActiveAt: now, isLive: true)
+        if let reused {
+          tab.pages = reused.pages
+          tab.shownPage = reused.shownPage
+        }
         state.peek = Peek(tab: tab, source: source, origin: origin)
         return .merge(
-          reused.map { .cancel(id: PeekClose(tab: $0)) } ?? .none,
-          .run { [space = state.spaces.selected] _ in
+          reused.map { .cancel(id: PeekClose(tab: $0.id)) } ?? .none,
+          .run { [space = state.spaces.selected, tab] _ in
             if let previous {
               await engine.close(previous)
             }
-            await engine.create(tab.id, space.profileID, space.isIncognito)
+            await engine.create(tab.id, space.profileID, space.isIncognito, tab.pages, tab.shownPage)
             await engine.load(tab.id, url)
           }
         )
@@ -840,7 +845,7 @@ struct WindowFeature {
       guard state.spaces.spaces[id: space]?.tabs[id: peek.source] != nil else { return .none }
       return .concatenate(
         .send(.spaces(.select(space))), .send(.tab(.select(peek.source), in: space)),
-        .send(.peek(peek.tab.url, from: peek.source, at: peek.origin, reusing: peek.tab.id)))
+        .send(.peek(peek.tab.url, from: peek.source, at: peek.origin, reusing: peek.tab)))
     case let .deleteFolder(space, removal):
       guard let name = state.spaces.spaces[id: space]?.name else { return .none }
       return .merge(
