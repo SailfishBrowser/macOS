@@ -47,6 +47,13 @@ struct WebKitMediaState {
 }
 
 extension WebKitPage {
+  // A macOS web view has no Picture in Picture unless WebKit's private allowsPictureInPictureMediaPlayback is on.
+  static func allowPictureInPicture(_ configuration: WKWebViewConfiguration) {
+    let preferences = configuration.preferences
+    guard preferences.responds(to: NSSelectorFromString("_setAllowsPictureInPictureMediaPlayback:")) else { return }
+    preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")
+  }
+
   var isAudible: Bool { !mediaState.audibleFrames.isEmpty }
 
   var media: PageMedia? {

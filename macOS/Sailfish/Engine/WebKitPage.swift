@@ -33,6 +33,7 @@ import WebKit
     let fresh = WebKitStores.configuration(profile: profile, incognito: incognito)
     let configuration = configuration ?? fresh
     configuration.userContentController = fresh.userContentController
+    Self.allowPictureInPicture(configuration)
     webView = WKWebView(frame: .zero, configuration: configuration)
     super.init()
     fresh.userContentController.add(self, contentWorld: WebKitPageScript.world, name: "sailfish")
