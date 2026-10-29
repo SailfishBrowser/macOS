@@ -195,6 +195,7 @@ extension Engine {
       guard restoredPages.remove(record.id) != nil else { return closePage(record.id, of: tab) }
       (page as? ECWebContents)?.loadIfNeeded()
     }
+    (livePages[record.id] as? WebKitPage)?.reshow()
     hold(tab, hidden.id)
     livePages[hidden.id]?.pauseMedia()
     shownPages[tab] = index

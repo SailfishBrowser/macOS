@@ -159,6 +159,17 @@ import WebKit
     webView.alphaValue = 1
   }
 
+  // Shown again by Back or Forward: clear until its next frame, as its content returns a frame or two after its
+  // view comes back to the window. A page still in the window, under the one that replaced it, shows at once.
+  func reshow() {
+    guard webView.alphaValue > 0, webView.window == nil else { return }
+    webView.alphaValue = 0
+    webView.callAsyncJavaScript(
+      "await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))", arguments: [:],
+      in: nil, in: WebKitPageScript.world
+    ) { [weak self] _ in self?.painted() }
+  }
+
   // MARK: Navigation
 
   // The clauses keep this order, each its task's: downloads; a modified link or form opening elsewhere; the
