@@ -118,6 +118,58 @@ namespace {
 constexpr int kSessionStateVersion = 1;
 constexpr int kSessionEntryMaxSize = 1 << 20;
 
+// The content settings of permissions the user set for the URL's site.
+NSDictionary<NSString*, NSNumber*>* SitePermissions(Profile* profile,
+                                                     const GURL& url) {
+  NSMutableDictionary<NSString*, NSNumber*>* permissions =
+      [NSMutableDictionary dictionary];
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile);
+  for (const content_settings::ContentSettingsInfo* info :
+       *content_settings::ContentSettingsRegistry::GetInstance()) {
+    ContentSettingsType type = info->website_settings_info()->type();
+    std::optional<permissions::RequestType> request =
+        permissions::ContentSettingsTypeToRequestTypeIfExists(type);
+    if (!request || !permissions::PermissionUtil::IsPermission(type)) {
+      continue;
+    }
+    content_settings::SettingInfo setting_info;
+    ContentSetting setting =
+        map->GetContentSetting(url, url, type, &setting_info);
+    bool decided =
+        setting == CONTENT_SETTING_ALLOW || setting == CONTENT_SETTING_BLOCK;
+    if (setting_info.source != content_settings::SettingSource::kUser ||
+        setting_info.primary_pattern == ContentSettingsPattern::Wildcard() ||
+        !decided) {
+      continue;
+    }
+    permissions[@(permissions::PermissionKeyForRequestType(*request))] =
+        @(setting == CONTENT_SETTING_ALLOW);
+  }
+  return permissions;
+}
+
+void SetSitePermission(Profile* profile,
+                       const GURL& url,
+                       NSString* permission,
+                       BOOL allowed) {
+  for (const content_settings::ContentSettingsInfo* info :
+       *content_settings::ContentSettingsRegistry::GetInstance()) {
+    ContentSettingsType type = info->website_settings_info()->type();
+    std::optional<permissions::RequestType> request =
+        permissions::ContentSettingsTypeToRequestTypeIfExists(type);
+    if (request &&
+        std::string_view(permission.UTF8String) ==
+            permissions::PermissionKeyForRequestType(*request)) {
+      HostContentSettingsMapFactory::GetForProfile(profile)
+          ->SetContentSettingDefaultScope(
+              url, url, type,
+              allowed ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
+      return;
+    }
+  }
+}
+
 // Asks the shell instead of showing Chrome's permission bubble.
 class PermissionPromptBridge : public permissions::PermissionPrompt {
  public:
@@ -1041,59 +1093,16 @@ class OtherSiteLinkThrottle : public content::NavigationThrottle {
       ->ShowTranslateUI(/*auto_translate=*/true, /*triggered_from_menu=*/true);
 }
 
-// The content settings of permissions the user set for the site.
 - (NSDictionary<NSString*, NSNumber*>*)sitePermissions {
-  NSMutableDictionary<NSString*, NSNumber*>* permissions =
-      [NSMutableDictionary dictionary];
-  if (!_contents) {
-    return permissions;
-  }
-  GURL url = _contents->GetLastCommittedURL();
-  HostContentSettingsMap* map =
-      HostContentSettingsMapFactory::GetForProfile(_context.profile);
-  for (const content_settings::ContentSettingsInfo* info :
-       *content_settings::ContentSettingsRegistry::GetInstance()) {
-    ContentSettingsType type = info->website_settings_info()->type();
-    std::optional<permissions::RequestType> request =
-        permissions::ContentSettingsTypeToRequestTypeIfExists(type);
-    if (!request || !permissions::PermissionUtil::IsPermission(type)) {
-      continue;
-    }
-    content_settings::SettingInfo setting_info;
-    ContentSetting setting =
-        map->GetContentSetting(url, url, type, &setting_info);
-    bool decided =
-        setting == CONTENT_SETTING_ALLOW || setting == CONTENT_SETTING_BLOCK;
-    if (setting_info.source != content_settings::SettingSource::kUser ||
-        setting_info.primary_pattern == ContentSettingsPattern::Wildcard() ||
-        !decided) {
-      continue;
-    }
-    permissions[@(permissions::PermissionKeyForRequestType(*request))] =
-        @(setting == CONTENT_SETTING_ALLOW);
-  }
-  return permissions;
+  return _contents ? SitePermissions(_context.profile,
+                                     _contents->GetLastCommittedURL())
+                   : @{};
 }
 
 - (void)setSitePermission:(NSString*)permission allowed:(BOOL)allowed {
-  if (!_contents) {
-    return;
-  }
-  GURL url = _contents->GetLastCommittedURL();
-  for (const content_settings::ContentSettingsInfo* info :
-       *content_settings::ContentSettingsRegistry::GetInstance()) {
-    ContentSettingsType type = info->website_settings_info()->type();
-    std::optional<permissions::RequestType> request =
-        permissions::ContentSettingsTypeToRequestTypeIfExists(type);
-    if (request &&
-        std::string_view(permission.UTF8String) ==
-            permissions::PermissionKeyForRequestType(*request)) {
-      HostContentSettingsMapFactory::GetForProfile(_context.profile)
-          ->SetContentSettingDefaultScope(
-              url, url, type,
-              allowed ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
-      return;
-    }
+  if (_contents) {
+    SetSitePermission(_context.profile, _contents->GetLastCommittedURL(),
+                      permission, allowed);
   }
 }
 
