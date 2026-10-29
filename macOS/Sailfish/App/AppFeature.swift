@@ -357,6 +357,8 @@ struct AppFeature {
       case .launched:
         return .merge(
           .run { send in
+            // Before any tab opens a WebKit store.
+            await engine.removeDeletedStores()
             do {
               await send(.loaded(.success(try persistence.load().map { try Snapshot.decode($0) })))
             } catch let error where Self.isUnreadable(error) {

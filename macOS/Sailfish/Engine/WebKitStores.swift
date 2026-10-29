@@ -29,10 +29,19 @@ import WebKit
     return store
   }
 
-  // Ends the profile's incognito session, so the next one starts with a fresh store.
+  // Ends the profile's incognito session with its data removed, so the next one starts with a fresh store.
   static func dropIncognitoStore(profile: UUID) {
-    incognitoStores[profile] = nil
+    incognitoStores.removeValue(forKey: profile)?
+      .removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {}
     dropIncognitoWarmView(profile: profile)
+  }
+
+  // Takes a deleted profile's store out of use, with its data removed: a page of the profile gets a store that keeps
+  // nothing from here on, so nothing writes to the old one while it is removed.
+  static func retireStore(profile: UUID) async {
+    let store = stores[profile]
+    stores[profile] = .nonPersistent()
+    await store?.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
   }
 
   // A new configuration on the profile's store, with the page and password scripts installed. Each page adds itself as

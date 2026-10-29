@@ -201,6 +201,14 @@ import WebKit
       {
         return decisionHandler(.cancel)
       }
+      // A link to another site from a favorite or pinned tab opens in Peek, as Chromium's pages do.
+      if cause == .link, engine.tabsPeekingOtherSites.contains(tab), let from = committedURL,
+        ["http", "https"].contains(from.scheme), ["http", "https"].contains(url.scheme),
+        engine.siteOf(from) != engine.siteOf(url)
+      {
+        decisionHandler(.cancel)
+        return engine.requestNewWindow(tab, url, disposition: .newWindow, modifierFlags: [], from: webView)
+      }
       @Shared(.siteEngines) var siteEngines
       if pageEngine(for: url, from: .webkit, choice: engine.choices[tab], cause: cause, siteEngines) == .chromium {
         decisionHandler(.cancel)

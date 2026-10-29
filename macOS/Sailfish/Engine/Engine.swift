@@ -60,6 +60,9 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   // The context of each tab's web contents, released before their context closes, and the tab's profile.
   @ObservationIgnored var tabContexts: [UUID: ECBrowserContext] = [:]
   @ObservationIgnored var tabProfiles: [UUID: UUID] = [:]
+  // Favorites and pinned tabs whose links to other sites open in Peek, set on their Chromium pages and read by their
+  // WebKit pages.
+  @ObservationIgnored var tabsPeekingOtherSites: Set<UUID> = []
   // The engine and site each tab was last switched to, held while its shown page stays on that site.
   @ObservationIgnored var choices: [UUID: EngineChoice] = [:]
   // When each tab's last search was asked for: the effects that ask arrive in no fixed order.
@@ -145,6 +148,16 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   }
 
   func syncWindow(_ space: Space, tabs shown: [Tab], focused: Bool, peeksLinksToOtherSites: Bool) {
+    // Links to other sites open from favorites and pinned tabs in Peek, unless Settings > Links turns it off.
+    for tab in shown {
+      let peeks = peeksLinksToOtherSites && tab.placement != .unpinned
+      self.contents(tab.id)?.opensLinksToOtherSitesInNewWindow = peeks
+      if peeks {
+        tabsPeekingOtherSites.insert(tab.id)
+      } else {
+        tabsPeekingOtherSites.remove(tab.id)
+      }
+    }
     let contents = shown.compactMap { self.contents($0.id) }
     if windows[space.id] == nil, !contents.isEmpty {
       let window = ECWindow(browserContext: loadedContext(space.profileID, space.isIncognito))
@@ -153,10 +166,6 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     }
     guard let window = windows[space.id] else { return }
     window.tabs = contents
-    // Links to other sites open from favorites and pinned tabs in Peek, unless Settings > Links turns it off.
-    for tab in shown {
-      self.contents(tab.id)?.opensLinksToOtherSitesInNewWindow = peeksLinksToOtherSites && tab.placement != .unpinned
-    }
     window.activeTab = shown.first { $0.id == space.selectedTabID }.flatMap { self.contents($0.id) }
     if window.isFocused != focused {
       window.isFocused = focused
@@ -164,9 +173,13 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   }
 
   // A Little Sailfish's page as a window of its own to the context's extensions, which the PDF viewer is one of:
-  // its tab had none, and the viewer left the page blank.
+  // its tab had none, and the viewer left the page blank. While it shows a WebKit page the window has no tab, as a
+  // space's window leaves such a tab out.
   func syncLittleWindow(_ id: UUID, profile: UUID, tab: UUID) {
-    guard let contents = self.contents(tab) else { return }
+    guard let contents = self.contents(tab) else {
+      windows[id]?.tabs = []
+      return
+    }
     if windows[id] == nil {
       let window = ECWindow(browserContext: loadedContext(profile, false))
       window.delegate = windowDelegate
@@ -252,10 +265,12 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     Autocomplete.forget(context)
     closeTabs(of: context)
     context.close()
+    WebKitStores.dropIncognitoStore(profile: profile)
   }
 
-  // Closes the profile's context, then has the engine delete its data.
-  func deleteProfile(_ profile: UUID) {
+  // Closes the profile's context and pages, then has the engine delete its data and removes its WebKit store and
+  // folder.
+  func deleteProfile(_ profile: UUID) async {
     WebKitDownloads.shared.forget(profile: profile)
     if let context = contexts.removeValue(forKey: profile) {
       Autocomplete.forget(context)
@@ -263,6 +278,9 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
       context.close()
     }
     ECBrowserContext.deleteProfile(atPath: Self.userDataDir + "/" + profile.uuidString)
+    try? FileManager.default.removeItem(at: URL.dataDirectory.appending(path: "WebKit/\(profile.uuidString)"))
+    await WebKitStores.retireStore(profile: profile)
+    await WebKitStoreRemovals.remove(profile)
   }
 
   private func closeTabs(of context: ECBrowserContext) {
@@ -379,6 +397,7 @@ extension WebEngineClient: DependencyKey {
     discard: { await Engine.shared.discard($0) },
     closeIncognito: { await Engine.shared.closeIncognito($0) },
     deleteProfile: { await Engine.shared.deleteProfile($0) },
+    removeDeletedStores: { await WebKitStoreRemovals.removePending() },
     find: { tab, string, forward, requested in
       await Engine.shared.find(tab, requested, .find(string, forward: forward))
     },
