@@ -1,10 +1,6 @@
 import AppKit
 @preconcurrency import EngineCore
 
-enum PageEngineKind: String, Codable, Sendable {
-  case chromium, webkit
-}
-
 // One of a tab's pages: its id, which names its saved history, and the engine that renders it.
 struct PageRecord: Codable, Equatable, Sendable {
   let id: UUID
