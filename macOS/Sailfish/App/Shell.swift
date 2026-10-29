@@ -220,7 +220,8 @@ final class Shell: NSObject, NSMenuDelegate {
   // hovered link or a typed address would open in WebKit. Runs once.
   private func warmWebKit() {
     guard store.isLoaded else { return }
-    warmToken = nil
+    // NSObject keeps every observation token it returns, so only cancelling ends this one.
+    warmToken?.cancel()
     let profiles = Set(
       store.windows.flatMap(\.spaces.spaces).filter { $0.tabs.contains { $0.engine == .webkit } }.map(\.profileID))
     DispatchQueue.main.async {
