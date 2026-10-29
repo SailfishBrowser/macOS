@@ -2573,8 +2573,8 @@ private struct PermissionPrompt: View {
         Text(request.message).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
       }
       HStack(spacing: 8) {
-        button("Not Now", fill: 0.06) { request.answer(false) }
-        button("Allow", fill: 0.36) { request.answer(true) }
+        PromptButton(title: "Not Now", fill: 0.06) { request.answer(false) }
+        PromptButton(title: "Allow", fill: 0.36) { request.answer(true) }
       }
     }
     .padding(.horizontal, 9)
@@ -2582,9 +2582,15 @@ private struct PermissionPrompt: View {
     .padding(.bottom, 10)
     .frame(width: 236)
   }
+}
 
-  // Shot 53: Not Now a faint fill, Allow a light one, both with 14 pt semibold titles.
-  private func button(_ title: String, fill: Double, action: @escaping () -> Void) -> some View {
+// Shot 53: Not Now a faint fill, Allow a light one, both with 14 pt semibold titles.
+private struct PromptButton: View {
+  let title: String
+  let fill: Double
+  let action: () -> Void
+
+  var body: some View {
     Button(action: action) {
       Text(title).font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 32)
         .background(.white.opacity(fill), in: RoundedRectangle(cornerRadius: 8))
