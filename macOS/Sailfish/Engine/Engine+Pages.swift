@@ -210,6 +210,7 @@ extension Engine {
       (page as? ECWebContents)?.loadIfNeeded()
     }
     (livePages[record.id] as? WebKitPage)?.reshow()
+    (livePages[record.id] as? ECWebContents).map(showWhenDrawn)
     hold(tab, hidden.id)
     livePages[hidden.id]?.pauseMedia()
     if let page = livePages[record.id], let muted = livePages[hidden.id]?.isMuted, page.isMuted != muted {
@@ -219,6 +220,31 @@ extension Engine {
     hoveredLinks[tab] = nil
     selections[tab] = nil
     reportShown(tab)
+  }
+
+  // A Chromium page shown in place of another stays clear, with the other under it, until it has drawn; one still in
+  // the window, under the page that replaced it, shows at once.
+  func showWhenDrawn(_ contents: ECWebContents) {
+    guard contents.view.window == nil else { return }
+    setAlpha(0, of: contents.view)
+    let show = #selector(webContentsDidPresentFirstFrame(_:))
+    NSObject.cancelPreviousPerformRequests(withTarget: self, selector: show, object: contents)
+    // A page that never draws, crashed or hung, shows after 300 ms.
+    perform(show, with: contents, afterDelay: 0.3)
+  }
+
+  func webContentsDidPresentFirstFrame(_ contents: ECWebContents) {
+    NSObject.cancelPreviousPerformRequests(
+      withTarget: self, selector: #selector(webContentsDidPresentFirstFrame(_:)), object: contents)
+    setAlpha(1, of: contents.view)
+  }
+
+  // At once: the view's layer would fade when Chromium's callbacks set it, and when it returns to the window.
+  private func setAlpha(_ alpha: CGFloat, of view: NSView) {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    view.alphaValue = alpha
+    CATransaction.commit()
   }
 
   // The open permission request and dialog of a page being hidden wait until it is shown again.
