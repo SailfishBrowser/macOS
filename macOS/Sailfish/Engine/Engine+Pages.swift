@@ -13,6 +13,9 @@ struct PageRecord: Codable, Equatable, Sendable {
 extension Engine {
   func create(_ tab: UUID, _ profile: UUID, _ incognito: Bool, pages: [PageRecord], shown: Int) async {
     _ = await context(profile)
+    if pages[shown].engine == .webkit {
+      await CookieSync.shared(profile: profile, incognito: incognito).open()
+    }
     // Once quitting has closed every page, none is made.
     guard !isClosed else { return }
     register(tab, profile, incognito, pages: pages, shown: shown)
@@ -149,6 +152,9 @@ extension Engine {
   }
 
   func goToEntry(_ tab: UUID, _ entry: HistoryEntry) async {
+    if let index = pageRecords[tab]?.firstIndex(where: { $0.id == entry.page }), index != shownPages[tab] {
+      await syncCookies(tab, showing: index)
+    }
     guard let index = pageRecords[tab]?.firstIndex(where: { $0.id == entry.page }), let page = livePages[entry.page]
     else { return }
     if index != shownPages[tab] {
@@ -160,6 +166,9 @@ extension Engine {
   }
 
   func goBack(_ tab: UUID) async {
+    if let page = page(tab), !page.canGoBack, let shown = shownPages[tab], shown > 0 {
+      await syncCookies(tab, showing: shown - 1)
+    }
     guard let page = page(tab), let shown = shownPages[tab] else { return }
     if page.canGoBack {
       page.goBack()
@@ -169,6 +178,11 @@ extension Engine {
   }
 
   func goForward(_ tab: UUID) async {
+    if let page = page(tab), !page.canGoForward, let shown = shownPages[tab], let count = pageRecords[tab]?.count,
+      shown < count - 1
+    {
+      await syncCookies(tab, showing: shown + 1)
+    }
     guard let page = page(tab), let shown = shownPages[tab], let count = pageRecords[tab]?.count else { return }
     if page.canGoForward {
       page.goForward()
@@ -317,6 +331,9 @@ extension Engine {
     let page = livePages.removeValue(forKey: id)
     if let page {
       owners[ObjectIdentifier(page)] = nil
+    }
+    if let page = page as? WebKitPage {
+      CookieSync.pageDidClose(page)
     }
     (page as? ECWebContents)?.delegate = nil
     pendingSheets.removeValue(forKey: id)?.forEach { $0() }

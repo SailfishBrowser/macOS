@@ -30,6 +30,9 @@ extension Engine {
   // media paused (or is dropped when nothing committed in it), and a new page of `engine` loads the request. The
   // tab's choice keeps it in that engine while it stays on the request's site.
   func switchEngine(_ tab: UUID, to engine: PageEngineKind, request: URLRequest) async {
+    if let url = request.url {
+      await syncCookies(tab, switchingTo: engine, for: url)
+    }
     guard var pages = pageRecords[tab], let shown = shownPages[tab], let context = tabContexts[tab],
       let profile = tabProfiles[tab], let url = request.url
     else { return }
@@ -69,6 +72,7 @@ extension Engine {
   }
 
   func webKitPageDidUpdate(_ page: WebKitPage) {
+    CookieSync.pageDidUpdate(page)
     guard let tab = shownTab(of: page) else { return }
     if loadProgress[tab] != page.loadProgress {
       loadProgress[tab] = page.loadProgress
