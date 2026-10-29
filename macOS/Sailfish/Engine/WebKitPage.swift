@@ -23,6 +23,8 @@ import WebKit
   private var isProvisional = false
   // Set when a terminated content process reloads the page, until a load finishes.
   private var reloadedAfterTermination = false
+  // The isolated script's hit test of the last right click, and when it arrived.
+  var contextMenuHit: (hit: WebKitContextMenu.Hit, time: ContinuousClock.Instant)?
   private static let textDirectiveCharacters = CharacterSet(
     charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._~")
 
@@ -35,8 +37,10 @@ import WebKit
     let fresh = WebKitStores.configuration(profile: profile, incognito: incognito)
     let configuration = configuration ?? fresh
     configuration.userContentController = fresh.userContentController
-    webView = WKWebView(frame: .zero, configuration: configuration)
+    let webView = WebKitWebView(frame: .zero, configuration: configuration)
+    self.webView = webView
     super.init()
+    webView.page = self
     fresh.userContentController.add(self, contentWorld: WebKitPageScript.world, name: "sailfish")
     // The window's two-finger swipe switches spaces.
     webView.allowsBackForwardNavigationGestures = false
@@ -140,8 +144,11 @@ import WebKit
   }
 
   func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-    guard message.frameInfo.isMainFrame, let body = PageScriptMessage(message.body) else { return }
+    guard let body = PageScriptMessage(message.body) else { return }
     switch body {
+    // A right click's hit test comes from the frame clicked; everything else only from the main frame.
+    case let .contextMenu(hit): contextMenuHit = (hit, .now)
+    case _ where !message.frameInfo.isMainFrame: break
     case let .icons(icons):
       if let icon = icons.first {
         fetchFavicon(icon)
