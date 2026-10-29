@@ -39,6 +39,8 @@ enum WebEngineEvent: Equatable, Sendable {
   case splitRequested(tab: UUID, url: URL)
   case littleSailfishRequested(tab: UUID, url: URL)
   case closeRequested(tab: UUID)
+  // A script's popup from a WebKit page, already a tab of its own, for the opener's space.
+  case adoptRequested(tab: UUID, opener: UUID, url: URL)
   case activateRequested(tab: UUID)
   case found(tab: UUID, matches: Int, activeMatch: Int)
   // The page's zoom percent changed: a zoom step, or a navigation to a site with a remembered zoom.
@@ -55,6 +57,8 @@ struct WebEngineClient: Sendable {
   // Registers the tab's pages and makes the shown one from its saved history.
   var create: @Sendable (_ tab: UUID, _ profile: UUID, _ incognito: Bool, _ pages: [PageRecord], _ shown: Int) async -> Void
   var load: @Sendable (_ tab: UUID, _ url: URL) async -> Void
+  // Reloads the shown page's URL in the other engine, as a page of its own.
+  var switchEngine: @Sendable (_ tab: UUID, _ engine: PageEngineKind) async -> Void
   // Makes the Little Sailfish `id` a window holding its page `tab`, for the context's extensions.
   var littleWindow: @Sendable (_ id: UUID, _ profile: UUID, _ tab: UUID) async -> Void
   var goBack: @Sendable (_ tab: UUID) async -> Void

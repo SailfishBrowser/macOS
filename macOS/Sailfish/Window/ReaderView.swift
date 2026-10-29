@@ -77,7 +77,7 @@ struct ReaderOverlay: View {
   var body: some View {
     if let article = Engine.shared.readers[tab] {
       let settings = ReaderSettings(step: step, isSerif: isSerif, theme: theme)
-      ReaderPage(article: article, baseURL: url, settings: settings) { Engine.shared.load(tab, $0) }
+      ReaderPage(article: article, baseURL: url, settings: settings) { url in Task { await Engine.shared.load(tab, url) } }
         .background(settings.theme.background)
         .overlay(alignment: .topTrailing) { controls(settings).padding(10) }
         .clipShape(RoundedRectangle(cornerRadius: 6))

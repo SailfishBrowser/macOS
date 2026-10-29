@@ -15,8 +15,8 @@ extension Engine {
     _ = await context(profile)
     // Once quitting has closed every page, none is made.
     guard !isClosed else { return }
-    let context = register(tab, profile, incognito, pages: pages, shown: shown)
-    makeContents(tab, page: pages[shown].id, context)
+    register(tab, profile, incognito, pages: pages, shown: shown)
+    makePage(pages[shown], of: tab)
   }
 
   // A tab of one Chromium page under the tab's id, as an extension opens one. Needs the profile's context loaded.
@@ -28,7 +28,8 @@ extension Engine {
 
   // A page the tab still has, such as a closing Peek that undo brings back, is saved and closed first, so the new
   // one starts from its history.
-  private func register(
+  @discardableResult
+  func register(
     _ tab: UUID, _ profile: UUID, _ incognito: Bool, pages: [PageRecord], shown: Int
   ) -> ECBrowserContext {
     release(tab, keepingHistory: true).forEach { $0.close() }
@@ -36,21 +37,34 @@ extension Engine {
     pageRecords[tab] = pages
     shownPages[tab] = shown
     tabContexts[tab] = context
+    tabProfiles[tab] = profile
     if incognito {
       incognitoTabs.insert(tab)
     }
     return context
   }
 
+  // Makes the tab's page, from its saved history if it has one. A restored WebKit page starts loading at once; a
+  // restored Chromium page loads when the tab does, or when Back or Forward reaches it.
+  @discardableResult
+  private func makePage(_ record: PageRecord, of tab: UUID) -> (any TabPage)? {
+    guard let context = tabContexts[tab], let profile = tabProfiles[tab] else { return nil }
+    switch record.engine {
+    case .chromium: return makeContents(tab, page: record.id, context)
+    case .webkit: return makeWebKitPage(tab, page: record.id, profile: profile)
+    }
+  }
+
   // A Chromium page of the tab, given its saved history if it has one.
   @discardableResult
-  private func makeContents(_ tab: UUID, page id: UUID, _ context: ECBrowserContext) -> ECWebContents {
+  func makeContents(_ tab: UUID, page id: UUID, _ context: ECBrowserContext) -> ECWebContents {
     let contents = ECWebContents(browserContext: context)
     contents.delegate = self
     livePages[id] = contents
     owners[ObjectIdentifier(contents)] = (tab, id)
     if let state = Self.sessions.load(id), contents.restoreSessionState(state) {
       restoredPages.insert(id)
+      restoringPages.insert(id)
     }
     return contents
   }
@@ -91,6 +105,30 @@ extension Engine {
     guard let owner = owners[ObjectIdentifier(page)], shownRecord(owner.tab)?.id != owner.page else { return false }
     pendingSheets[owner.page, default: []].append(request)
     return true
+  }
+
+  // A page behind the shown one closes alone; the shown one closes its tab.
+  func closeRequested(by page: AnyObject) {
+    guard let owner = owners[ObjectIdentifier(page)] else { return }
+    if owner.page == shownRecord(owner.tab)?.id {
+      Self.continuation.yield(.closeRequested(tab: owner.tab))
+    } else {
+      closePage(owner.page, of: owner.tab)
+    }
+  }
+
+  // A navigation a page committed. In the shown page, one to another site clears the tab's engine choice, and a new
+  // one (not a history step, nor the load of a restored history) closes the pages after it.
+  func pageDidCommit(_ page: AnyObject, url: URL?, isNewNavigation: Bool) {
+    guard let owner = owners[ObjectIdentifier(page)] else { return }
+    let restoring = restoringPages.remove(owner.page) != nil
+    guard owner.page == shownRecord(owner.tab)?.id else { return }
+    if let choice = choices[owner.tab], let url, siteOf(url) != choice.site {
+      choices[owner.tab] = nil
+    }
+    if isNewNavigation, !restoring {
+      prune(owner.tab)
+    }
   }
 
   // Back and Forward include the pages before and after the shown one; a page that is not alive lists nothing.
@@ -150,14 +188,15 @@ extension Engine {
   // Shows the tab's page at `index` and reports it at once. A page that is not alive is made from its saved history
   // and loads it; one without saved history is dropped instead.
   private func show(_ tab: UUID, _ index: Int) {
-    guard let pages = pageRecords[tab], let hidden = shownRecord(tab), let context = tabContexts[tab] else { return }
+    guard let pages = pageRecords[tab], let hidden = shownRecord(tab) else { return }
     let record = pages[index]
     if livePages[record.id] == nil {
-      let contents = makeContents(tab, page: record.id, context)
+      let page = makePage(record, of: tab)
       guard restoredPages.remove(record.id) != nil else { return closePage(record.id, of: tab) }
-      contents.loadIfNeeded()
+      (page as? ECWebContents)?.loadIfNeeded()
     }
     hold(tab, hidden.id)
+    livePages[hidden.id]?.pauseMedia()
     shownPages[tab] = index
     hoveredLinks[tab] = nil
     selections[tab] = nil
@@ -165,7 +204,7 @@ extension Engine {
   }
 
   // The open permission request and dialog of a page being hidden wait until it is shown again.
-  private func hold(_ tab: UUID, _ page: UUID) {
+  func hold(_ tab: UUID, _ page: UUID) {
     if let request = permissionRequests.removeValue(forKey: tab) {
       pendingSheets[page, default: []].append { [weak self] in
         guard let self, self.shownRecord(tab)?.id == page else { return request.answer(false) }
@@ -180,17 +219,30 @@ extension Engine {
     }
   }
 
-  // Closes one page behind the shown one and drops it from the tab's list, with its saved history.
+  // Closes one page behind the shown one and drops it from the tab's list.
   func closePage(_ id: UUID, of tab: UUID) {
     guard var pages = pageRecords[tab], let shown = shownPages[tab],
       let index = pages.firstIndex(where: { $0.id == id }), index != shown
     else { return }
-    let record = pages.remove(at: index)
+    dropPage(pages.remove(at: index))
     pageRecords[tab] = pages
     shownPages[tab] = index < shown ? shown - 1 : shown
-    releasePage(id)?.close()
-    Self.store(record.engine).forget(id)
     reportShown(tab)
+  }
+
+  // Closes the pages after the shown one, as a new navigation in it ends its forward history.
+  func prune(_ tab: UUID) {
+    guard var pages = pageRecords[tab], let shown = shownPages[tab], shown < pages.count - 1 else { return }
+    pages[(shown + 1)...].forEach { dropPage($0) }
+    pages.removeSubrange((shown + 1)...)
+    pageRecords[tab] = pages
+    reportShown(tab)
+  }
+
+  // Closes a page that leaves its tab's list, and forgets its saved history.
+  func dropPage(_ record: PageRecord) {
+    releasePage(record.id)?.close()
+    Self.store(record.engine).forget(record.id)
   }
 
   func reportShown(_ tab: UUID) {
@@ -251,6 +303,8 @@ extension Engine {
     incognitoTabs.remove(tab)
     lastPages[tab] = nil
     tabContexts[tab] = nil
+    tabProfiles[tab] = nil
+    choices[tab] = nil
     findRequests[tab] = nil
     shownPages[tab] = nil
     return (pageRecords.removeValue(forKey: tab) ?? []).compactMap { releasePage($0.id) }
@@ -259,6 +313,7 @@ extension Engine {
   // Waiting sheets run once the page is gone, and find no tab.
   private func releasePage(_ id: UUID) -> (any TabPage)? {
     restoredPages.remove(id)
+    restoringPages.remove(id)
     let page = livePages.removeValue(forKey: id)
     if let page {
       owners[ObjectIdentifier(page)] = nil

@@ -266,6 +266,15 @@ struct AppFeature {
         }
         return send(.close(tab), toSpaceOf: tab, in: state)
 
+      // A WebKit page's script popup joins the opener's space, or, from a Peek or a Little Sailfish, the selected space
+      // of the frontmost window.
+      case let .engine(.adoptRequested(tab, opener, url)):
+        if state.windows.contains(where: { $0.spaces.spaces.contains { $0.tabs[id: opener] != nil } }) {
+          return send(.adopt(tab, url, active: true), toSpaceOf: opener, in: state)
+        }
+        guard let id = toastWindow(state), let window = state.windows[id: id] else { return .none }
+        return .send(.windows(.element(id: id, action: .tab(.adopt(tab, url, active: true), in: window.spaces.selectedID))))
+
       case let .engine(.activateRequested(tab)):
         return send(.select(tab), toSpaceOf: tab, in: state)
 

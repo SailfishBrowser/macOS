@@ -31,6 +31,7 @@ import AppKit
   func goForward()
   func go(to index: Int)
   func reload()
+  func pauseMedia()
   func close()
 }
 

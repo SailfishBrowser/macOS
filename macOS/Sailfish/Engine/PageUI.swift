@@ -109,7 +109,7 @@ extension Engine {
   }
 
   // Shows `sheet` on the tab's window once the tab is on screen; a closed tab is answered with `.abort`.
-  private func present(
+  func present(
     _ sheet: NSWindow, for tab: UUID,
     _ begin: @escaping (NSWindow, @escaping (NSApplication.ModalResponse) -> Void) -> Void,
     completion: @escaping (NSApplication.ModalResponse) -> Void
@@ -174,14 +174,8 @@ extension Engine {
     if selections[tab] != selection { selections[tab] = selection }
   }
 
-  // A page behind the shown one closes alone; the shown one closes its tab.
   func webContentsDidRequestClose(_ contents: ECWebContents) {
-    guard let tab = tab(of: contents) else { return }
-    if let page = owners[ObjectIdentifier(contents)]?.page, page != shownRecord(tab)?.id {
-      closePage(page, of: tab)
-    } else {
-      Self.continuation.yield(.closeRequested(tab: tab))
-    }
+    closeRequested(by: contents)
   }
 
   func webContents(_ contents: ECWebContents, showContextMenu menu: ECContextMenu) {
