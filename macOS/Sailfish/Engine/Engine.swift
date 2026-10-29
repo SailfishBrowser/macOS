@@ -165,9 +165,13 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   }
 
   // A Little Sailfish's page as a window of its own to the context's extensions, which the PDF viewer is one of:
-  // its tab had none, and the viewer left the page blank.
+  // its tab had none, and the viewer left the page blank. While it shows a WebKit page the window has no tab, as a
+  // space's window leaves such a tab out.
   func syncLittleWindow(_ id: UUID, profile: UUID, tab: UUID) {
-    guard let contents = self.contents(tab) else { return }
+    guard let contents = self.contents(tab) else {
+      windows[id]?.tabs = []
+      return
+    }
     if windows[id] == nil {
       let window = ECWindow(browserContext: loadedContext(profile, false))
       window.delegate = windowDelegate
