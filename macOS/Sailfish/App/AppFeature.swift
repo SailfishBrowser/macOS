@@ -27,6 +27,11 @@ struct AppFeature {
     // The window last made key; its space is the globally last focused one, which a relaunch brings to the front.
     var focusedWindowID: WindowFeature.State.ID?
 
+    // Toasts that belong to no window show in the last focused one.
+    var toastWindowID: WindowFeature.State.ID? {
+      focusedWindowID.flatMap { windows[id: $0]?.id } ?? windows.last?.id
+    }
+
     var focusedSpace: Space? {
       (focusedWindowID.flatMap { windows[id: $0] } ?? windows.last { !$0.isIncognito })?.spaces.selected
     }
@@ -186,7 +191,7 @@ struct AppFeature {
 
       // Tidy Downloads' card, with its Undo, and the note once undone show in the window last focused.
       case let .downloads(.renamed(id, file)):
-        guard let original = state.downloads.downloads[id: id]?.originalName, let window = toastWindow(state)
+        guard let original = state.downloads.downloads[id: id]?.originalName, let window = state.toastWindowID
         else { return .none }
         return .send(.windows(.element(
           id: window, action: .showToast(file.lastPathComponent, .revertDownloadName(id), placement: .renamed(from: original)))))
@@ -206,7 +211,7 @@ struct AppFeature {
         return .run { _ in await engine.saveLogin(id) }
 
       case .downloads(.reverted):
-        guard let window = toastWindow(state) else { return .none }
+        guard let window = state.toastWindowID else { return .none }
         return .send(.windows(.element(id: window, action: .showToast("Download name reverted!"))))
 
       case let .engine(.updated(tab, page)):
@@ -283,7 +288,7 @@ struct AppFeature {
         if state.windows.contains(where: { $0.spaces.spaces.contains { $0.tabs[id: opener] != nil } }) {
           return send(.adopt(tab, url, active: true), toSpaceOf: opener, in: state)
         }
-        guard let id = toastWindow(state), let window = state.windows[id: id] else { return .none }
+        guard let id = state.toastWindowID, let window = state.windows[id: id] else { return .none }
         return .send(.windows(.element(id: id, action: .tab(.adopt(tab, url, active: true), in: window.spaces.selectedID))))
 
       case let .engine(.activateRequested(tab)):
@@ -757,10 +762,6 @@ struct AppFeature {
     let spaces = state.windows.filter { !$0.isIncognito }.flatMap(\.spaces.spaces).filter { $0.profileID == profile }
     let tabs = (state.profiles[id: profile]?.favorites.elements ?? []) + spaces.flatMap(\.ownTabs)
     return Array(tabs.sorted { $0.lastActiveAt > $1.lastActiveAt }.prefix(5))
-  }
-
-  private func toastWindow(_ state: State) -> WindowFeature.State.ID? {
-    state.focusedWindowID.flatMap { state.windows[id: $0]?.id } ?? state.windows.last?.id
   }
 
   // The profile of the last window's space: a Little Sailfish uses the last used one.

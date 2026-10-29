@@ -192,8 +192,10 @@ struct WindowFeature {
     case toggleExpandedPane
     // Clear Archive: empties the archive, which no undo brings back.
     case clearArchive
-    // Shows a toast, replacing any showing; it goes after Toast.duration unless another replaces it first.
-    case showToast(String, Toast.Action? = nil, tap: Toast.Action? = nil, placement: Toast.Placement = .bottom)
+    // Shows a toast, replacing any showing; it goes after its duration unless another replaces it first.
+    case showToast(
+      String, Toast.Action? = nil, tap: Toast.Action? = nil, placement: Toast.Placement = .bottom,
+      duration: Duration = Toast.duration)
     case dismissToast(Toast.ID)
     case toastAction(Toast.Action)
     // View > Zoom In / Zoom Out / Zoom to Actual Size on the selected tab's page, then the percent indicator.
@@ -506,7 +508,7 @@ struct WindowFeature {
         guard let space = state.spaces.spaces[id: id], let placement = space.tabs[id: tab]?.placement else { return .none }
         return .send(.showToast(placement == .pinned ? "Pinned Tab to \(space.name)" : "Un-Pinned Tab from \(space.name)"))
 
-      case let .showToast(message, action, tap, placement):
+      case let .showToast(message, action, tap, placement, duration):
         let replaced = state.toast
         let toast = Toast(
           id: uuid(), message: message, action: action, tap: tap, placement: placement,
@@ -515,7 +517,7 @@ struct WindowFeature {
         return .merge(
           dropLogin(of: replaced),
           .run { send in
-            try await clock.sleep(for: Toast.duration)
+            try await clock.sleep(for: duration)
             await send(.dismissToast(toast.id), animation: Motion.layout)
           }
           .cancellable(id: ToastDismissal(window: state.id), cancelInFlight: true))
