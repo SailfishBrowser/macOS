@@ -68,10 +68,20 @@ import WebKit
     let store = WKContentRuleListStore.default()!
     let version = await Task.detached(priority: .utility) { digest(texts) }.value
     let prefix = "\(identifierPrefix).\(version)."
-    let ours = (await store.availableIdentifiers() ?? []).filter { $0.hasPrefix(identifierPrefix + ".") }
-    if let lists = await lookUp(ours.filter { $0.hasPrefix(prefix) }, prefix: prefix, in: store) {
+    // The stored lists by the identifier prefix of the compile that made them.
+    let stored = Dictionary(
+      grouping: (await store.availableIdentifiers() ?? []).filter { $0.hasPrefix(identifierPrefix + ".") }
+    ) { $0.split(separator: ".").prefix(2).joined(separator: ".") + "." }
+    if let lists = await lookUp(stored[prefix, default: []], prefix: prefix, in: store) {
       ruleLists = lists
     } else {
+      // While these compile, pages keep the lists they have, or get the last complete compile's when they have none,
+      // as after a quit during a compile.
+      for (older, identifiers) in stored where ruleLists.isEmpty && older != prefix {
+        if let lists = await lookUp(identifiers, prefix: older, in: store) {
+          ruleLists = lists
+        }
+      }
       let chunks = await Task.detached(priority: .utility) { encoded(rules(from: texts)) }.value
       // A first compile gives pages each list as it is ready; a recompile replaces the old lists at once.
       let replacing = !ruleLists.isEmpty
@@ -91,7 +101,7 @@ import WebKit
       }
       ruleLists = compiled
     }
-    for identifier in ours where !identifier.hasPrefix(prefix) {
+    for identifier in stored.filter({ $0.key != prefix }).values.joined() {
       try? await store.removeContentRuleList(forIdentifier: identifier)
     }
   }
