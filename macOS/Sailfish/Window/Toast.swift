@@ -13,6 +13,8 @@ struct Toast: Equatable, Identifiable {
     case revertDownloadName(Download.ID)
     // "Save password for {site}?": saves the login typed into a WebKit page.
     case saveLogin(PendingLogin.ID)
+    // "{site} opened in WebKit": the tab shows its Chromium page again.
+    case undoEngineSwitch(Tab.ID)
   }
 
   // The dark pill at the bottom, or the accent pill at the page's top right.
@@ -128,7 +130,7 @@ struct ToastView: View {
         Button(action: { perform(action) }) {
           Text(title(action)).font(.system(size: 12, weight: .bold))
             .padding(.horizontal, 8).frame(height: 24)
-            .background(action == .undo ? .white.opacity(0.14) : Theme.accent, in: RoundedRectangle(cornerRadius: 6))
+            .background(isUndo(action) ? .white.opacity(0.14) : Theme.accent, in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
       }
@@ -150,6 +152,14 @@ struct ToastView: View {
     .onHover { isHovering = $0 }
   }
 
+  // An Undo is a faint button; any other action is the accent.
+  private func isUndo(_ action: Toast.Action) -> Bool {
+    switch action {
+    case .undo, .undoEngineSwitch: true
+    case .goToTab, .editShortcut, .revertDownloadName, .saveLogin: false
+    }
+  }
+
   private func title(_ action: Toast.Action) -> String {
     switch action {
     case .undo: "Undo"
@@ -157,6 +167,7 @@ struct ToastView: View {
     case .editShortcut: "Edit the shortcut ↗"
     case .revertDownloadName: "Undo"
     case .saveLogin: "Save"
+    case .undoEngineSwitch: "Undo"
     }
   }
 }

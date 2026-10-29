@@ -210,6 +210,14 @@ struct AppFeature {
       case let .windows(.element(_, .toastAction(.saveLogin(id)))):
         return .run { _ in await engine.saveLogin(id) }
 
+      // A tab switched to WebKit for protected video: the window showing it, or the last focused one, offers Undo.
+      case let .engine(.openedInWebKit(tab, site)):
+        guard let window = state.window(showing: tab)?.id ?? state.toastWindowID else { return .none }
+        return .send(.windows(.element(id: window, action: .showToast("\(site) opened in WebKit", .undoEngineSwitch(tab)))))
+
+      case let .windows(.element(_, .toastAction(.undoEngineSwitch(tab)))):
+        return .run { _ in await engine.undoEngineSwitch(tab) }
+
       case .downloads(.reverted):
         guard let window = state.toastWindowID else { return .none }
         return .send(.windows(.element(id: window, action: .showToast("Download name reverted!"))))
