@@ -556,6 +556,7 @@ final class WebKitWebView: WKWebView {
   // popup, nil otherwise. It shares its opener's content controller, and with it the opener's message handler, so the
   // popup's view takes a controller of its own.
   convenience init(profile: UUID, incognito: Bool, configuration: WKWebViewConfiguration?) {
+    ContentBlocker.webKitDidStart()
     let fresh = WebKitStores.configuration(profile: profile, incognito: incognito)
     let configuration = configuration ?? fresh
     configuration.userContentController = fresh.userContentController

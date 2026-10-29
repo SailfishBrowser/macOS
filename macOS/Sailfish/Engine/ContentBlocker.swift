@@ -6,8 +6,11 @@ import WebKit
 
 // Ad blocking in WebKit pages: uBlock Origin's default filter lists, converted into WebKit content rule lists and
 // given to every WebKit page while "Block ads and trackers with uBlock Origin" is on. The lists start as the bundled
-// uBlock Origin's copies and are fetched again on uBlock's schedule. They compile in the background and no page waits
-// for them: a page made before they exist gets them from its next load.
+// uBlock Origin's copies and are fetched again on uBlock's schedule. Compiled lists stay in WebKit's content rule list
+// store, so they compile only on a first install or when a list changes. Nothing is read, looked up, compiled or
+// fetched until the session's first WebKit view, warm or for a page; then the stored lists are attached at once and
+// any compile runs in the background. No page waits for them: a page that opens while the first compile runs gets the
+// lists attached as they finish, and they apply fully from its next load.
 @MainActor enum ContentBlocker {
   // Part of every compiled list's identifier; raising it when the converter's output changes compiles the lists again.
   nonisolated private static let converterVersion = 1
@@ -17,14 +20,30 @@ import WebKit
     didSet { applyToLivePages() }
   }
   private static var task: Task<Void, Never>?
+  // Whether the setting is on, and whether the session has made a WebKit view; the lists load once both are true.
+  private static var isOn = false
+  private static var isWebKitInUse = false
 
-  // Looks up the compiled lists or compiles them, then fetches each filter list on uBlock Origin's schedule: checked 37
-  // seconds after the lists are ready and every hour after that, each list fetched once its copy has expired. Does
-  // nothing once started.
+  // The setting is on.
   static func start() {
-    guard task == nil else { return }
+    isOn = true
+    load()
+  }
+
+  // A WebKit view was made, warm or for a page.
+  static func webKitDidStart() {
+    isWebKitInUse = true
+    load()
+  }
+
+  // Attaches the stored lists, reads the filter lists and looks up their compiled lists or compiles them, then fetches
+  // each filter list on uBlock Origin's schedule: checked 37 seconds after the lists are ready and every hour after
+  // that, each list fetched once its copy has expired. Does nothing once started.
+  private static func load() {
+    guard isOn, isWebKitInUse, task == nil else { return }
     let root = URL(filePath: Engine.adBlocker)
     task = Task {
+      await attachStored()
       var lists: FilterLists
       do {
         lists = try await Task.detached(priority: .utility) { try FilterLists(root: root) }.value
@@ -44,6 +63,7 @@ import WebKit
   }
 
   static func stop() {
+    isOn = false
     task?.cancel()
     task = nil
   }
@@ -63,27 +83,38 @@ import WebKit
     }
   }
 
+  // The stored lists by the identifier prefix of the compile that made them.
+  private static func stored(in store: WKContentRuleListStore) async -> [String: [String]] {
+    Dictionary(
+      grouping: (await store.availableIdentifiers() ?? []).filter { $0.hasPrefix(identifierPrefix + ".") }
+    ) { $0.split(separator: ".").prefix(2).joined(separator: ".") + "." }
+  }
+
+  // Gives pages the last complete compile's lists before the filter lists are read, which a compile that removed
+  // every other leaves as the only one.
+  private static func attachStored() async {
+    let store = WKContentRuleListStore.default()!
+    for (prefix, identifiers) in await stored(in: store) where ruleLists.isEmpty {
+      if let lists = await lookUp(identifiers, prefix: prefix, in: store) {
+        ruleLists = lists
+      }
+    }
+  }
+
   // Looks up the lists compiled from these filter lists, or compiles them, and removes every other stored list.
   private static func compile(_ lists: FilterLists) async {
     let store = WKContentRuleListStore.default()!
     let prefix = "\(identifierPrefix).\(digest(lists.digests))."
-    // The stored lists by the identifier prefix of the compile that made them.
-    let stored = Dictionary(
-      grouping: (await store.availableIdentifiers() ?? []).filter { $0.hasPrefix(identifierPrefix + ".") }
-    ) { $0.split(separator: ".").prefix(2).joined(separator: ".") + "." }
+    let stored = await stored(in: store)
     // The lists this compile keeps.
     let current: Set<String>
     if let lists = await lookUp(stored[prefix, default: []], prefix: prefix, in: store) {
-      ruleLists = lists
+      if lists.map(\.identifier) != ruleLists.map(\.identifier) {
+        ruleLists = lists
+      }
       current = Set(stored[prefix, default: []])
     } else {
-      // While these compile, pages keep the lists they have, or get the last complete compile's when they have none,
-      // as after a quit during a compile.
-      for (older, identifiers) in stored where ruleLists.isEmpty && older != prefix {
-        if let lists = await lookUp(identifiers, prefix: older, in: store) {
-          ruleLists = lists
-        }
-      }
+      // While these compile, pages keep the lists they have, which attachStored gave them.
       let chunks: [String]
       do {
         chunks = try await Task.detached(priority: .utility) { encoded(rules(from: try lists.texts())) }.value
