@@ -643,12 +643,22 @@ struct SidebarView: View {
       Color.clear.frame(width: 16, height: 16).padding(.trailing, 11)
         .popover(item: permissionRequest, arrowEdge: .bottom) { PermissionPrompt(request: $0) }
     }
+    .overlay(alignment: .trailing) {
+      Color.clear.frame(width: 16, height: 16).padding(.trailing, 11)
+        .popover(item: engineOffer, arrowEdge: .bottom) { EngineOfferPrompt(offer: $0) }
+    }
   }
 
   // The selected tab's permission request; closing the popover answers it "Not Now".
   private var permissionRequest: Binding<PermissionRequest?> {
     let request = space.selectedTabID.flatMap { Engine.shared.permissionRequests[$0] }
     return Binding(get: { request }, set: { if $0 == nil { request?.answer(false) } })
+  }
+
+  // The selected tab's "Play in WebKit" offer; closing the popover answers it Stay in Chromium.
+  private var engineOffer: Binding<EngineOffer?> {
+    let offer = space.selectedTabID.flatMap { Engine.shared.engineOffers[$0] }
+    return Binding(get: { offer }, set: { if $0 == nil { offer?.answer(false, false) } })
   }
 
   private func copy(_ url: URL) {
@@ -2581,6 +2591,36 @@ private struct PermissionPrompt: View {
     .padding(.top, 11)
     .padding(.bottom, 10)
     .frame(width: 236)
+  }
+}
+
+// The offer on the URL pill, laid out as the permission popover; outside incognito, Remember for this site makes
+// either answer the site's rule.
+private struct EngineOfferPrompt: View {
+  let offer: EngineOffer
+  @State private var remember = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 15) {
+      HStack(alignment: .top, spacing: 8) {
+        Image(systemName: "play.rectangle.fill")
+          .font(.system(size: 13))
+          .frame(width: 32, height: 32)
+          .background(.quaternary, in: Circle())
+        Text("Play \(offer.site) in WebKit?").font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
+      }
+      if !Engine.shared.incognitoTabs.contains(offer.tab) {
+        Toggle("Remember for this site", isOn: $remember).toggleStyle(.checkbox).font(.system(size: 13))
+      }
+      HStack(spacing: 8) {
+        PromptButton(title: "Stay in Chromium", fill: 0.06) { offer.answer(false, remember) }
+        PromptButton(title: "Open in WebKit", fill: 0.36) { offer.answer(true, remember) }
+      }
+    }
+    .padding(.horizontal, 9)
+    .padding(.top, 11)
+    .padding(.bottom, 10)
+    .frame(width: 300)
   }
 }
 

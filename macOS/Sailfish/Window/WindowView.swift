@@ -197,9 +197,10 @@ struct WindowView: View {
         .onHover { isAtEdge in
           if isAtEdge { store.send(.sidebar(.peek(true))) }
         }
-      // A permission prompt hangs off the URL pill, so it brings the sidebar out.
+      // A permission prompt or a "Play in WebKit" offer hangs off the URL pill, so it brings the sidebar out.
       if store.sidebar.isPeeking
         || store.spaces.selected.selectedTabID.flatMap({ Engine.shared.permissionRequests[$0] }) != nil
+        || store.spaces.selected.selectedTabID.flatMap({ Engine.shared.engineOffers[$0] }) != nil
       {
         SidebarView(store: store)
           .frame(width: store.sidebar.visibleWidth)
