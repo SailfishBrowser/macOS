@@ -1801,8 +1801,8 @@ struct SidebarView: View {
       .disabled(below.isEmpty)
   }
 
-  // Order: Copy Link, Share | Change Icon, Rename, Mute, Edit Pinned Page | Open in Split View, Duplicate, Move to |
-  // Archive Tab and Archive Tabs Below, or Remove Favorite.
+  // Order: Copy Link, Share | Change Icon, Rename, Mute, Edit Pinned Page | Open in Split View, Duplicate, Open Page
+  // in WebKit or Chromium, Move to | Archive Tab and Archive Tabs Below, or Remove Favorite.
   @ViewBuilder private func tabMenu(_ tab: Tab) -> some View {
     let app = tab.placement == .favorite ? PreviewApp(tab.pinnedURL ?? tab.url) : nil
     if app == .calendar {
@@ -1849,6 +1849,9 @@ struct SidebarView: View {
     Button("Open in Split View") { splitBeside.map { send(.split(tab.id, beside: $0)) } }
       .disabled(splitBeside == nil)
     Button("Duplicate") { send(.duplicate(tab.id)) }
+    if let engine = Engine.shared.otherEngine(tab.id) {
+      Button("Open Page in \(engine.name)") { send(.switchEngine(tab.id, engine)) }
+    }
     // An incognito window has no favorites.
     if tab.placement != .favorite, !store.isIncognito {
       Button("Favorite Tab") { send(.move(tab.id, .favorite, before: nil)) }
@@ -2482,16 +2485,36 @@ private struct ShareMenu: View {
   }
 }
 
-// The tab's own icon if it was given one, else its favicon.
+// The tab's own icon if it was given one, else its favicon, with the WebKit mark.
 private struct TabIcon: View {
   let tab: Tab
   let space: Space
 
   var body: some View {
-    if let icon = tab.icon {
-      SpaceIcon(icon: icon, emojiSize: 15)
-    } else {
-      TabFavicon(tab: tab, space: space)
+    Group {
+      if let icon = tab.icon {
+        SpaceIcon(icon: icon, emojiSize: 15)
+      } else {
+        TabFavicon(tab: tab, space: space)
+      }
+    }
+    .engineMark(tab)
+  }
+}
+
+extension View {
+  // A tab showing a WebKit page: Safari's compass on a small dark plate at the bottom right of its icon.
+  func engineMark(_ tab: Tab) -> some View {
+    overlay(alignment: .bottomTrailing) {
+      if tab.engine == .webkit {
+        Image(systemName: "safari")
+          .font(.system(size: 7, weight: .semibold))
+          .foregroundStyle(.white)
+          .frame(width: 10, height: 10)
+          .background(Color(white: 0.12), in: Circle())
+          .offset(x: 3, y: 3)
+          .accessibilityLabel("WebKit")
+      }
     }
   }
 }

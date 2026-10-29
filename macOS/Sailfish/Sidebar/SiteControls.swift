@@ -3,18 +3,20 @@ import EngineCore
 import SwiftUI
 
 // The site controls popover on the URL pill: a dark card with share, capture and full-page capture tiles, the
-// extensions' actions, the site's settings and permissions, and its security with a "…" menu.
+// extensions' actions (none on a WebKit page), the site's settings and permissions, and its security with a "…" menu.
 struct SiteControls: View {
   let space: Space
   let tab: Tab.ID
   let url: URL
   let open: (URL) -> Void
   @State private var revision = 0
+  @Shared(.siteEngines) private var siteEngines
 
   var body: some View {
     let _ = revision
     let page = Engine.shared.page(tab)
     let permissions = Engine.shared.sitePermissions(tab)
+    let otherEngine = Engine.shared.otherEngine(tab)
     VStack(alignment: .leading, spacing: 0) {
       // Shot 57: 49 pt tiles 7 apart.
       HStack(spacing: 7) {
@@ -23,23 +25,28 @@ struct SiteControls: View {
         tile("text.viewfinder").opacity(0.4).allowsHitTesting(false).accessibilityHidden(true)
       }
       .buttonStyle(.plain)
-      header("Extensions")
-      // Four tiles a row; past three rows the grid scrolls.
-      let actions = Engine.shared.extensionActions(tab, in: space)
-      ScrollView {
-        LazyVGrid(columns: Array(repeating: GridItem(.fixed(49), spacing: 7), count: 4), alignment: .leading, spacing: 7) {
-          ForEach(actions, id: \.id) { item in
-            ActionTile(item: item) { Engine.shared.runExtensionAction(item.id, tab, in: space) }
+      if Engine.shared.shownEngine(tab) != .webkit {
+        header("Extensions")
+        // Four tiles a row; past three rows the grid scrolls.
+        let actions = Engine.shared.extensionActions(tab, in: space)
+        ScrollView {
+          LazyVGrid(columns: Array(repeating: GridItem(.fixed(49), spacing: 7), count: 4), alignment: .leading, spacing: 7) {
+            ForEach(actions, id: \.id) { item in
+              ActionTile(item: item) { Engine.shared.runExtensionAction(item.id, tab, in: space) }
+            }
+            // Shot 57: the add tile is a light one, white 5% over the popover.
+            Button { open(URL(string: "https://chromewebstore.google.com")!) } label: { tile("plus", fill: .white.opacity(0.05)) }
+              .buttonStyle(.plain)
+              .help("Add Extension")
           }
-          // Shot 57: the add tile is a light one, white 5% over the popover.
-          Button { open(URL(string: "https://chromewebstore.google.com")!) } label: { tile("plus", fill: .white.opacity(0.05)) }
-            .buttonStyle(.plain)
-            .help("Add Extension")
         }
+        .frame(height: CGFloat(min((actions.count + 1 + 3) / 4, 3)) * 37 - 7)
+        .scrollDisabled(actions.count + 1 <= 12)
       }
-      .frame(height: CGFloat(min((actions.count + 1 + 3) / 4, 3)) * 37 - 7)
-      .scrollDisabled(actions.count + 1 <= 12)
       header("Settings")
+      if url.scheme == "http" || url.scheme == "https" {
+        opensIn
+      }
       // Developer mode follows the page's URL, so its row reports and does not toggle.
       setting("hammer.fill", "Developer Mode", url.isDeveloperPage ? "On" : "Off", isOn: url.isDeveloperPage)
         .allowsHitTesting(false)
@@ -69,6 +76,10 @@ struct SiteControls: View {
           Button("Copy Link") { copyLink(url) }
           Button("Save Page…") { page?.savePage() }
           Button("Print…") { page?.printPage() }
+          if let otherEngine {
+            Divider()
+            Button("Open Page in \(otherEngine.name)") { Task { await Engine.shared.reopen(tab, in: otherEngine) } }
+          }
         } label: {
           Image(systemName: "ellipsis")
             .font(.system(size: 12, weight: .semibold))
@@ -87,6 +98,26 @@ struct SiteControls: View {
     .frame(width: 236, alignment: .leading)
     .background(DarkPopover())
     .environment(\.colorScheme, .dark)
+  }
+
+  // Opens in: the engine the site's rule names, or Automatic without one; a choice shows the page in the engine
+  // the site now opens in.
+  private var opensIn: some View {
+    let rule = siteEngines.rule(for: Engine.shared.siteOf(url))
+    return Menu {
+      Picker("Opens in", selection: Binding(get: { rule }, set: { Engine.shared.setEngine($0, forSiteOf: url, in: tab) })) {
+        Text("Automatic").tag(PageEngineKind?.none)
+        Text(PageEngineKind.chromium.name).tag(PageEngineKind?.some(.chromium))
+        Text(PageEngineKind.webkit.name).tag(PageEngineKind?.some(.webkit))
+      }
+      .pickerStyle(.inline)
+      .labelsHidden()
+    } label: {
+      setting("globe", "Opens in", rule?.name ?? "Automatic", isOn: rule != nil)
+    }
+    .menuStyle(.button)
+    .buttonStyle(.plain)
+    .menuIndicator(.hidden)
   }
 
   private func header(_ title: String) -> some View {
