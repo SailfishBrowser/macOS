@@ -56,6 +56,7 @@
 #include "components/zoom/zoom_controller.h"
 #include "components/zoom/zoom_observer.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/context_menu_params.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/file_select_listener.h"
@@ -66,6 +67,7 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/navigation_throttle_registry.h"
+#include "content/public/browser/reload_type.h"
 #include "content/public/browser/picture_in_picture_window_controller.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host.h"
@@ -78,17 +80,23 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/apple/url_conversions.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/http/http_request_headers.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/cpp/data_element.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/blink/public/common/context_menu_data/context_menu_data.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/page/page_zoom.h"
 #include "third_party/blink/public/mojom/choosers/file_chooser.mojom.h"
 #include "third_party/blink/public/mojom/context_menu/context_menu.mojom-shared.h"
 #include "third_party/blink/public/mojom/link_to_text/link_to_text.mojom.h"
+#include "third_party/blink/public/mojom/loader/referrer.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
+#include "url/url_constants.h"
 
 @interface ECContextMenu ()
 - (instancetype)initWithFrame:(content::RenderFrameHost&)frame
@@ -117,6 +125,58 @@ namespace {
 // session commands keep less; page state past it is cut).
 constexpr int kSessionStateVersion = 1;
 constexpr int kSessionEntryMaxSize = 1 << 20;
+
+// The content settings of permissions the user set for the URL's site.
+NSDictionary<NSString*, NSNumber*>* SitePermissions(Profile* profile,
+                                                     const GURL& url) {
+  NSMutableDictionary<NSString*, NSNumber*>* permissions =
+      [NSMutableDictionary dictionary];
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile);
+  for (const content_settings::ContentSettingsInfo* info :
+       *content_settings::ContentSettingsRegistry::GetInstance()) {
+    ContentSettingsType type = info->website_settings_info()->type();
+    std::optional<permissions::RequestType> request =
+        permissions::ContentSettingsTypeToRequestTypeIfExists(type);
+    if (!request || !permissions::PermissionUtil::IsPermission(type)) {
+      continue;
+    }
+    content_settings::SettingInfo setting_info;
+    ContentSetting setting =
+        map->GetContentSetting(url, url, type, &setting_info);
+    bool decided =
+        setting == CONTENT_SETTING_ALLOW || setting == CONTENT_SETTING_BLOCK;
+    if (setting_info.source != content_settings::SettingSource::kUser ||
+        setting_info.primary_pattern == ContentSettingsPattern::Wildcard() ||
+        !decided) {
+      continue;
+    }
+    permissions[@(permissions::PermissionKeyForRequestType(*request))] =
+        @(setting == CONTENT_SETTING_ALLOW);
+  }
+  return permissions;
+}
+
+void SetSitePermission(Profile* profile,
+                       const GURL& url,
+                       NSString* permission,
+                       BOOL allowed) {
+  for (const content_settings::ContentSettingsInfo* info :
+       *content_settings::ContentSettingsRegistry::GetInstance()) {
+    ContentSettingsType type = info->website_settings_info()->type();
+    std::optional<permissions::RequestType> request =
+        permissions::ContentSettingsTypeToRequestTypeIfExists(type);
+    if (request &&
+        std::string_view(permission.UTF8String) ==
+            permissions::PermissionKeyForRequestType(*request)) {
+      HostContentSettingsMapFactory::GetForProfile(profile)
+          ->SetContentSettingDefaultScope(
+              url, url, type,
+              allowed ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
+      return;
+    }
+  }
+}
 
 // Asks the shell instead of showing Chrome's permission bubble.
 class PermissionPromptBridge : public permissions::PermissionPrompt {
@@ -300,6 +360,16 @@ class WebContentsDelegateBridge : public content::WebContentsDelegate,
     if ([owner_.delegate respondsToSelector:@selector
                          (webContents:didChangeLoadProgress:)]) {
       [owner_.delegate webContents:owner_ didChangeLoadProgress:progress];
+    }
+  }
+
+  void DidFinishNavigation(content::NavigationHandle* handle) override {
+    if (handle->HasCommitted() && handle->IsInPrimaryMainFrame() &&
+        !handle->IsSameDocument() &&
+        [owner_.delegate respondsToSelector:@selector
+                         (webContents:didCommitNavigationIsHistory:)]) {
+      [owner_.delegate webContents:owner_
+          didCommitNavigationIsHistory:handle->IsHistory()];
     }
   }
 
@@ -580,6 +650,74 @@ class OtherSiteLinkThrottle : public content::NavigationThrottle {
   const char* GetNameForLogging() override { return "OtherSiteLinkThrottle"; }
 };
 
+// Asks the shell whether a navigation the user started should be made
+// elsewhere, before its request leaves, and cancels it if so. Redirects are
+// not asked about.
+class HandoffThrottle : public content::NavigationThrottle {
+ public:
+  using content::NavigationThrottle::NavigationThrottle;
+
+  static void MaybeCreateAndAdd(content::NavigationThrottleRegistry& registry) {
+    content::NavigationHandle& handle = registry.GetNavigationHandle();
+    ECWebContents* owner = [ECWebContents fromContents:handle.GetWebContents()];
+    bool user_started =
+        (!handle.IsRendererInitiated() || handle.HasUserGesture()) &&
+        handle.GetReloadType() == content::ReloadType::NONE &&
+        !handle.IsHistory() &&
+        handle.GetRestoreType() == content::RestoreType::kNotRestored;
+    if ([owner.delegate respondsToSelector:@selector
+                        (webContents:shouldHandOffNavigation:)] &&
+        handle.IsInPrimaryMainFrame() && !handle.IsSameDocument() &&
+        handle.GetURL().SchemeIsHTTPOrHTTPS() && user_started) {
+      registry.AddThrottle(std::make_unique<HandoffThrottle>(registry));
+    }
+  }
+
+  ThrottleCheckResult WillStartRequest() override {
+    content::NavigationHandle* handle = navigation_handle();
+    ECWebContents* owner = [ECWebContents fromContents:handle->GetWebContents()];
+    NSMutableURLRequest* request =
+        [NSMutableURLRequest requestWithURL:net::NSURLWithGURL(handle->GetURL())];
+    if (handle->IsPost()) {
+      request.HTTPMethod = @"POST";
+      NSMutableData* body = [NSMutableData data];
+      if (scoped_refptr<network::ResourceRequestBody> post =
+              handle->GetPostData()) {
+        for (const network::DataElement& element : *post->elements()) {
+          if (const auto* bytes =
+                  element.TryAs<network::DataElementBytes>()) {
+            [body appendBytes:bytes->bytes().data()
+                       length:bytes->bytes().size()];
+          }
+        }
+      }
+      request.HTTPBody = body;
+      if (std::optional<std::string> type =
+              handle->GetRequestHeaders().GetHeader(
+                  net::HttpRequestHeaders::kContentType)) {
+        [request setValue:base::SysUTF8ToNSString(*type)
+            forHTTPHeaderField:@"Content-Type"];
+      }
+    }
+    const GURL& referrer = handle->GetReferrer().url;
+    if (referrer.is_valid()) {
+      [request setValue:base::SysUTF8ToNSString(referrer.spec())
+          forHTTPHeaderField:@"Referer"];
+    }
+    return [owner.delegate webContents:owner shouldHandOffNavigation:request]
+               ? CANCEL_AND_IGNORE
+               : PROCEED;
+  }
+
+  const char* GetNameForLogging() override { return "HandoffThrottle"; }
+};
+
+// The other-site throttle comes first, so Peek keeps priority.
+void AddNavigationThrottles(content::NavigationThrottleRegistry& registry) {
+  OtherSiteLinkThrottle::MaybeCreateAndAdd(registry);
+  HandoffThrottle::MaybeCreateAndAdd(registry);
+}
+
 }  // namespace
 
 @implementation ECContextMenu {
@@ -766,7 +904,7 @@ class OtherSiteLinkThrottle : public content::NavigationThrottle {
 
 + (void)initialize {
   if (self == [ECWebContents class]) {
-    SetEngineCoreNavigationThrottles(&OtherSiteLinkThrottle::MaybeCreateAndAdd);
+    SetEngineCoreNavigationThrottles(&AddNavigationThrottles);
   }
 }
 
@@ -1041,59 +1179,16 @@ class OtherSiteLinkThrottle : public content::NavigationThrottle {
       ->ShowTranslateUI(/*auto_translate=*/true, /*triggered_from_menu=*/true);
 }
 
-// The content settings of permissions the user set for the site.
 - (NSDictionary<NSString*, NSNumber*>*)sitePermissions {
-  NSMutableDictionary<NSString*, NSNumber*>* permissions =
-      [NSMutableDictionary dictionary];
-  if (!_contents) {
-    return permissions;
-  }
-  GURL url = _contents->GetLastCommittedURL();
-  HostContentSettingsMap* map =
-      HostContentSettingsMapFactory::GetForProfile(_context.profile);
-  for (const content_settings::ContentSettingsInfo* info :
-       *content_settings::ContentSettingsRegistry::GetInstance()) {
-    ContentSettingsType type = info->website_settings_info()->type();
-    std::optional<permissions::RequestType> request =
-        permissions::ContentSettingsTypeToRequestTypeIfExists(type);
-    if (!request || !permissions::PermissionUtil::IsPermission(type)) {
-      continue;
-    }
-    content_settings::SettingInfo setting_info;
-    ContentSetting setting =
-        map->GetContentSetting(url, url, type, &setting_info);
-    bool decided =
-        setting == CONTENT_SETTING_ALLOW || setting == CONTENT_SETTING_BLOCK;
-    if (setting_info.source != content_settings::SettingSource::kUser ||
-        setting_info.primary_pattern == ContentSettingsPattern::Wildcard() ||
-        !decided) {
-      continue;
-    }
-    permissions[@(permissions::PermissionKeyForRequestType(*request))] =
-        @(setting == CONTENT_SETTING_ALLOW);
-  }
-  return permissions;
+  return _contents ? SitePermissions(_context.profile,
+                                     _contents->GetLastCommittedURL())
+                   : @{};
 }
 
 - (void)setSitePermission:(NSString*)permission allowed:(BOOL)allowed {
-  if (!_contents) {
-    return;
-  }
-  GURL url = _contents->GetLastCommittedURL();
-  for (const content_settings::ContentSettingsInfo* info :
-       *content_settings::ContentSettingsRegistry::GetInstance()) {
-    ContentSettingsType type = info->website_settings_info()->type();
-    std::optional<permissions::RequestType> request =
-        permissions::ContentSettingsTypeToRequestTypeIfExists(type);
-    if (request &&
-        std::string_view(permission.UTF8String) ==
-            permissions::PermissionKeyForRequestType(*request)) {
-      HostContentSettingsMapFactory::GetForProfile(_context.profile)
-          ->SetContentSettingDefaultScope(
-              url, url, type,
-              allowed ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
-      return;
-    }
+  if (_contents) {
+    SetSitePermission(_context.profile, _contents->GetLastCommittedURL(),
+                      permission, allowed);
   }
 }
 
@@ -1271,6 +1366,32 @@ class OtherSiteLinkThrottle : public content::NavigationThrottle {
   _contents->GetController().LoadURL(net::GURLWithNSURL(url),
                                      content::Referrer(),
                                      ui::PAGE_TRANSITION_TYPED, std::string());
+}
+
+// A link the user followed (a browser-initiated link transition), so the
+// handoff throttle asks about it.
+- (void)loadRequest:(NSURLRequest*)request {
+  if (!_contents) {
+    return;
+  }
+  content::NavigationController::LoadURLParams params(
+      net::GURLWithNSURL(request.URL));
+  params.transition_type = ui::PAGE_TRANSITION_LINK;
+  if (NSString* referrer = [request valueForHTTPHeaderField:@"Referer"]) {
+    params.referrer =
+        content::Referrer(GURL(base::SysNSStringToUTF8(referrer)),
+                          network::mojom::ReferrerPolicy::kDefault);
+  }
+  if ([request.HTTPMethod isEqualToString:@"POST"]) {
+    params.load_type = content::NavigationController::LOAD_TYPE_HTTP_POST;
+    params.post_data = network::ResourceRequestBody::CreateFromCopyOfBytes(
+        base::apple::NSDataToSpan(request.HTTPBody ?: [NSData data]));
+    if (NSString* type = [request valueForHTTPHeaderField:@"Content-Type"]) {
+      params.extra_headers = std::string(net::HttpRequestHeaders::kContentType) +
+                             ": " + base::SysNSStringToUTF8(type);
+    }
+  }
+  _contents->GetController().LoadURLWithParams(params);
 }
 
 - (void)goBack {
@@ -1484,6 +1605,37 @@ class OtherSiteLinkThrottle : public content::NavigationThrottle {
   if (_contents) {
     _contents->PasteAndMatchStyle();
   }
+}
+
+@end
+
+@implementation ECBrowserContext (SiteSettings)
+
+- (NSDictionary<NSString*, NSNumber*>*)permissionsForOrigin:(NSURL*)origin {
+  return SitePermissions(self.profile, net::GURLWithNSURL(origin));
+}
+
+- (void)setPermission:(NSString*)permission
+              allowed:(BOOL)allowed
+            forOrigin:(NSURL*)origin {
+  SetSitePermission(self.profile, net::GURLWithNSURL(origin), permission,
+                    allowed);
+}
+
+// As ZoomController's zoomPercent reads the level the host's pages get.
+- (NSInteger)zoomPercentForHost:(NSString*)host {
+  double level = content::HostZoomMap::GetDefaultForBrowserContext(self.profile)
+                     ->GetZoomLevelForHostAndScheme(
+                         url::kHttpsScheme, base::SysNSStringToUTF8(host));
+  return static_cast<NSInteger>(blink::ZoomLevelToZoomFactor(level) * 100 +
+                                0.5);
+}
+
+// A percentage at the default zoom removes the host's own level.
+- (void)setZoomPercent:(NSInteger)percent forHost:(NSString*)host {
+  content::HostZoomMap::GetDefaultForBrowserContext(self.profile)
+      ->SetZoomLevelForHost(base::SysNSStringToUTF8(host),
+                            blink::ZoomFactorToZoomLevel(percent / 100.0));
 }
 
 @end

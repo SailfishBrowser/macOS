@@ -252,6 +252,67 @@ scripts, service workers, `webNavigation` and the rest. The bridge adds:
   `tabs.onMoved`, `onAttached`, `onDetached`, `onHighlighted`, and
   `windows.create`, `remove` and `onCreated`.
 
+## WebKit tabs
+
+The shell can show some pages in a `WKWebView` instead of Chromium. These
+calls let it move a user's navigation between the engines and share the
+profile's data with WebKit pages. None needs an upstream patch, and none
+changes what an existing call does.
+
+- Handoff: a second throttle beside the other-site one (patches/0007),
+  registered after it so Peek keeps priority, asks the delegate's
+  `webContents:shouldHandOffNavigation:` in `WillStartRequest` and returns
+  `CANCEL_AND_IGNORE` on YES. It attaches only when the delegate implements
+  the method, to a primary main frame, cross-document http or https
+  navigation the user started: one without a reload type, history step or
+  restore type that is browser-initiated or carries a user gesture. It does
+  not override `WillRedirectRequest`, so redirects stay. The request carries
+  the URL, the method, a POST's bytes from `GetPostData()` (file and data
+  pipe elements dropped) with its `Content-Type`, and `GetReferrer()` as
+  `Referer`.
+- `loadRequest:` loads through `LoadURLParams` as a browser-initiated
+  `PAGE_TRANSITION_LINK`, with the `Referer` header as the referrer and, for
+  a POST, the body as `post_data` with `LOAD_TYPE_HTTP_POST` and its
+  `Content-Type` in `extra_headers`, as Chrome's own POST loads pass it.
+- `webContents:didCommitNavigationIsHistory:` is sent from
+  `DidFinishNavigation` for a committed primary main frame, cross-document
+  navigation, with `NavigationHandle::IsHistory()`.
+- `ECEngine.registrableDomainForHost:` is
+  `registry_controlled_domains::GetDomainAndRegistry` with private
+  registries, or the host when it has none.
+- Cookies use the default storage partition's
+  `network::mojom::CookieManager`. `cookiesForDomains:` filters
+  `GetAllCookies` to unpartitioned, unexpired cookies at or under the
+  domains. `deleteCookies:` deletes the stored cookies with each name,
+  domain and path through `DeleteCanonicalCookie`, which deletes only a
+  cookie whose value is unchanged, so it passes the stored cookie rather
+  than the shell's. While `observedCookieDomains` is non-empty, an
+  `AddGlobalChangeListener` listener, bound again if the network service
+  restarts, reports changes under those domains to `cookieDelegate`: the
+  three insert causes as set, the removal causes as removed, and neither the
+  `OVERWRITE` half of an overwrite nor a partitioned cookie.
+- Logins: `loginsForURL:` reads `PasswordStoreInterface::GetLogins` with
+  the `PasswordFormDigest` of an HTML form at the URL's origin and keeps the
+  exact signon-realm matches, most recently used first, then the
+  `MatchType::kPSL` matches with `exactMatch` NO; blocklisted and federated
+  entries are dropped. `addLoginForURL:username:password:` reads the same
+  logins and calls `UpdateLogin` with the new password for a login of that
+  realm and username, or `AddLogin` with a form-submission login for the
+  page's URL without query, fragment or credentials.
+- History: `addVisitToURL:title:` calls `HistoryService::AddPage` with
+  `SOURCE_BROWSED` and then `SetPageTitle`, and
+  `setFavicon:iconURL:forPageURL:` writes the image's PNG bytes with
+  `FaviconService::MergeFavicon` as `kFavicon` at its pixel size, which
+  replaces the bitmap of that size and keeps the others. An incognito
+  context does neither.
+- Site settings: `permissionsForOrigin:` and
+  `setPermission:allowed:forOrigin:` share the content-settings code of
+  `sitePermissions` and `setSitePermission:allowed:`, for an origin instead
+  of the page's URL. `zoomPercentForHost:` and `setZoomPercent:forHost:`
+  read and write the profile's `HostZoomMap` level for the host, converted
+  as `ZoomController::GetZoomPercent` converts it; the default percentage
+  clears the host's level.
+
 ## How the host app hands control to Chromium
 
 - On macOS the browser process owns the main thread, which is Chromium's UI
