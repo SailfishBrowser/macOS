@@ -183,9 +183,21 @@ extension Engine {
     showPageMenu(menu, for: tab, page: contents)
   }
 
-  // The page, link, image, selection and text field menus (Chromium's, without Cast).
   func showPageMenu(_ menu: any PageMenuTarget, for tab: UUID, page: any TabPage) {
     guard let window = page.view.window else { return }
+    let items = NSMenu()
+    items.items = pageMenuItems(menu, for: tab, page: page)
+    // A context menu event, so AppKit adds Services and Writing Tools for the page's view.
+    let event = NSEvent.mouseEvent(
+      with: .rightMouseDown, location: window.mouseLocationOutsideOfEventStream, modifierFlags: [],
+      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+      eventNumber: 0, clickCount: 1, pressure: 1)!
+    let view = window.firstResponder as? NSView
+    NSMenu.popUpContextMenu(items, with: event, for: view?.isDescendant(of: page.view) == true ? view! : page.view)
+  }
+
+  // The page, link, image, selection and text field menus (Chromium's, without Cast).
+  func pageMenuItems(_ menu: any PageMenuTarget, for tab: UUID, page: any TabPage) -> [NSMenuItem] {
     let open: (URL) -> Void = { Self.continuation.yield(.newWindowRequested(tab: tab, url: $0, background: false)) }
     let openWindow = { (url: URL, incognito: Bool) -> Void in
       Self.continuation.yield(.windowRequested(tab: tab, url: url, incognito: incognito))
@@ -317,15 +329,7 @@ extension Engine {
       ]
       sections.append([speech])
     }
-    let items = NSMenu()
-    items.items = Array(sections.filter { !$0.isEmpty }.flatMap { [.separator()] + $0 }.dropFirst())
-    // A context menu event, so AppKit adds Services and Writing Tools for the page's view.
-    let event = NSEvent.mouseEvent(
-      with: .rightMouseDown, location: window.mouseLocationOutsideOfEventStream, modifierFlags: [],
-      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
-      eventNumber: 0, clickCount: 1, pressure: 1)!
-    let view = window.firstResponder as? NSView
-    NSMenu.popUpContextMenu(items, with: event, for: view?.isDescendant(of: page.view) == true ? view! : page.view)
+    return Array(sections.filter { !$0.isEmpty }.flatMap { [.separator()] + $0 }.dropFirst())
   }
 
   // Chrome's selection text in menu items: 50 characters, cut at a word.
