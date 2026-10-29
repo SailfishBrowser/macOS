@@ -427,6 +427,40 @@ class WebContentsDelegateBridge : public content::WebContentsDelegate,
     }
   }
 
+  // Blink reports the first frame with content of the primary page from the
+  // frame's presentation feedback.
+  void DidFirstVisuallyNonEmptyPaint() override { ReportFirstFrame(owner_); }
+
+  // Shown again after its document drew, the view embeds a new surface of the
+  // page in a new compositor. A copy of one pixel of that surface asks the
+  // display to draw it and completes once it has.
+  void OnVisibilityChanged(content::Visibility visibility) override {
+    content::RenderWidgetHostView* view =
+        web_contents()->GetRenderWidgetHostView();
+    if (visibility != content::Visibility::VISIBLE || !view ||
+        !web_contents()->CompletedFirstVisuallyNonEmptyPaint() ||
+        ![owner_.delegate
+            respondsToSelector:@selector(webContentsDidPresentFirstFrame:)]) {
+      return;
+    }
+    view->CopyFromSurface(
+        gfx::Rect(1, 1), gfx::Size(1, 1), base::TimeDelta(),
+        base::BindPostTaskToCurrentDefault(base::BindOnce(
+            &WebContentsDelegateBridge::DidCopyPixel,
+            weak_factory_.GetWeakPtr())));
+  }
+
+  void DidCopyPixel(const content::CopyFromSurfaceResult& result) {
+    ReportFirstFrame(owner_);
+  }
+
+  static void ReportFirstFrame(ECWebContents* owner) {
+    if ([owner.delegate
+            respondsToSelector:@selector(webContentsDidPresentFirstFrame:)]) {
+      [owner.delegate webContentsDidPresentFirstFrame:owner];
+    }
+  }
+
   // The modifier keys held at the last click or key press in the page, which
   // a link it opens follows (kRawKeyDown is the key press; kKeyDown is not
   // reported here).
@@ -660,6 +694,7 @@ class WebContentsDelegateBridge : public content::WebContentsDelegate,
   base::TimeTicks last_interaction_;
   bool fullscreen_ = false;
   __weak ECWebContents* owner_;
+  base::WeakPtrFactory<WebContentsDelegateBridge> weak_factory_{this};
 };
 
 // Finds the ECWebContents of a web contents.
