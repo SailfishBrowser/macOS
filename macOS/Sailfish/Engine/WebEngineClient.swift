@@ -48,6 +48,8 @@ enum WebEngineEvent: Equatable, Sendable {
   case downloaded(Download)
   // A login typed into a WebKit page that the profile's store does not hold, for its window to offer saving.
   case loginSubmitted(tab: UUID, login: PendingLogin)
+  // Protected video that failed in Chromium switched the tab to WebKit, for its window to offer Undo.
+  case openedInWebKit(tab: UUID, site: String)
 }
 
 enum ZoomStep: Equatable, Sendable {
@@ -87,6 +89,8 @@ struct WebEngineClient: Sendable {
   // Saves the login a toast offered to save, or forgets it when the toast goes unanswered.
   var saveLogin: @Sendable (_ id: PendingLogin.ID) async -> Void
   var dropLogin: @Sendable (_ id: PendingLogin.ID) async -> Void
+  // Shows the Chromium page a switch to WebKit for protected video left, as Undo on its toast.
+  var undoEngineSwitch: @Sendable (_ tab: UUID) async -> Void
   // Steps the page's zoom and returns its percent afterwards, nil without a page.
   var zoom: @Sendable (_ tab: UUID, _ step: ZoomStep) async -> Int?
   // Saves the live tabs' histories.

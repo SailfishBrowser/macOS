@@ -582,8 +582,9 @@ struct WindowFeature {
             .cancel(id: ToastDismissal(window: state.id)),
             space == state.spaces.selectedID ? .none : .send(.spaces(.select(space))),
             .send(.tab(.select(tab), in: space)))
-        case .editShortcut, .revertDownloadName, .saveLogin:
-          // The window opens the Shortcuts pane; the app renames the download back or saves the login.
+        case .editShortcut, .revertDownloadName, .saveLogin, .undoEngineSwitch:
+          // The window opens the Shortcuts pane; the app renames the download back, saves the login or switches
+          // the tab back.
           return .cancel(id: ToastDismissal(window: state.id))
         }
 

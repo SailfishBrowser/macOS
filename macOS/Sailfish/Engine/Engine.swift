@@ -23,6 +23,12 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   var extensionsRevision = 0
   // Each tab's unanswered permission request, shown as a popover on the URL pill.
   var permissionRequests: [UUID: PermissionRequest] = [:]
+  // Each tab's "Play in WebKit" offer, shown as a popover on the URL pill.
+  var engineOffers: [UUID: EngineOffer] = [:]
+  // Sites whose offer was declined, or whose switch was undone, this session.
+  @ObservationIgnored var declinedSites: Set<String> = []
+  // Each tab's last switch to WebKit for protected video, with the Chromium page it left, for the toast's Undo.
+  @ObservationIgnored var offerSwitches: [UUID: (site: String, left: UUID)] = [:]
   // Each tab's open JavaScript dialog, shown over its page.
   var dialogs: [UUID: PageDialog] = [:]
   // Each tab's selected text, for the URL pill's Share Quote.
@@ -406,6 +412,7 @@ extension WebEngineClient: DependencyKey {
     cancelDownload: { await Engine.shared.cancelDownload($0) },
     saveLogin: { await PasswordFill.save($0) },
     dropLogin: { await PasswordFill.drop($0) },
+    undoEngineSwitch: { await Engine.shared.undoEngineSwitch($0) },
     zoom: { tab, step in await Engine.shared.zoom(tab, step) },
     saveSessions: { await Engine.shared.saveSessions() },
     keepSessions: {

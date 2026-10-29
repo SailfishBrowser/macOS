@@ -63,6 +63,8 @@ extension Engine {
   func makeContents(_ tab: UUID, page id: UUID, _ context: ECBrowserContext) -> ECWebContents {
     let contents = ECWebContents(browserContext: context)
     contents.delegate = self
+    contents.addDocumentStartScript(ProtectedMedia.script)
+    contents.addMessageObjectNamed(ProtectedMedia.objectName)
     livePages[id] = contents
     owners[ObjectIdentifier(contents)] = (tab, id)
     if let state = Self.sessions.load(id), contents.restoreSessionState(state) {
@@ -125,6 +127,7 @@ extension Engine {
   func pageDidCommit(_ page: AnyObject, url: URL?, isNewNavigation: Bool) {
     guard let owner = owners[ObjectIdentifier(page)] else { return }
     let restoring = restoringPages.remove(owner.page) != nil
+    withdrawOffer(owner.tab, committedIn: owner.page)
     guard owner.page == shownRecord(owner.tab)?.id else { return }
     if let choice = choices[owner.tab], let url, siteOf(url) != choice.site {
       choices[owner.tab] = nil
@@ -201,7 +204,7 @@ extension Engine {
 
   // Shows the tab's page at `index`, muted as the tab is, and reports it at once. A page that is not alive is made
   // from its saved history and loads it; one without saved history is dropped instead.
-  private func show(_ tab: UUID, _ index: Int) {
+  func show(_ tab: UUID, _ index: Int) {
     guard let pages = pageRecords[tab], let hidden = shownRecord(tab) else { return }
     let record = pages[index]
     if livePages[record.id] == nil {
@@ -264,6 +267,7 @@ extension Engine {
   }
 
   func reportShown(_ tab: UUID) {
+    withdrawOffer(tab, committedIn: nil)
     guard let page = page(tab) else { return }
     loadProgress[tab] = page.loadProgress
     report(tab, page)
@@ -313,6 +317,8 @@ extension Engine {
     }
     permissionRequests.removeValue(forKey: tab)?.answer(false)
     dialogs.removeValue(forKey: tab)?.answer(false, "")
+    engineOffers[tab] = nil
+    offerSwitches[tab] = nil
     selections[tab] = nil
     hoveredLinks[tab] = nil
     readerable.remove(tab)
