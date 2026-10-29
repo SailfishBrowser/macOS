@@ -6,8 +6,10 @@
 #include <string>
 #include <vector>
 
+#include "base/strings/sys_string_conversions.h"
 #import "chrome/browser/app_controller_mac.h"
 #import "engine_core/ec_browser_context_private.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
 extern "C" int ChromeMain(int argc, const char** argv);
 
@@ -69,6 +71,13 @@ NSMenu* g_dock_menu;
 
 + (void)setDockMenu:(NSMenu*)menu {
   g_dock_menu = menu;
+}
+
++ (NSString*)registrableDomainForHost:(NSString*)host {
+  std::string domain = net::registry_controlled_domains::GetDomainAndRegistry(
+      base::SysNSStringToUTF8(host),
+      net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
+  return domain.empty() ? host : base::SysUTF8ToNSString(domain);
 }
 
 + (void)startWithArguments:(NSArray<NSString*>*)args {

@@ -26,6 +26,10 @@ EC_EXPORT
 // The Dock icon's menu (Chrome's own is dropped), nil for none. The shell
 // sets it once launching has finished, as it replaces the main menu.
 @property(class, nullable) NSMenu* dockMenu;
+// The host's registrable domain (eTLD+1, private registries such as
+// github.io included), or the host itself when it has none (an IP address,
+// localhost, a public suffix).
++ (NSString*)registrableDomainForHost:(NSString*)host;
 @end
 
 // Matches download::DownloadItem::DownloadState.
