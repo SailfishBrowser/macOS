@@ -2,18 +2,27 @@
 
 #include <algorithm>
 #include <tuple>
+#include <utility>
+#include <vector>
 
 #include "base/barrier_callback.h"
+#include "base/memory/weak_ptr.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/time/time.h"
+#include "base/types/expected.h"
 #include "chrome/browser/password_manager/factories/profile_password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "components/affiliations/core/browser/match_type.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/password_manager/core/browser/import/csv_password_sequence.h"
+#include "components/password_manager/core/browser/password_form_digest.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
+#include "components/password_manager/core/browser/password_store/password_store_backend_error.h"
+#include "components/password_manager/core/browser/password_store/password_store_consumer.h"
 #include "components/password_manager/core/browser/password_store/password_store_interface.h"
 #include "components/password_manager/core/browser/password_store/stored_credential.h"
 #include "content/public/browser/storage_partition.h"
+#include "net/base/apple/url_conversions.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_access_result.h"
 #include "net/cookies/cookie_options.h"
@@ -21,19 +30,85 @@
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 #include "url/gurl.h"
 
+namespace {
+
+using StoredCredential = password_manager::StoredCredential;
+
+// Reads the logins of one form digest from a password store and hands them
+// to `callback`, then deletes itself.
+class LoginsRequest : public password_manager::PasswordStoreConsumer {
+ public:
+  using Callback = base::OnceCallback<void(std::vector<StoredCredential>)>;
+
+  static void Start(Profile* profile,
+                    const password_manager::PasswordFormDigest& digest,
+                    Callback callback) {
+    LoginsRequest* request = new LoginsRequest(std::move(callback));
+    ProfilePasswordStoreFactory::GetForProfile(
+        profile, ServiceAccessType::EXPLICIT_ACCESS)
+        ->GetLogins(digest, request->weak_factory_.GetWeakPtr());
+  }
+
+  void OnGetPasswordStoreResultsOrErrorFrom(
+      password_manager::PasswordStoreInterface* store,
+      base::expected<std::vector<StoredCredential>,
+                     password_manager::PasswordStoreBackendError>
+          results_or_error) override {
+    std::move(callback_).Run(results_or_error.has_value()
+                                 ? std::move(*results_or_error)
+                                 : std::vector<StoredCredential>());
+    delete this;
+  }
+
+ private:
+  explicit LoginsRequest(Callback callback) : callback_(std::move(callback)) {}
+
+  Callback callback_;
+  base::WeakPtrFactory<LoginsRequest> weak_factory_{this};
+};
+
+// The digest of the page's form, as Chrome's password manager makes it for
+// an HTML form on the page.
+password_manager::PasswordFormDigest DigestForURL(const GURL& url) {
+  return password_manager::PasswordFormDigest(
+      password_manager::PasswordForm::Scheme::kHtml,
+      password_manager_util::GetSignonRealm(url), url.GetWithEmptyPath());
+}
+
+}  // namespace
+
+@interface ECPassword ()
+- (instancetype)initWithURLString:(NSString*)URLString
+                         username:(NSString*)username
+                         password:(NSString*)password
+                       exactMatch:(BOOL)exactMatch;
+@end
+
 @implementation ECPassword
 
 @synthesize URLString = _URLString;
 @synthesize username = _username;
 @synthesize password = _password;
+@synthesize exactMatch = _exactMatch;
 
 - (instancetype)initWithURLString:(NSString*)URLString
                          username:(NSString*)username
                          password:(NSString*)password {
+  return [self initWithURLString:URLString
+                        username:username
+                        password:password
+                      exactMatch:YES];
+}
+
+- (instancetype)initWithURLString:(NSString*)URLString
+                         username:(NSString*)username
+                         password:(NSString*)password
+                       exactMatch:(BOOL)exactMatch {
   if ((self = [super init])) {
     _URLString = [URLString copy];
     _username = [username copy];
     _password = [password copy];
+    _exactMatch = exactMatch;
   }
   return self;
 }
@@ -209,6 +284,99 @@ bool CookieIsUnderDomains(const net::CanonicalCookie& cookie,
             },
             done));
   }
+}
+
+// As Chrome's password manager fetches the logins for a form: exact
+// matches, then the public suffix matches it offers, without blocklisted
+// and federated entries, which have no password.
+- (void)loginsForURL:(NSURL*)url
+          completion:(void (^)(NSArray<ECPassword*>*))completion {
+  password_manager::PasswordFormDigest digest =
+      DigestForURL(net::GURLWithNSURL(url));
+  std::string realm = digest.signon_realm;
+  LoginsRequest::Start(
+      self.profile, digest,
+      base::BindOnce(^(std::vector<StoredCredential> forms) {
+        std::erase_if(forms, [&](const StoredCredential& form) {
+          bool psl = form.match_type &&
+                     (*form.match_type & affiliations::MatchType::kPSL) ==
+                         affiliations::MatchType::kPSL;
+          return form.blocked_by_user || form.federation_origin.IsValid() ||
+                 (form.signon_realm != realm && !psl);
+        });
+        std::ranges::stable_sort(
+            forms, [&](const StoredCredential& a, const StoredCredential& b) {
+              bool a_exact = a.signon_realm == realm;
+              bool b_exact = b.signon_realm == realm;
+              return a_exact != b_exact ? a_exact
+                                        : a.date_last_used > b.date_last_used;
+            });
+        NSMutableArray<ECPassword*>* logins = [NSMutableArray array];
+        for (const StoredCredential& form : forms) {
+          [logins
+              addObject:[[ECPassword alloc]
+                            initWithURLString:base::SysUTF8ToNSString(
+                                                  form.url.spec())
+                                     username:base::SysUTF16ToNSString(
+                                                  form.username_value)
+                                     password:base::SysUTF16ToNSString(
+                                                  form.password_value.value())
+                                   exactMatch:form.signon_realm == realm]];
+        }
+        completion(logins);
+      }));
+}
+
+// As Chrome's save prompt saves a login: a new password for a username the
+// realm has updates that login, and anything else is added.
+- (void)addLoginForURL:(NSURL*)url
+              username:(NSString*)username
+              password:(NSString*)password {
+  GURL page = net::GURLWithNSURL(url);
+  GURL::Replacements strip;
+  strip.ClearUsername();
+  strip.ClearPassword();
+  strip.ClearQuery();
+  strip.ClearRef();
+  page = page.ReplaceComponents(strip);
+  password_manager::PasswordFormDigest digest = DigestForURL(page);
+  std::u16string name = base::SysNSStringToUTF16(username);
+  std::u16string value = base::SysNSStringToUTF16(password);
+  scoped_refptr<password_manager::PasswordStoreInterface> store =
+      ProfilePasswordStoreFactory::GetForProfile(
+          self.profile, ServiceAccessType::EXPLICIT_ACCESS);
+  LoginsRequest::Start(
+      self.profile, digest,
+      base::BindOnce(
+          [](scoped_refptr<password_manager::PasswordStoreInterface> store,
+             GURL page, std::string realm, std::u16string name,
+             std::u16string value, std::vector<StoredCredential> forms) {
+            base::Time now = base::Time::Now();
+            for (StoredCredential& form : forms) {
+              if (form.signon_realm == realm && !form.blocked_by_user &&
+                  form.username_value == name) {
+                form.password_value =
+                    password_manager::PasswordString(std::move(value));
+                form.date_password_modified = now;
+                form.date_last_used = now;
+                store->UpdateLogin(std::move(form));
+                return;
+              }
+            }
+            StoredCredential form;
+            form.url = page;
+            form.signon_realm = realm;
+            form.username_value = name;
+            form.password_value =
+                password_manager::PasswordString(std::move(value));
+            form.type = password_manager::PasswordForm::Type::kFormSubmission;
+            form.date_created = now;
+            form.date_password_modified = now;
+            form.date_last_used = now;
+            form.in_store = password_manager::PasswordForm::Store::kProfileStore;
+            store->AddLogin(std::move(form));
+          },
+          store, page, digest.signon_realm, name, value));
 }
 
 @end

@@ -200,6 +200,9 @@ EC_EXPORT
 @property(readonly) NSString* URLString;
 @property(readonly) NSString* username;
 @property(readonly) NSString* password;
+// NO for a login loginsForURL: found by public suffix (saved for another
+// subdomain of the site); YES otherwise.
+@property(readonly, getter=isExactMatch) BOOL exactMatch;
 @end
 
 // A cookie from another browser, as importCookies: takes it.
@@ -240,6 +243,18 @@ EC_EXPORT
 // set them. `completion` gets how many it took, on the main thread.
 - (void)importCookies:(NSArray<ECCookie*>*)cookies
            completion:(void (^)(NSInteger count))completion;
+// The saved logins Chrome would offer on the URL's page, blocklisted ones
+// left out: those saved for its origin, most recently used first, then those
+// of other subdomains of the site (exactMatch NO), in `completion` on the
+// main thread.
+- (void)loginsForURL:(NSURL*)url
+          completion:(void (^)(NSArray<ECPassword*>* logins))completion;
+// Saves a login typed on the URL's page, as Chrome's save prompt does: it
+// updates the password of the same username saved for the URL's origin, or
+// adds the login.
+- (void)addLoginForURL:(NSURL*)url
+              username:(NSString*)username
+              password:(NSString*)password;
 @end
 
 @interface ECBrowserContext (Cookies)
