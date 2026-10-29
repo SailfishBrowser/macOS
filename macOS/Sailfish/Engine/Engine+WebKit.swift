@@ -74,6 +74,7 @@ extension Engine {
       loadProgress[tab] = page.loadProgress
     }
     report(tab, page)
+    recordVisit(tab, page)
   }
 
   func webContents(_ contents: ECWebContents, didCommitNavigationIsHistory isHistory: Bool) {
