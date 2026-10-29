@@ -198,6 +198,15 @@ enum WebKitPageScript {
   document.addEventListener("mouseout", (e) => e.relatedTarget || hover(""), true);
 
   if (isTop) {
+    // A frame after the one that shows the page's first content, or after its load when it shows none.
+    const painted = () => requestAnimationFrame(() => requestAnimationFrame(() => post("painted")));
+    new PerformanceObserver((list, observer) => {
+      if (!list.getEntriesByName("first-contentful-paint").length) return;
+      observer.disconnect();
+      painted();
+    }).observe({ type: "paint", buffered: true });
+    addEventListener("load", painted, { once: true });
+
     let selected = "";
     let pending = false;
     document.addEventListener("selectionchange", () => {
@@ -398,6 +407,8 @@ enum PageScriptMessage {
   case selection(String)
   // The main frame's icons, best first.
   case icons([URL])
+  // The main frame's first content is on screen.
+  case painted
 
   init?(_ body: Any) {
     guard let body = body as? [String: Any], let kind = body["kind"] as? String else { return nil }
@@ -405,6 +416,7 @@ enum PageScriptMessage {
     case let ("hover", href as String): self = .hover(URL(string: href))
     case let ("selection", text as String): self = .selection(text)
     case let ("icons", hrefs as [String]): self = .icons(hrefs.compactMap { URL(string: $0) })
+    case ("painted", _): self = .painted
     default: return nil
     }
   }

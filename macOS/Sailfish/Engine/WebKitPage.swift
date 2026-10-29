@@ -40,6 +40,8 @@ import WebKit
     webView.isInspectable = !incognito
     webView.navigationDelegate = self
     webView.uiDelegate = self
+    // Clear until its first paint, as a new Chromium page is, so the card or the page this one replaces shows through.
+    webView.alphaValue = 0
     observations = [
       observe(\.url), observe(\.title), observe(\.isLoading), observe(\.estimatedProgress), observe(\.canGoBack),
       observe(\.canGoForward), observe(\.hasOnlySecureContent),
@@ -148,7 +150,13 @@ import WebKit
       }
     case let .hover(url): Engine.shared.webKitPage(self, hovered: url)
     case let .selection(text): Engine.shared.webKitPage(self, selected: text)
+    case .painted: painted()
     }
+  }
+
+  // The page's first content on screen, or a load that failed, shows its view.
+  private func painted() {
+    webView.alphaValue = 1
   }
 
   // MARK: Navigation
@@ -204,10 +212,12 @@ import WebKit
 
   func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
     isProvisional = false
+    painted()
   }
 
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
     isProvisional = false
+    painted()
   }
 
   // HTTP Basic and Digest ask for a name and password; server trust and everything else are left to macOS, so an
