@@ -29,9 +29,10 @@ import WebKit
     return store
   }
 
-  // Ends the profile's incognito session, so the next one starts with a fresh store.
+  // Ends the profile's incognito session with its data removed, so the next one starts with a fresh store.
   static func dropIncognitoStore(profile: UUID) {
-    incognitoStores[profile] = nil
+    incognitoStores.removeValue(forKey: profile)?
+      .removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {}
   }
 
   // Takes a deleted profile's store out of use, with its data removed: a page of the profile gets a store that keeps

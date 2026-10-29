@@ -233,6 +233,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     Autocomplete.forget(context)
     closeTabs(of: context)
     context.close()
+    WebKitStores.dropIncognitoStore(profile: profile)
   }
 
   // Closes the profile's context and pages, then has the engine delete its data and removes its WebKit store and
