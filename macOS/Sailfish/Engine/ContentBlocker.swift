@@ -580,15 +580,20 @@ private struct FilterSet {
       hidingOff.append(contentsOf: pages)
       return
     }
-    guard !(exception && parsed.isImportant), let (filter, isHost) = Self.urlFilter(pattern) else { return }
-    var trigger = ContentRule.Trigger(urlFilter: filter, isCaseSensitive: parsed.isCaseSensitive ? true : nil)
+    guard !(exception && parsed.isImportant), let (filters, isHost) = Self.urlFilters(pattern) else { return }
+    var trigger = ContentRule.Trigger(isCaseSensitive: parsed.isCaseSensitive ? true : nil)
     switch parsed.scope {
     case .all: break
     case let .only(domains): trigger.ifDomain = domains.map { "*" + $0 }
     case let .except(domains): trigger.unlessDomain = domains.map { "*" + $0 }
     }
     trigger.loadType = parsed.loadType.map { [$0] }
-    for trigger in Self.typed(trigger, parsed, wholeHost: isHost || exception) {
+    let triggers = filters.map { filter in
+      var filtered = trigger
+      filtered.urlFilter = filter
+      return filtered
+    }
+    for trigger in triggers.flatMap({ Self.typed($0, parsed, wholeHost: isHost || exception) }) {
       let rule = ContentRule(trigger: trigger, action: .init(type: exception ? "ignore-previous-rules" : "block"))
       if exception {
         exceptions.append(rule)
@@ -654,13 +659,14 @@ private struct FilterSet {
     }
   }
 
-  // A pattern as a WebKit url-filter, and whether it names a whole host; nil for a regex WebKit cannot run or a
-  // pattern that is not ASCII.
-  static func urlFilter(_ pattern: Substring) -> (filter: String, isHost: Bool)? {
+  // A pattern as WebKit url-filters, and whether it names a whole host; nil for a regex WebKit cannot run or a pattern
+  // that is not ASCII. A final separator, which can also be the URL's end, gives two filters, one for each: as one
+  // filter with an optional group, a list of urlhaus's paths compiles twenty times slower.
+  static func urlFilters(_ pattern: Substring) -> (filters: [String], isHost: Bool)? {
     guard pattern.allSatisfy({ $0.isASCII && !$0.isWhitespace }) else { return nil }
     if pattern.count > 2, pattern.hasPrefix("/"), pattern.hasSuffix("/") {
       let regex = pattern.dropFirst().dropLast()
-      return isWebKitRegex(regex) ? (String(regex), false) : nil
+      return isWebKitRegex(regex) ? ([String(regex)], false) : nil
     }
     var source = pattern
     var filter = ""
@@ -684,12 +690,14 @@ private struct FilterSet {
     }
     let host = source.hasSuffix("^") ? source.dropLast() : source
     let isHost = hostAnchored && !host.isEmpty && host.allSatisfy { $0.isLetter || $0.isNumber || "._-".contains($0) }
+    // After a whole host the path always follows, so its separator cannot be the end.
+    let endsInSeparator = source.hasSuffix("^") && !endAnchored && !isHost && source.count > 1
+    if endsInSeparator {
+      source = source.dropLast()
+    }
     for index in source.indices {
       switch source[index] {
       case "*": filter += ".*"
-      // A separator or the end; after a whole host the path always follows, so a separator.
-      case "^" where source.index(after: index) == source.endIndex && !endAnchored && !isHost:
-        filter += "(\(separator).*)?$"
       case "^": filter += separator
       case let character where "\\.+?$()[]{}|".contains(character): filter += "\\\(character)"
       case let character: filter.append(character)
@@ -698,7 +706,8 @@ private struct FilterSet {
     if endAnchored {
       filter += "$"
     }
-    return (filter.isEmpty ? ".*" : filter, isHost)
+    guard !endsInSeparator else { return ([filter + separator, filter + "$"], isHost) }
+    return ([filter.isEmpty ? ".*" : filter], isHost)
   }
 
   // Whether WebKit's regex subset covers the regex: ASCII, no alternation, counted repetition, lookaround,
