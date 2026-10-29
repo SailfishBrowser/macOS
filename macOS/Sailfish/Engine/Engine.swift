@@ -132,6 +132,9 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
       downloadContexts.append(context)
       downloadProfiles[context] = profile
       context.downloads.forEach { browserContext(context, downloadDidUpdate: $0) }
+      if !incognito {
+        WebKitDownloads.shared.report(profile: profile)
+      }
     }
     return context
   }
@@ -252,6 +255,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
 
   // Closes the profile's context, then has the engine delete its data.
   func deleteProfile(_ profile: UUID) {
+    WebKitDownloads.shared.forget(profile: profile)
     if let context = contexts.removeValue(forKey: profile) {
       Autocomplete.forget(context)
       closeTabs(of: context)

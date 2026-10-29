@@ -7,6 +7,8 @@ import WebKit
 // A tab's page rendered by WebKit, owning one web view.
 @MainActor final class WebKitPage: NSObject, TabPage, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
   let id: UUID
+  let profile: UUID
+  let incognito: Bool
   let webView: WKWebView
   // Called on every change of the page's URL, title, loading, progress, history or security, and of its favicon.
   var onUpdate: (@MainActor (WebKitPage) -> Void)?
@@ -25,6 +27,8 @@ import WebKit
   // Set when a terminated content process reloads the page, until a load finishes.
   private var reloadedAfterTermination = false
   let finder = WebKitFind()
+  // The isolated script's hit test of the last right click, and when it arrived.
+  var contextMenuHit: (hit: WebKitContextMenu.Hit, time: ContinuousClock.Instant)?
   private static let textDirectiveCharacters = CharacterSet(
     charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._~")
 
@@ -32,11 +36,15 @@ import WebKit
   // and with it the opener's message handler, so the popup's page takes a controller of its own.
   init(id: UUID, profile: UUID, incognito: Bool, configuration: WKWebViewConfiguration?) {
     self.id = id
+    self.profile = profile
+    self.incognito = incognito
     let fresh = WebKitStores.configuration(profile: profile, incognito: incognito)
     let configuration = configuration ?? fresh
     configuration.userContentController = fresh.userContentController
-    webView = WKWebView(frame: .zero, configuration: configuration)
+    let webView = WebKitWebView(frame: .zero, configuration: configuration)
+    self.webView = webView
     super.init()
+    webView.page = self
     fresh.userContentController.add(self, contentWorld: WebKitPageScript.world, name: "sailfish")
     // The window's two-finger swipe switches spaces.
     webView.allowsBackForwardNavigationGestures = false
@@ -140,8 +148,11 @@ import WebKit
   }
 
   func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-    guard message.frameInfo.isMainFrame, let body = PageScriptMessage(message.body) else { return }
+    guard let body = PageScriptMessage(message.body) else { return }
     switch body {
+    // A right click's hit test comes from the frame clicked; everything else only from the main frame.
+    case let .contextMenu(hit): contextMenuHit = (hit, .now)
+    case _ where !message.frameInfo.isMainFrame: break
     case let .icons(icons):
       if let icon = icons.first {
         fetchFavicon(icon)
@@ -160,6 +171,9 @@ import WebKit
     _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
     decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
   ) {
+    if WebKitDownloads.isDownload(action) {
+      return decisionHandler(.download)
+    }
     let engine = Engine.shared
     guard action.targetFrame?.isMainFrame == true, let tab = engine.tab(of: self), let url = action.request.url else {
       return decisionHandler(.allow)

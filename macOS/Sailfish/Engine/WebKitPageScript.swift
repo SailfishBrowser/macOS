@@ -197,6 +197,34 @@ enum WebKitPageScript {
   );
   document.addEventListener("mouseout", (e) => e.relatedTarget || hover(""), true);
 
+  // What a right click is on, for Sailfish's context menu, which opens right after.
+  const textTypes = ["text", "search", "url", "tel", "email", "password", "number"];
+  document.addEventListener(
+    "contextmenu",
+    (e) => {
+      const target = e.target instanceof Element ? e.target : null;
+      const link = target && target.closest("a[href], area[href]");
+      const image = target && target.closest("img");
+      const isField =
+        !!target && (target.tagName === "TEXTAREA" || (target.tagName === "INPUT" && textTypes.includes(target.type)));
+      const field = isField && !target.readOnly && !target.disabled ? target : null;
+      const editable = !!field || !!(target && target.isContentEditable);
+      // A text field's selection is not the document's.
+      const selection = field
+        ? field.value.substring(field.selectionStart || 0, field.selectionEnd || 0)
+        : String(getSelection() || "");
+      post("contextMenu", {
+        link: link && typeof link.href === "string" ? link.href : "",
+        linkText: link ? link.innerText.trim() : "",
+        image: image ? image.currentSrc || image.src : "",
+        selection,
+        editable,
+        direction: editable ? getComputedStyle(target).direction : "",
+      });
+    },
+    true,
+  );
+
   if (isTop) {
     let selected = "";
     let pending = false;
@@ -398,6 +426,8 @@ enum PageScriptMessage {
   case selection(String)
   // The main frame's icons, best first.
   case icons([URL])
+  // What a right click in any frame is on.
+  case contextMenu(WebKitContextMenu.Hit)
 
   init?(_ body: Any) {
     guard let body = body as? [String: Any], let kind = body["kind"] as? String else { return nil }
@@ -405,6 +435,7 @@ enum PageScriptMessage {
     case let ("hover", href as String): self = .hover(URL(string: href))
     case let ("selection", text as String): self = .selection(text)
     case let ("icons", hrefs as [String]): self = .icons(hrefs.compactMap { URL(string: $0) })
+    case let ("contextMenu", hit as [String: Any]): self = .contextMenu(WebKitContextMenu.Hit(hit))
     default: return nil
     }
   }
