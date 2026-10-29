@@ -313,6 +313,34 @@ changes what an existing call does.
   as `ZoomController::GetZoomPercent` converts it; the default percentage
   clears the host's level.
 
+## Main-world scripts
+
+`addDocumentStartScript:` runs a script in the main world of every frame
+before the page's own scripts, and `addMessageObjectNamed:` adds an object
+whose `postMessage(string)` reaches the delegate's
+`webContents:didReceiveMessage:fromObject:origin:mainFrame:`. Both use
+`components/js_injection`, as Android WebView does, and apply from the next
+navigation on.
+
+- Browser side: each `ECWebContents` makes one
+  `js_injection::JsCommunicationHost` on first use and destroys it before
+  its web contents. Scripts go to `AddPersistentJavaScript` at
+  `kDocumentStart` and objects to `AddWebMessageHostFactory`, both in world
+  `ISOLATED_WORLD_ID_GLOBAL` for the origin rule `*`. The host reaches each
+  frame through its remote associated interfaces and hands the renderer the
+  message remotes itself, so no binder is registered.
+- Renderer side (patches/0012): `ChromeContentRendererClient` makes a
+  `js_injection::JsCommunication` in `RenderFrameCreated` and runs its
+  document-start scripts first in `RunScriptsAtDocumentStart`, before the
+  extension scripts, which run only if the frame outlived ours. Every
+  Chromium renderer frame carries the observer, but without a host it holds
+  no scripts or objects.
+- Messages: a frame's host is made on its first message, with the frame's
+  origin and whether it is the main frame. js_injection names opaque and
+  local origins `null`, which reaches the delegate as a nil origin. String
+  messages are posted to the main queue and dropped if the web contents
+  closed meanwhile; other payloads are dropped.
+
 ## How the host app hands control to Chromium
 
 - On macOS the browser process owns the main thread, which is Chromium's UI

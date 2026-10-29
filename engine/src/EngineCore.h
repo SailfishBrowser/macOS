@@ -473,6 +473,16 @@ EC_EXPORT
 // a back, forward or history entry step.
 - (void)webContents:(ECWebContents*)contents
     didCommitNavigationIsHistory:(BOOL)isHistory;
+// A string a frame's script passed to the postMessage() of the object named
+// `name` (addMessageObjectNamed:). `origin` is the frame's origin, nil when
+// it is opaque, as a data: page's, or local, as a file: page's. Messages
+// that are not strings are dropped. Delivered on a later turn of the main
+// thread, so the shell may navigate or close the web contents inside it.
+- (void)webContents:(ECWebContents*)contents
+    didReceiveMessage:(NSString*)message
+           fromObject:(NSString*)name
+               origin:(nullable NSURL*)origin
+            mainFrame:(BOOL)mainFrame;
 // The Chrome Web Store asks to install an extension. `permissions` are the
 // warnings Chrome lists for it. Without this method installs are refused.
 - (void)webContents:(ECWebContents*)contents
@@ -617,6 +627,14 @@ EC_EXPORT
 - (void)evaluateJavaScript:(NSString*)script
                 completion:(void (^)(NSString* _Nullable result))completion
     NS_SWIFT_NAME(evaluateJavaScript(_:completion:));
+// Runs `script` in the main world of every frame at document start, before
+// the page's own scripts, from the next navigation on.
+- (void)addDocumentStartScript:(NSString*)script;
+// Adds a main-world object named `name` to every frame, from the next
+// navigation on. A string passed to its postMessage() reaches the delegate's
+// webContents:didReceiveMessage:fromObject:origin:mainFrame:. A name added
+// before is ignored.
+- (void)addMessageObjectNamed:(NSString*)name;
 
 // Finds `string` (case-insensitively), or the next match if it is unchanged.
 - (void)findString:(NSString*)string forward:(BOOL)forward;
