@@ -33,6 +33,8 @@ import WebKit
   var mediaState = WebKitMediaState()
   // Set while the page, shown again, waits to come back into the window.
   private var showsOnReturn = false
+  // Shows the page on the display's next frame.
+  private var nextFrame: CADisplayLink?
   private static let textDirectiveCharacters = CharacterSet(
     charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._~")
 
@@ -134,6 +136,7 @@ import WebKit
   }
 
   func close() {
+    nextFrame?.invalidate()
     observations = []
     onUpdate = nil
     webView.configuration.userContentController.removeAllScriptMessageHandlers()
@@ -183,13 +186,23 @@ import WebKit
     }
   }
 
-  // Shows the view once WebKit has put the page's pending drawing on screen, which a snapshot taken after screen
-  // updates waits for; one point of it costs nothing.
+  // Shows the view once the page's pending drawing is on screen: a snapshot taken after screen updates waits for
+  // WebKit to draw it (one point of it costs nothing), and its tiles reach the screen on the display's next frame.
   private func showWhenDrawn() {
     let configuration = WKSnapshotConfiguration()
     configuration.rect = CGRect(x: 0, y: 0, width: 1, height: 1)
     configuration.snapshotWidth = 1
-    webView.takeSnapshot(with: configuration) { [weak self] _, _ in self?.webView.alphaValue = 1 }
+    webView.takeSnapshot(with: configuration) { [weak self] _, _ in
+      guard let self, nextFrame == nil else { return }
+      nextFrame = webView.displayLink(target: self, selector: #selector(show(_:)))
+      nextFrame?.add(to: .main, forMode: .common)
+    }
+  }
+
+  @objc private func show(_ link: CADisplayLink) {
+    link.invalidate()
+    nextFrame = nil
+    webView.alphaValue = 1
   }
 
   // Shown again by Back or Forward: clear until it has drawn again, as its content returns a frame or two after its
