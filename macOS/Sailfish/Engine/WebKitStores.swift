@@ -58,6 +58,13 @@ import WebKit
     controller.addUserScript(
       WKUserScript(
         source: PasswordFill.script, injectionTime: .atDocumentEnd, forMainFrameOnly: false, in: PasswordFill.world))
+    if WebKitPasskeys.isEntitled {
+      WebKitPasskeys.requestAccess()
+    } else {
+      controller.addUserScript(
+        WKUserScript(
+          source: WebKitPasskeys.hidingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+    }
     return configuration
   }
 }
