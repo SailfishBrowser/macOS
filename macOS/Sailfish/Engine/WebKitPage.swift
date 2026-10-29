@@ -193,10 +193,12 @@ import WebKit
     }
   }
 
+  // The store's next page takes a web view started once this one shows, so it opens as fast as the first.
   @objc private func show(_ link: CADisplayLink) {
     link.invalidate()
     nextFrame = nil
     webView.alphaValue = 1
+    WebKitStores.warm(profile: profile, incognito: incognito)
   }
 
   // Shown again by Back or Forward: clear until it has drawn again, as its content returns a frame or two after its
