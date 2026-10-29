@@ -58,9 +58,9 @@ extension WebKitStores {
     warmViews[key] = nil
   }
 
-  // An incognito session ended, so the next one's store starts cold.
-  static func dropIncognitoWarmView(profile: UUID) {
-    let key = Key(profile: profile, incognito: true)
+  // The store's session ended or its profile was deleted, so its hidden page goes and a next store starts cold.
+  static func dropWarmView(profile: UUID, incognito: Bool) {
+    let key = Key(profile: profile, incognito: incognito)
     opened.remove(key)
     warmViews[key] = nil
   }

@@ -33,7 +33,7 @@ import WebKit
   static func dropIncognitoStore(profile: UUID) {
     incognitoStores.removeValue(forKey: profile)?
       .removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {}
-    dropIncognitoWarmView(profile: profile)
+    dropWarmView(profile: profile, incognito: true)
   }
 
   // Takes a deleted profile's store out of use, with its data removed: a page of the profile gets a store that keeps
@@ -41,6 +41,7 @@ import WebKit
   static func retireStore(profile: UUID) async {
     let store = stores[profile]
     stores[profile] = .nonPersistent()
+    dropWarmView(profile: profile, incognito: false)
     await store?.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
   }
 
