@@ -38,23 +38,17 @@ import WebKit
   private static let textDirectiveCharacters = CharacterSet(
     charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._~")
 
-  // `configuration` is the one WebKit passes for a popup, nil otherwise. It shares its opener's content controller,
-  // and with it the opener's message handler, so the popup's page takes a controller of its own.
-  init(id: UUID, profile: UUID, incognito: Bool, configuration: WKWebViewConfiguration?) {
+  init(id: UUID, profile: UUID, incognito: Bool, webView: WebKitWebView) {
     self.id = id
     self.profile = profile
     self.incognito = incognito
-    let fresh = WebKitStores.configuration(profile: profile, incognito: incognito)
-    let configuration = configuration ?? fresh
-    configuration.userContentController = fresh.userContentController
-    Self.allowPictureInPicture(configuration)
-    let webView = WebKitWebView(frame: .zero, configuration: configuration)
     self.webView = webView
     super.init()
     webView.page = self
-    fresh.userContentController.add(self, contentWorld: WebKitPageScript.world, name: "sailfish")
-    fresh.userContentController.add(self, contentWorld: PasswordFill.world, name: PasswordFill.handlerName)
-    ContentBlocker.apply(to: fresh.userContentController)
+    let controller = webView.configuration.userContentController
+    controller.add(self, contentWorld: WebKitPageScript.world, name: "sailfish")
+    controller.add(self, contentWorld: PasswordFill.world, name: PasswordFill.handlerName)
+    ContentBlocker.apply(to: controller)
     // The window's two-finger swipe switches spaces.
     webView.allowsBackForwardNavigationGestures = false
     webView.allowsMagnification = true
@@ -524,6 +518,17 @@ import WebKit
 // page menu, the same as a Chromium page's.
 final class WebKitWebView: WKWebView {
   weak var page: WebKitPage?
+
+  // A page's web view on the profile's store, with the page scripts. `configuration` is the one WebKit passes for a
+  // popup, nil otherwise. It shares its opener's content controller, and with it the opener's message handler, so the
+  // popup's view takes a controller of its own.
+  convenience init(profile: UUID, incognito: Bool, configuration: WKWebViewConfiguration?) {
+    let fresh = WebKitStores.configuration(profile: profile, incognito: incognito)
+    let configuration = configuration ?? fresh
+    configuration.userContentController = fresh.userContentController
+    WebKitPage.allowPictureInPicture(configuration)
+    self.init(frame: .zero, configuration: configuration)
+  }
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()

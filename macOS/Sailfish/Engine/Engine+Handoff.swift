@@ -35,30 +35,33 @@ extension WebKitStores {
     let incognito: Bool
   }
 
-  // Each store's hidden page, kept until the store's first page exists, and the stores that have had one.
-  private static var warmViews: [Key: WKWebView] = [:]
+  // Each store's warm web view, kept for the store's first page, and the stores that have had a page.
+  private static var warmViews: [Key: WebKitWebView] = [:]
   private static var opened: Set<Key> = []
 
-  // Starts WebKit and the store's processes with a hidden page on about:blank, so the store's first page opens
-  // fast. Nothing once the store has had a page.
+  // Starts WebKit for the store with a page's web view, which the store's first page then takes: a script run in its
+  // empty document starts the store's content process with the page script's world, its canvas starts the GPU
+  // process, and reading the store's cookies starts the network process. Nothing once the store has had a page.
   static func warm(profile: UUID, incognito: Bool) {
     let key = Key(profile: profile, incognito: incognito)
     guard warmViews[key] == nil, !opened.contains(key) else { return }
-    let configuration = WKWebViewConfiguration()
-    configuration.websiteDataStore = store(profile: profile, incognito: incognito)
-    let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 1, height: 1), configuration: configuration)
-    view.load(URLRequest(url: URL(string: "about:blank")!))
+    let view = WebKitWebView(profile: profile, incognito: incognito, configuration: nil)
+    view.evaluateJavaScript(
+      "document.createElement('canvas').getContext('2d').fillRect(0, 0, 1, 1)", in: nil, in: WebKitPageScript.world
+    ) { _ in }
+    view.configuration.websiteDataStore.httpCookieStore.getAllCookies { _ in }
     warmViews[key] = view
   }
 
-  // The store's first page exists, so its hidden page goes.
-  static func pageOpened(profile: UUID, incognito: Bool) {
+  // The web view for the store's next page: the warm one for its first, when there is one.
+  static func webView(profile: UUID, incognito: Bool) -> WebKitWebView {
     let key = Key(profile: profile, incognito: incognito)
     opened.insert(key)
-    warmViews[key] = nil
+    return warmViews.removeValue(forKey: key)
+      ?? WebKitWebView(profile: profile, incognito: incognito, configuration: nil)
   }
 
-  // The store's session ended or its profile was deleted, so its hidden page goes and a next store starts cold.
+  // The store's session ended or its profile was deleted, so its warm view goes and a next store starts cold.
   static func dropWarmView(profile: UUID, incognito: Bool) {
     let key = Key(profile: profile, incognito: incognito)
     opened.remove(key)
