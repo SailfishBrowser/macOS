@@ -287,6 +287,16 @@ EC_EXPORT
 // destinationURL, in `completion` on the main thread (nil for none).
 - (void)faviconForPageURL:(NSURL*)URL
                completion:(void (^)(NSImage* _Nullable favicon))completion;
+// Records a visit to a page the shell showed itself, as a browsed visit
+// with its title, so history and autocomplete find it. An incognito context
+// records nothing.
+- (void)addVisitToURL:(NSURL*)url title:(NSString*)title;
+// Saves the page's favicon, loaded from `iconURL`, for faviconForPageURL:.
+// It replaces the saved image of the same pixel size. An incognito context
+// saves nothing.
+- (void)setFavicon:(NSImage*)image
+           iconURL:(NSURL*)iconURL
+        forPageURL:(NSURL*)pageURL;
 @end
 
 @protocol ECExtensionPopupDelegate <NSObject>
