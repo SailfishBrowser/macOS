@@ -139,6 +139,28 @@ final class DownloadsFeatureTests: XCTestCase {
     await store.receive(\.finishedShown) { $0.finished = nil }
   }
 
+  func testAFinishedExtensionKeepsItsNameForTheEngineToInstall() async {
+    let crx = Download(
+      id: "0/2", url: URL(string: "https://clients2.googleusercontent.com/crx/blobs/a.crx")!,
+      fileURL: URL(filePath: "/tmp/Webstore Downloads/pejdijmoenmkgeppbflobdenhhabjlaij_7620.crx"),
+      receivedBytes: 10, totalBytes: 10, state: .complete, startTime: Date(timeIntervalSince1970: 1_000))
+    var running = crx
+    running.state = .inProgress
+    let clock = TestClock()
+    let store = TestStore(initialState: DownloadsFeature.State(downloads: [running])) {
+      DownloadsFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+    }
+
+    await store.send(.updated(crx)) {
+      $0.downloads[id: crx.id] = crx
+      $0.finished = crx.id
+    }
+    await clock.advance(by: .seconds(30))
+    await store.receive(\.finishedShown) { $0.finished = nil }
+  }
+
   func testRevertingMovesTheFileBackAndForgetsTheName() async {
     var renamed = download
     renamed.fileURL = URL(filePath: "/tmp/Table.pdf")
