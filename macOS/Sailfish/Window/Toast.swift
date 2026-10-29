@@ -146,8 +146,9 @@ struct ToastView: View {
     .padding(.leading, 14)
     .padding(.trailing, 8)
     .frame(height: 40)
+    // The border lies under the buttons: as an overlay its stroked shape took clicks on the pill's middle row.
+    .background(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(isHovering ? 0.14 : 0.08)))
     .background(Theme.menu.opacity(isHovering ? 1 : 0.92), in: RoundedRectangle(cornerRadius: 10))
-    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(isHovering ? 0.14 : 0.08)))
     .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
     .onHover { isHovering = $0 }
   }
