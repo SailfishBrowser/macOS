@@ -145,6 +145,11 @@ denied or cancelled (permissions stay pending, Chrome's context menu shows).
   as in Chrome. Its install dialog asks the web contents' delegate with the
   extension's name, icon and permission warnings (patches/0005), and
   Chrome's post-install UI is off (`ExtensionInstallUI`'s only switch).
+- Opening other apps: a link to another app's URL scheme (an OAuth sign-in
+  handing back to a desktop app) asks the shell with the app's name and the
+  site that asked, and launches it once allowed (patches/0012). Chrome's
+  "Open app?" dialog is web-modal and our tabs have no host for one, so it
+  crashed. Without the delegate method the app is not opened.
 - Built-in extensions: `loadBuiltInExtensionAtPath:` registers an unpacked
   extension with the profile's `ComponentLoader` (`AddOrReplace`, the one
   entry that skips the component allowlist), so it loads for the session, in

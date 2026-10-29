@@ -1,0 +1,79 @@
+From: Isaac Lins <104733575+isaaclins@users.noreply.github.com>
+Subject: [PATCH] Let the embedder ask before opening another app
+
+A link to another app's URL scheme (t3code://, zoommtg://, ...) makes
+Chrome ask "Open <app>?" in a web-modal dialog, whose host comes from the
+tab's dialog manager delegate. EngineCore's tabs have no such delegate, so
+showing the dialog dereferenced null and the browser crashed, e.g. on an
+OAuth sign-in that hands back to a desktop app. EngineCore replaces the
+dialog through a callback and asks its embedder instead.
+---
+diff --git a/chrome/browser/external_protocol/external_protocol_handler.h b/chrome/browser/external_protocol/external_protocol_handler.h
+--- a/chrome/browser/external_protocol/external_protocol_handler.h
++++ b/chrome/browser/external_protocol/external_protocol_handler.h
+@@ -8,6 +8,7 @@
+ #include <optional>
+ #include <string>
+ 
++#include "base/functional/callback.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/shell_integration.h"
+ #include "content/public/browser/web_contents.h"
+@@ -200,6 +201,17 @@
+       const std::optional<url::Origin>& initiating_origin,
+       content::WeakDocumentPtr initiator_document,
+       const std::u16string& program_name);
++
++  // Replaces the dialog RunExternalProtocolDialog shows. EngineCore
++  // (//engine_core) asks its embedder, as its tabs have no host for a
++  // web-modal dialog.
++  using ShowDialogCallback = base::RepeatingCallback<void(
++      const GURL& url,
++      content::WebContents* web_contents,
++      const std::optional<url::Origin>& initiating_origin,
++      content::WeakDocumentPtr initiator_document,
++      const std::u16string& program_name)>;
++  static void SetShowDialogCallback(ShowDialogCallback callback);
+ #endif
+ 
+   // Clears the external protocol handling data.
+diff --git a/chrome/browser/ui/views/external_protocol_dialog.cc b/chrome/browser/ui/views/external_protocol_dialog.cc
+--- a/chrome/browser/ui/views/external_protocol_dialog.cc
++++ b/chrome/browser/ui/views/external_protocol_dialog.cc
+@@ -40,6 +40,8 @@
+ 
+ namespace {
+ 
++ExternalProtocolHandler::ShowDialogCallback* g_show_dialog_callback = nullptr;
++
+ std::u16string GetMessageTextForOrigin(
+     const std::optional<url::Origin>& origin) {
+   if (!origin || origin->opaque()) {
+@@ -105,6 +107,14 @@
+ 
+   if (program_name.empty()) {
+     // ShellExecute won't do anything. Don't bother warning the user.
++    return;
++  }
++
++  // EngineCore's tabs have no host for the web-modal dialog: showing it
++  // dereferenced null. Its embedder asks instead.
++  if (g_show_dialog_callback) {
++    g_show_dialog_callback->Run(url, web_contents, initiating_origin,
++                                std::move(initiator_document), program_name);
+     return;
+   }
+ 
+@@ -112,6 +122,12 @@
+   new ExternalProtocolDialog(web_contents, url, program_name, initiating_origin,
+                              std::move(initiator_document));
+ }
++
++// static
++void ExternalProtocolHandler::SetShowDialogCallback(
++    ShowDialogCallback callback) {
++  g_show_dialog_callback = new ShowDialogCallback(std::move(callback));
++}
+ #endif  // !BUILDFLAG(IS_CHROMEOS)
+ 
+ ExternalProtocolDialog::ExternalProtocolDialog(

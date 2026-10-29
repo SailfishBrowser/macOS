@@ -21,6 +21,7 @@
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
 #include "chrome/browser/devtools/devtools_window.h"
+#include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
@@ -71,6 +72,7 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/restore_type.h"
+#include "content/public/browser/weak_document_ptr.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -89,6 +91,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
+#include "url/origin.h"
 
 @interface ECContextMenu ()
 - (instancetype)initWithFrame:(content::RenderFrameHost&)frame
@@ -580,6 +583,44 @@ class OtherSiteLinkThrottle : public content::NavigationThrottle {
   const char* GetNameForLogging() override { return "OtherSiteLinkThrottle"; }
 };
 
+// Asks the shell before a page opens another app, in place of Chrome's
+// web-modal dialog, which has no host in our tabs (patches/0012). Without the
+// delegate method, or for a web contents that is not an ECWebContents, the app
+// is not opened.
+void AskToOpenExternalApp(const GURL& url,
+                          content::WebContents* web_contents,
+                          const std::optional<url::Origin>& initiating_origin,
+                          content::WeakDocumentPtr initiator_document,
+                          const std::u16string& program_name) {
+  ECWebContents* owner = [ECWebContents fromContents:web_contents];
+  if (![owner.delegate
+          respondsToSelector:@selector
+          (webContents:requestsOpeningURL:inApplicationNamed:fromOrigin:
+              completionHandler:)]) {
+    return;
+  }
+  base::WeakPtr<content::WebContents> contents = web_contents->GetWeakPtr();
+  // Taken by the first answer, so the app opens at most once.
+  auto document = std::make_shared<std::optional<content::WeakDocumentPtr>>(
+      std::move(initiator_document));
+  NSURL* origin = initiating_origin && !initiating_origin->opaque()
+                      ? net::NSURLWithGURL(initiating_origin->GetURL())
+                      : nil;
+  [owner.delegate webContents:owner
+           requestsOpeningURL:net::NSURLWithGURL(url)
+           inApplicationNamed:base::SysUTF16ToNSString(program_name)
+                   fromOrigin:origin
+            completionHandler:^(BOOL allow) {
+              if (!allow || !contents || !document->has_value()) {
+                return;
+              }
+              content::WeakDocumentPtr initiator = std::move(**document);
+              document->reset();
+              ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck(
+                  url, contents.get(), std::move(initiator));
+            }];
+}
+
 }  // namespace
 
 @implementation ECContextMenu {
@@ -767,6 +808,8 @@ class OtherSiteLinkThrottle : public content::NavigationThrottle {
 + (void)initialize {
   if (self == [ECWebContents class]) {
     SetEngineCoreNavigationThrottles(&OtherSiteLinkThrottle::MaybeCreateAndAdd);
+    ExternalProtocolHandler::SetShowDialogCallback(
+        base::BindRepeating(&AskToOpenExternalApp));
   }
 }
 
