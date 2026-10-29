@@ -58,6 +58,9 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   // The context of each tab's web contents, released before their context closes, and the tab's profile.
   @ObservationIgnored var tabContexts: [UUID: ECBrowserContext] = [:]
   @ObservationIgnored var tabProfiles: [UUID: UUID] = [:]
+  // Favorites and pinned tabs whose links to other sites open in Peek, set on their Chromium pages and read by their
+  // WebKit pages.
+  @ObservationIgnored var tabsPeekingOtherSites: Set<UUID> = []
   // The engine and site each tab was last switched to, held while its shown page stays on that site.
   @ObservationIgnored var choices: [UUID: EngineChoice] = [:]
   // When each tab's last search was asked for: the effects that ask arrive in no fixed order.
@@ -137,6 +140,16 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   }
 
   func syncWindow(_ space: Space, tabs shown: [Tab], focused: Bool, peeksLinksToOtherSites: Bool) {
+    // Links to other sites open from favorites and pinned tabs in Peek, unless Settings > Links turns it off.
+    for tab in shown {
+      let peeks = peeksLinksToOtherSites && tab.placement != .unpinned
+      self.contents(tab.id)?.opensLinksToOtherSitesInNewWindow = peeks
+      if peeks {
+        tabsPeekingOtherSites.insert(tab.id)
+      } else {
+        tabsPeekingOtherSites.remove(tab.id)
+      }
+    }
     let contents = shown.compactMap { self.contents($0.id) }
     if windows[space.id] == nil, !contents.isEmpty {
       let window = ECWindow(browserContext: loadedContext(space.profileID, space.isIncognito))
@@ -145,10 +158,6 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     }
     guard let window = windows[space.id] else { return }
     window.tabs = contents
-    // Links to other sites open from favorites and pinned tabs in Peek, unless Settings > Links turns it off.
-    for tab in shown {
-      self.contents(tab.id)?.opensLinksToOtherSitesInNewWindow = peeksLinksToOtherSites && tab.placement != .unpinned
-    }
     window.activeTab = shown.first { $0.id == space.selectedTabID }.flatMap { self.contents($0.id) }
     if window.isFocused != focused {
       window.isFocused = focused
