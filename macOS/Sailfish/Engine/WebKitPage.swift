@@ -254,6 +254,13 @@ import WebKit
       from: tab, url: action.request.url ?? URL(string: "about:blank")!, configuration: configuration)
   }
 
+  func webView(
+    _ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo,
+    type: WKMediaCaptureType, decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void
+  ) {
+    Engine.shared.webKitPage(self, requestsCapture: type, origin: origin, decision: decisionHandler)
+  }
+
   func webViewDidClose(_ webView: WKWebView) {
     Engine.shared.closeRequested(by: self)
   }
