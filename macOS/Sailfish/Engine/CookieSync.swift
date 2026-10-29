@@ -35,7 +35,7 @@ import WebKit
   private var scope: [String] = []
   private var rules: AnyCancellable?
   private var operations: Task<Void, Never>?
-  private var isLive = false
+  private(set) var isLive = false
   private var isBusy = false
   private var isEnded = false
   private var flushScheduled = false
@@ -613,8 +613,12 @@ extension Engine {
     case .chromium:
       await sync.flush()
     case .webkit:
-      await sync.open()
-      await sync.drain(for: url)
+      // Opening reads every cookie in scope from Chromium, so only a sync already open drains.
+      if sync.isLive {
+        await sync.drain(for: url)
+      } else {
+        await sync.open()
+      }
     }
   }
 
