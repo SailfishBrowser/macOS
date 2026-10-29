@@ -321,6 +321,9 @@ final class WebContainer: NSView {
   var onMouseDown: (() -> Void)?
   // Watches a clear page (a WebKit page before its first paint) for the moment it shows.
   private var clearPage: NSKeyValueObservation?
+  // Counts the display's frames once the clear page shows, until the page under it can leave.
+  private var framesShown: CADisplayLink?
+  private var frameCount = 0
   // Set as the layout changes, before the card's animated frame. A wider page is applied at once, so a ⌘S hide has it
   // drawn behind the card's clip before its motion starts; a narrower one waits for the card's first moving frame.
   var restingWidth: CGFloat? {
@@ -336,6 +339,8 @@ final class WebContainer: NSView {
   // Shows the tab's page in place of the one before it, which stays underneath, as it looks, while the new page is
   // clear, so a switch between the tab's pages shows no empty frame; the new page takes the clicks.
   func show(_ view: NSView) {
+    framesShown?.invalidate()
+    framesShown = nil
     let showing = subviews.last { $0.alphaValue > 0 && $0 !== view }
     subviews = [view.alphaValue == 0 ? showing : nil, view].compactMap { $0 }
     fitPage()
@@ -343,10 +348,24 @@ final class WebContainer: NSView {
       ? view.observe(\.alphaValue) { [weak self] _, _ in MainActor.assumeIsolated { self?.uncover() } } : nil
   }
 
+  // The page underneath leaves the window once the display has shown the new page over it. Out of the window, a
+  // Chromium page blanks its content in its GPU process at once, which reaches the screen before the window's own
+  // frame with the new page whenever that frame is late, as the first one of a new WebKit page is; the second frame
+  // after the new page shows has it on the screen.
   private func uncover() {
     guard let page, page.alphaValue > 0 else { return }
     clearPage = nil
-    subviews = [page]
+    frameCount = 0
+    framesShown = displayLink(target: self, selector: #selector(frameShown(_:)))
+    framesShown?.add(to: .main, forMode: .common)
+  }
+
+  @objc private func frameShown(_ link: CADisplayLink) {
+    frameCount += 1
+    guard frameCount == 2 else { return }
+    link.invalidate()
+    framesShown = nil
+    subviews = page.map { [$0] } ?? []
   }
 
   // The page takes the width it comes to rest at, pinned to the card's leading edge and clipped by the card, so a ⌘S
