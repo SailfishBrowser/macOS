@@ -10,6 +10,7 @@ struct SiteControls: View {
   let url: URL
   let open: (URL) -> Void
   @State private var revision = 0
+  @Shared(.siteEngines) private var siteEngines
 
   var body: some View {
     let _ = revision
@@ -43,6 +44,9 @@ struct SiteControls: View {
         .scrollDisabled(actions.count + 1 <= 12)
       }
       header("Settings")
+      if url.scheme == "http" || url.scheme == "https" {
+        opensIn
+      }
       // Developer mode follows the page's URL, so its row reports and does not toggle.
       setting("hammer.fill", "Developer Mode", url.isDeveloperPage ? "On" : "Off", isOn: url.isDeveloperPage)
         .allowsHitTesting(false)
@@ -94,6 +98,26 @@ struct SiteControls: View {
     .frame(width: 236, alignment: .leading)
     .background(DarkPopover())
     .environment(\.colorScheme, .dark)
+  }
+
+  // Opens in: the engine the site's rule names, or Automatic without one; a choice shows the page in the engine
+  // the site now opens in.
+  private var opensIn: some View {
+    let rule = siteEngines.rule(for: Engine.shared.siteOf(url))
+    return Menu {
+      Picker("Opens in", selection: Binding(get: { rule }, set: { Engine.shared.setEngine($0, forSiteOf: url, in: tab) })) {
+        Text("Automatic").tag(PageEngineKind?.none)
+        Text(PageEngineKind.chromium.name).tag(PageEngineKind?.some(.chromium))
+        Text(PageEngineKind.webkit.name).tag(PageEngineKind?.some(.webkit))
+      }
+      .pickerStyle(.inline)
+      .labelsHidden()
+    } label: {
+      setting("globe", "Opens in", rule?.name ?? "Automatic", isOn: rule != nil)
+    }
+    .menuStyle(.button)
+    .buttonStyle(.plain)
+    .menuIndicator(.hidden)
   }
 
   private func header(_ title: String) -> some View {
