@@ -12,6 +12,9 @@ struct WebPage: Equatable, Sendable {
   var isAudible = false
   var isMuted = false
   var media: PageMedia?
+  // The tab's pages, oldest first, and the one shown.
+  var pages: [PageRecord]
+  var shownPage: Int
 }
 
 struct Download: Equatable, Identifiable, Sendable {
@@ -49,7 +52,8 @@ enum ZoomStep: Equatable, Sendable {
 
 @DependencyClient
 struct WebEngineClient: Sendable {
-  var create: @Sendable (_ tab: UUID, _ profile: UUID, _ incognito: Bool) async -> Void
+  // Registers the tab's pages and makes the shown one from its saved history.
+  var create: @Sendable (_ tab: UUID, _ profile: UUID, _ incognito: Bool, _ pages: [PageRecord], _ shown: Int) async -> Void
   var load: @Sendable (_ tab: UUID, _ url: URL) async -> Void
   // Makes the Little Sailfish `id` a window holding its page `tab`, for the context's extensions.
   var littleWindow: @Sendable (_ id: UUID, _ profile: UUID, _ tab: UUID) async -> Void
@@ -76,7 +80,7 @@ struct WebEngineClient: Sendable {
   var zoom: @Sendable (_ tab: UUID, _ step: ZoomStep) async -> Int?
   // Saves the live tabs' histories.
   var saveSessions: @Sendable () async -> Void = {}
-  // Drops the saved histories of every tab but these. It runs off the main actor, in the session writer's flush.
+  // Drops the saved histories of every page but these. It runs off the main actor, in the session writer's flush.
   var keepSessions: @Sendable (_ ids: Set<UUID>) -> Void = { _ in }
   // Gives a tab a copy of another tab's saved history.
   var copySession: @Sendable (_ from: UUID, _ to: UUID) async -> Void = { _, _ in }

@@ -132,7 +132,7 @@ struct LittleSailfishFeature {
       lastActiveAt: now, isLive: true)
     state.tab = tab
     return .run { [id = state.id, profile = state.profileID] _ in
-      await engine.create(tab.id, profile, false)
+      await engine.create(tab.id, profile, false, tab.pages, tab.shownPage)
       await engine.littleWindow(id, profile, tab.id)
       await engine.load(tab.id, url)
     }

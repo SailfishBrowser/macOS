@@ -46,7 +46,7 @@ final class TabsFeatureTests: XCTestCase {
       TabsFeature()
     } withDependencies: {
       $0.date = .constant(now)
-      $0.webEngine.create = { _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
       $0.webEngine.close = { tab in closed.withValue { $0.append(tab) } }
     }
@@ -116,7 +116,7 @@ final class TabsFeatureTests: XCTestCase {
     } withDependencies: {
       $0.uuid = .incrementing
       $0.date = .constant(now)
-      $0.webEngine.create = { _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
       $0.webEngine.close = { _ in }
     }
@@ -172,7 +172,7 @@ final class TabsFeatureTests: XCTestCase {
       TabsFeature()
     } withDependencies: {
       $0.date = .constant(now)
-      $0.webEngine.create = { _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
     }
     store.exhaustivity = .off

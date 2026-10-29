@@ -62,23 +62,23 @@ struct AppFeature {
     // Saved histories are kept for this many archived tabs, the newest.
     static let archivedSessions = 1000
 
-    // The tabs whose saved history is kept: open ones, the newest archived ones and those undo can bring back.
+    // The pages whose saved history is kept: those of open tabs, of the newest archived ones (which keep the page
+    // under the tab's id) and of those undo can bring back.
     var sessionIDs: Set<UUID> {
-      var ids = Set(windows.flatMap { $0.spaces.spaces.flatMap(\.tabs.ids) })
-      ids.formUnion(profiles.flatMap(\.favorites.ids))
-      ids.formUnion(archive.prefix(Self.archivedSessions).map(\.id))
-      ids.formUnion(windows.compactMap { $0.peek?.tab.id })
-      ids.formUnion(littleSailfishes.compactMap { $0.tab?.id })
+      var tabs = windows.flatMap { $0.spaces.spaces.flatMap(\.tabs) }
+      tabs += profiles.flatMap(\.favorites)
+      tabs += windows.compactMap { $0.peek?.tab }
+      tabs += littleSailfishes.compactMap(\.tab)
       for undo in windows.flatMap(\.undoStack) {
         switch undo {
-        case let .archive(_, closed, _): ids.formUnion(closed.map(\.tab.id))
-        case let .deleteFolder(_, removal): ids.formUnion(removal.closed.map(\.tab.id))
-        case let .deleteSpace(space, _): ids.formUnion(space.tabs.ids)
-        case let .peek(peek, _, _): ids.insert(peek.tab.id)
+        case let .archive(_, closed, _): tabs += closed.map(\.tab)
+        case let .deleteFolder(_, removal): tabs += removal.closed.map(\.tab)
+        case let .deleteSpace(space, _): tabs += space.tabs
+        case let .peek(peek, _, _): tabs.append(peek.tab)
         case .edit, .folderToSpace, .spaceToFolder, .move, .createFolder, .spaceEdit, .imported: break
         }
       }
-      return ids
+      return Set(tabs.flatMap(\.pages).map(\.id)).union(archive.prefix(Self.archivedSessions).map(\.id))
     }
 
     // Each window's shown tabs that are favorites; a favorite's page shows in one window at a time.
