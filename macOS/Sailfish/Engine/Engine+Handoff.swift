@@ -21,11 +21,16 @@ extension Engine {
   // A link under the pointer in a Chromium page that would open in WebKit starts WebKit for the tab's store.
   func warmWebKit(_ tab: UUID, for link: URL) {
     guard let profile = tabProfiles[tab] else { return }
+    warmWebKit(profile: profile, incognito: incognitoTabs.contains(tab), for: link, choice: choices[tab], cause: .link)
+  }
+
+  // An address the command bar would open, or a link, starts WebKit for the profile's store when it opens there.
+  func warmWebKit(
+    profile: UUID, incognito: Bool, for url: URL, choice: EngineChoice? = nil, cause: NavigationCause = .typed
+  ) {
     @Shared(.siteEngines) var siteEngines
-    guard pageEngine(for: link, from: .chromium, choice: choices[tab], cause: .link, siteEngines) == .webkit else {
-      return
-    }
-    WebKitStores.warm(profile: profile, incognito: incognitoTabs.contains(tab))
+    guard pageEngine(for: url, from: .chromium, choice: choice, cause: cause, siteEngines) == .webkit else { return }
+    WebKitStores.warm(profile: profile, incognito: incognito)
   }
 }
 

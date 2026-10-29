@@ -63,6 +63,8 @@ struct WebEngineClient: Sendable {
   var load: @Sendable (_ tab: UUID, _ url: URL) async -> Void
   // Reloads the shown page's URL in the other engine, as a page of its own.
   var switchEngine: @Sendable (_ tab: UUID, _ engine: PageEngineKind) async -> Void
+  // Starts WebKit for the profile's store when the URL, typed, would open there.
+  var warmWebKit: @Sendable (_ profile: UUID, _ incognito: Bool, _ url: URL) async -> Void = { _, _, _ in }
   // Makes the Little Sailfish `id` a window holding its page `tab`, for the context's extensions.
   var littleWindow: @Sendable (_ id: UUID, _ profile: UUID, _ tab: UUID) async -> Void
   var goBack: @Sendable (_ tab: UUID) async -> Void
