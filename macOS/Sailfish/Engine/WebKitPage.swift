@@ -178,8 +178,10 @@ import WebKit
     case let .hover(url) where isMainFrame: Engine.shared.webKitPage(self, hovered: url)
     case let .selection(text) where isMainFrame: Engine.shared.webKitPage(self, selected: text)
     case .painted where isMainFrame: showWhenDrawn()
+    case let .found(id, matches, active, ticks) where isMainFrame:
+      finder.update(id: id, matches: matches, active: active, ticks: ticks, in: self)
     case let .media(frame, report): receive(report, frame: frame, from: message.frameInfo)
-    case .icons, .hover, .selection, .painted: break
+    case .icons, .hover, .selection, .painted, .found: break
     }
   }
 

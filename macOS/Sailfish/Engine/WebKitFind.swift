@@ -15,9 +15,9 @@ enum FindOperation {
 // Find in a WebKit page, drawn and reported as Chromium's is: the isolated script finds the matches in the main
 // frame's text, marks every one with the active one stronger, scrolls the active one into view and keeps it selected
 // when finding stops, and the scrollbar shows a tick at each match. A new search starts at the first match from the
-// top.
+// top, and on a long page its count and ticks arrive as the script marks the rest.
 @MainActor final class WebKitFind {
-  // Bumped when finding ends, so answers to the searches before are dropped.
+  // Bumped by each call and when finding ends, so answers and reports for the calls before are dropped.
   private var generation = 0
   private let ticks = WebKitFindTicks()
 
@@ -38,19 +38,30 @@ enum FindOperation {
   }
 
   private func search(_ string: String, step: Int, in page: WebKitPage) {
+    generation += 1
     let generation = self.generation
     page.webView.callAsyncJavaScript(
-      "return window.__sailfish.find(text, step)", arguments: ["text": string, "step": step], in: nil,
-      in: WebKitPageScript.world
+      "return window.__sailfish.find(text, step, id)", arguments: ["text": string, "step": step, "id": generation],
+      in: nil, in: WebKitPageScript.world
     ) { [weak self, weak page] result in
       guard let self, let page, generation == self.generation else { return }
       // A page whose script did not run has no matches.
       let answer = (try? result.get()) as? [Any] ?? [0, 0, NSNull()]
-      if let positions = answer[2] as? [Double] {
-        self.showTicks(positions, in: page.webView)
-      }
-      Engine.shared.webKitPage(page, didFindMatches: answer[0] as? Int ?? 0, activeMatch: answer[1] as? Int ?? 0)
+      report(matches: answer[0] as? Int ?? 0, active: answer[1] as? Int ?? 0, ticks: answer[2] as? [Double], in: page)
     }
+  }
+
+  // The script's count so far for call `id`, and the ticks once every match is marked.
+  func update(id: Int, matches: Int, active: Int, ticks: [Double]?, in page: WebKitPage) {
+    guard id == generation else { return }
+    report(matches: matches, active: active, ticks: ticks, in: page)
+  }
+
+  private func report(matches: Int, active: Int, ticks: [Double]?, in page: WebKitPage) {
+    if let ticks {
+      showTicks(ticks, in: page.webView)
+    }
+    Engine.shared.webKitPage(page, didFindMatches: matches, activeMatch: active)
   }
 
   private func showTicks(_ positions: [Double], in webView: WKWebView) {
