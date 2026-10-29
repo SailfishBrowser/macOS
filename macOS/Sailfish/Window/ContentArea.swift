@@ -19,12 +19,13 @@ struct ContentArea: View {
       if let selected = space.selectedTabID {
         // One layout for a split and a lone page, so a pane closed from a split keeps the other page's view: it
         // takes the card the next frame. Expand Current Split shows the focused pane alone, still
-        // with its pane bar.
-        let expanded = split != nil && store.expandedPane == selected
+        // with its pane bar; a page in element full screen shows alone without it.
+        let isFullScreen = Engine.shared.fullScreenPages[selected] != nil
+        let expanded = split != nil && store.expandedPane == selected || isFullScreen
         SplitPanes(
           store: store, tabIDs: expanded ? [selected] : split?.tabIDs ?? [selected],
           widths: expanded || split == nil ? [1] : split!.widths, isVertical: split?.isVertical == true,
-          isSplit: split != nil, accent: accent, isThemed: isThemed)
+          isSplit: split != nil && !isFullScreen, accent: accent, isThemed: isThemed)
       } else {
         Pane(store: store, tab: nil, accent: accent, isThemed: isThemed, isSplit: false)
       }
@@ -119,6 +120,8 @@ private struct Pane: View {
 
   private var space: Space { store.spaces.selected }
 
+  private var isFullScreen: Bool { tab.map { Engine.shared.fullScreenPages[$0.id] != nil } == true }
+
   private var isFrozen: Bool {
     store.isLibraryOpen
       || (store.sidebar.swipe ?? 0) > 0 && store.spaces.selectedID == store.spaces.spaces.first?.id
@@ -151,7 +154,7 @@ private struct Pane: View {
   }
 
   @ViewBuilder private var bar: some View {
-    if let tab, tab.url.isDeveloperPage {
+    if let tab, tab.url.isDeveloperPage, !isFullScreen {
       DeveloperBar(tab: tab, accent: accent, close: isSplit ? { close() } : nil) { store.send(.editSelectedTab) }
     } else if let tab, isSplit {
       let panes = space.split(of: tab.id)?.tabIDs ?? [tab.id]
@@ -173,7 +176,7 @@ private struct Pane: View {
   }
 
   @ViewBuilder private var page: some View {
-    let hasBar = tab.map { isSplit || $0.url.isDeveloperPage } ?? false
+    let hasBar = tab.map { isSplit || $0.url.isDeveloperPage && !isFullScreen } ?? false
     ZStack {
       if let still {
         Image(nsImage: still).resizable().scaledToFill()
@@ -183,7 +186,7 @@ private struct Pane: View {
               topLeadingRadius: hasBar ? 0 : 6, bottomLeadingRadius: 6, bottomTrailingRadius: 6,
               topTrailingRadius: hasBar ? 0 : 6))
       } else if let tab, let view = Engine.shared.view(tab.id) {
-        WebView(view: view, roundsTop: !hasBar, cornerRadius: 6, onMouseDown: { select() })
+        WebView(view: view, roundsTop: !hasBar, cornerRadius: isFullScreen ? 0 : 6, onMouseDown: { select() })
       } else if let tab {
         // A tab a space switch selected gets its page once the strip settles; until then the card names it.
         PagePlaceholder(tab: tab, space: space)

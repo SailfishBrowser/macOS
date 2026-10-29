@@ -124,6 +124,21 @@ denied or cancelled (permissions stay pending, Chrome's context menu shows).
   Chrome's `BackForwardMenuModel`), nearest first, each with its index for
   `goToEntry:` (`GoToIndex`) and its offset for display; `loadProgress` and
   `webContents:didChangeLoadProgress:` are `WebContents::GetLoadProgress`.
+- Element full screen: the bridge implements the delegate calls Chrome's
+  `FullscreenController` answers for a tab (`CanEnterFullscreenModeForTab`,
+  `EnterFullscreenModeForTab`, `ExitFullscreenModeForTab`,
+  `IsFullscreenForTabOrPending`, `GetFullscreenState`) and keeps the state
+  per web contents. It changes inside the request, as content reads it back
+  there to grant the page full screen; the shell hears of the enter, with
+  the requesting frame's origin, and of the exit once the call returns, and
+  fills the screen with the view meanwhile. `exitFullscreenResizingView:`
+  is `WebContents::ExitFullscreen`: a shown page leaves with the resize the
+  shell makes as it restores its layout, as Chrome's windows do, so it lays
+  out once; a hidden one is told at once. Content also exits on a
+  navigation, and drops
+  full screen for security (`ForSecurityDropFullscreen`) through
+  `GetFullscreenState`. Without the delegate method requests are refused,
+  as before.
 - Zoom: `zoomPercent` and `webContentsDidChangeZoom:` read Chrome's
   `ZoomController`, so a tab's zoom follows the site's as in Chrome.
 - Session restore: `sessionState` serializes the navigation entries with

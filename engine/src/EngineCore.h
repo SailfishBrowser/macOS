@@ -458,6 +458,17 @@ EC_EXPORT
 // The page asked to be shown, e.g. by its Picture in Picture window's back to
 // tab button. The shell selects its tab.
 - (void)webContentsDidRequestActivation:(ECWebContents*)contents;
+// The page showed an element full screen (Element.requestFullscreen(), a
+// video's full screen button), which it already lays out as filling its
+// view; the shell fills the screen with the view and calls
+// exitFullscreenResizingView: to leave. `origin` is the requesting frame's,
+// nil when opaque (a data: page). Reported once the request returns, as is
+// the exit. Without this method requests are refused.
+- (void)webContents:(ECWebContents*)contents
+    didEnterFullscreenForOrigin:(nullable NSURL*)origin;
+// The page left element full screen: it exited itself, navigated, or the
+// shell called exitFullscreenResizingView:.
+- (void)webContentsDidExitFullscreen:(ECWebContents*)contents;
 // Asked before the request of a navigation the user started in the page
 // leaves: a link click or form submission with a user gesture, or a
 // loadURL:, loadRequest: or new tab load that is not a reload, history step
@@ -556,6 +567,12 @@ EC_EXPORT
 - (void)enterPictureInPicture;
 - (void)exitPictureInPicture;
 @property(readonly, nullable) NSWindow* pictureInPictureWindow;
+// Leaves the page's element full screen, which the delegate then hears of;
+// nothing while the page shows none. With `resizingView`, the shell is about
+// to resize the view (restoring its layout) and the page leaves with that
+// resize, in one step; otherwise (a hidden page) it is told at once.
+- (void)exitFullscreenResizingView:(BOOL)resizingView
+    NS_SWIFT_NAME(exitFullscreen(resizingView:));
 // Whether the page has Chrome's secure (lock) security level.
 @property(readonly, getter=isSecure) BOOL secure;
 // The name of the language "Translate to" would translate the page into,

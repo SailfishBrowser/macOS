@@ -300,6 +300,7 @@ extension Engine {
     readerable.remove(tab)
     readers[tab] = nil
     loadProgress[tab] = nil
+    fullScreenPages[tab] = nil
     incognitoTabs.remove(tab)
     lastPages[tab] = nil
     tabContexts[tab] = nil
