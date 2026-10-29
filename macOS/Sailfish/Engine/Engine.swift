@@ -241,6 +241,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   // Closes every tab before the engine destroys their web contents at quit.
   func closeAll() {
     isClosed = true
+    CookieSync.endAll()
     for tab in Array(pageRecords.keys) {
       release(tab, keepingHistory: true).forEach { $0.close() }
     }
@@ -265,6 +266,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   }
 
   private func closeTabs(of context: ECBrowserContext) {
+    CookieSync.end(context)
     for (tab, owner) in tabContexts where owner === context {
       release(tab, keepingHistory: true).forEach { $0.close() }
     }
