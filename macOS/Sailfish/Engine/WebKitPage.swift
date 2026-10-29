@@ -532,10 +532,13 @@ final class WebKitWebView: WKWebView {
     }
   }
 
-  // WebKit's items give way to Sailfish's, built from the hit test that arrived just before.
+  // The page's own context menu, opened by a right-click or a control-click, takes Sailfish's items, built from the
+  // hit test that arrived just before. A menu Sailfish pops up in the view, such as the login menu, opens as it is.
   override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
     super.willOpenMenu(menu, with: event)
-    guard let page, let tab = Engine.shared.tab(of: page) else { return }
+    let contextClick = event.type == .rightMouseDown || event.type == .rightMouseUp
+      || (event.type == .leftMouseDown && event.modifierFlags.contains(.control))
+    guard contextClick, let page, let tab = Engine.shared.tab(of: page) else { return }
     let hit = page.contextMenuHit.flatMap { ContinuousClock.now - $0.time < .milliseconds(100) ? $0.hit : nil }
     page.contextMenuHit = nil
     menu.items = Engine.shared.pageMenuItems(
