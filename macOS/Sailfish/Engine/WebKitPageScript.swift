@@ -278,6 +278,131 @@ enum WebKitPageScript {
     addEventListener("load", sendIcons, { once: true });
   }
 
+  // Find in page, marked as Chromium marks it: every match yellow and the active one orange, through the CSS Custom
+  // Highlight API and a style sheet that stays out of the page's DOM. Matches follow the rendered text of the main
+  // frame: case ignored, accents ignored unless the string has some, whitespace collapsed, and text joined across
+  // inline elements but not across blocks.
+  const marks = { text: "", ranges: [], active: -1 };
+  const markSheet = new CSSStyleSheet();
+  markSheet.replaceSync(
+    "::highlight(sailfish-match) { background-color: #ffff00; color: #000000 } ::highlight(sailfish-active) { background-color: #ff9632; color: #000000 }"
+  );
+  // A highlight's ranges are cleared before it leaves the registry, since WebKit repaints for the first and not the
+  // second.
+  const unmark = () => {
+    for (const name of ["sailfish-match", "sailfish-active"]) {
+      const highlight = CSS.highlights.get(name);
+      if (highlight) highlight.clear();
+      CSS.highlights.delete(name);
+    }
+    if (document.adoptedStyleSheets.includes(markSheet)) document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== markSheet);
+    marks.text = "";
+    marks.ranges = [];
+    marks.active = -1;
+  };
+  const folds = [new Map(), new Map()];
+  // A character as matching compares it: lowercase, whitespace as a space, and without its accent when `accents` is
+  // false, where a lone combining mark folds to nothing.
+  const fold = (c, accents) => {
+    const code = c.charCodeAt(0);
+    if (code < 128) return code === 32 || (code >= 9 && code <= 13) ? " " : code >= 65 && code <= 90 ? String.fromCharCode(code + 32) : c;
+    const cache = folds[accents ? 1 : 0];
+    let f = cache.get(c);
+    if (f === undefined) {
+      f = /\s/.test(c) ? " " : c.toLowerCase();
+      if (!accents && f !== " ") f = f.normalize("NFD").replace(/\p{M}/gu, "");
+      if (f.length > 1) f = c;
+      cache.set(c, f);
+    }
+    return f;
+  };
+  const matchRanges = (text) => {
+    const accents = /\p{M}/u.test(text.normalize("NFD"));
+    const needle = text.split("").map((c) => fold(c, accents)).join("").replace(/ +/g, " ");
+    if (!needle || !document.body) return [];
+    const shown = new Map();
+    const inlines = new Map();
+    const inline = (el) => {
+      let yes = inlines.get(el);
+      if (yes === undefined) inlines.set(el, (yes = /^(inline|contents)/.test(getComputedStyle(el).display)));
+      return yes;
+    };
+    const sibling = (n, key) => {
+      do n = n[key];
+      while (n && n.nodeType === Node.COMMENT_NODE);
+      return n;
+    };
+    // Whether only inline elements separate text node `a` from the next one, `b`.
+    const joined = (a, b) => {
+      let x = a;
+      while (!x.parentNode.contains(b)) {
+        if (sibling(x, "nextSibling")) return false;
+        x = x.parentNode;
+        if (!inline(x)) return false;
+      }
+      let y = b;
+      while (y.parentNode !== x.parentNode) {
+        if (sibling(y, "previousSibling")) return false;
+        y = y.parentNode;
+        if (!inline(y)) return false;
+      }
+      return sibling(x, "nextSibling") === y;
+    };
+    const chars = [];
+    const nodes = [];
+    const offsets = [];
+    let previous = null;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const parent = n.parentElement;
+      let visible = shown.get(parent);
+      if (visible === undefined) shown.set(parent, (visible = parent.tagName !== "TEXTAREA" && parent.checkVisibility({ visibilityProperty: true })));
+      if (!visible) continue;
+      if (previous && !joined(previous, n)) {
+        chars.push("\n");
+        nodes.push(null);
+        offsets.push(0);
+      }
+      previous = n;
+      const data = n.data;
+      for (let i = 0; i < data.length; i++) {
+        const c = fold(data[i], accents);
+        const last = chars[chars.length - 1];
+        if (!c || (c === " " && (last === undefined || last === " " || last === "\n"))) continue;
+        chars.push(c);
+        nodes.push(n);
+        offsets.push(i);
+      }
+    }
+    const haystack = chars.join("");
+    const ranges = [];
+    for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + needle.length)) {
+      const end = at + needle.length - 1;
+      const range = new Range();
+      range.setStart(nodes[at], offsets[at]);
+      range.setEnd(nodes[end], offsets[end] + 1);
+      ranges.push(range);
+    }
+    return ranges;
+  };
+  // How far a scroller moves to show the span from `start` to `end` in its box from `from` to `to`, as Chromium
+  // reveals its active match: not at all when the span shows, to the nearer edge when part of it does, and to the
+  // middle when none does.
+  const offset = (start, end, from, to) =>
+    start >= from && end <= to ? 0 : end <= from || start >= to ? (start + end - from - to) / 2 : start < from ? start - from : end - to;
+  // Scrolls every scroller the range is in to show it, the page last.
+  const reveal = (range) => {
+    for (let el = range.startContainer.parentElement; el; el = el.parentElement) {
+      const page = el === document.scrollingElement;
+      if (!page && (el.scrollHeight <= el.clientHeight && el.scrollWidth <= el.clientWidth || !/auto|scroll|overlay/.test(getComputedStyle(el).overflow))) continue;
+      const box = page ? { top: 0, left: 0, bottom: innerHeight, right: innerWidth } : el.getBoundingClientRect();
+      const r = range.getBoundingClientRect();
+      const top = offset(r.top, r.bottom, box.top, box.bottom);
+      const left = offset(r.left, r.right, box.left, box.right);
+      if (top || left) (page ? window : el).scrollBy({ top, left, behavior: "instant" });
+    }
+  };
+
   window.__sailfish = {
     mute(on) {
       muted = !!on;
@@ -331,13 +456,45 @@ enum WebKitPageScript {
       else return false;
       return true;
     },
-    count(text) {
-      if (!text || !document.body) return 0;
-      const haystack = document.body.innerText.toLowerCase();
-      const needle = text.toLowerCase();
-      let n = 0;
-      for (let at = haystack.indexOf(needle); at >= 0 && n < 1000; at = haystack.indexOf(needle, at + needle.length)) n++;
-      return n;
+    // A new `text` starts at its first match, or its last when `step` is negative; the same text moves the active
+    // match by `step`. Answers the match count, the active match from 1, and for a new text each match's place down
+    // the page from 0 to 1 for the scrollbar's ticks, empty when the page does not scroll.
+    find(text, step) {
+      let ticks = null;
+      if (text !== marks.text || !text) {
+        unmark();
+        getSelection().removeAllRanges();
+        const found = matchRanges(text).map((range) => [range, range.getBoundingClientRect()]).filter(([, r]) => r.width || r.height);
+        marks.text = text;
+        marks.ranges = found.map(([range]) => range);
+        marks.active = found.length ? (step < 0 ? found.length - 1 : 0) : -1;
+        const page = document.scrollingElement;
+        ticks = page && page.scrollHeight > page.clientHeight ? found.map(([, r]) => Math.floor(r.top + scrollY) / page.scrollHeight) : [];
+        if (found.length) {
+          const all = new Highlight();
+          for (const range of marks.ranges) all.add(range);
+          CSS.highlights.set("sailfish-match", all);
+          document.adoptedStyleSheets = [...document.adoptedStyleSheets, markSheet];
+        }
+      } else if (step && marks.ranges.length) {
+        marks.active = (marks.active + step + marks.ranges.length) % marks.ranges.length;
+      }
+      const range = marks.ranges[marks.active];
+      if (range) {
+        const all = CSS.highlights.get("sailfish-match");
+        const previous = CSS.highlights.get("sailfish-active");
+        if (previous) for (const r of previous) all.add(r);
+        all.delete(range);
+        CSS.highlights.set("sailfish-active", new Highlight(range));
+        if (ticks || step) reveal(range);
+      }
+      return [marks.ranges.length, marks.active + 1, ticks];
+    },
+    // Clears the marks and keeps the active match selected, as Chromium does when its find bar closes.
+    stopFinding() {
+      const range = marks.ranges[marks.active];
+      unmark();
+      if (range) getSelection().setBaseAndExtent(range.startContainer, range.startOffset, range.endContainer, range.endOffset);
     },
   };
 })();

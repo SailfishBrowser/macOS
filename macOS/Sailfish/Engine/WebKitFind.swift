@@ -12,82 +12,81 @@ enum FindOperation {
   case stop
 }
 
-// Find in a WebKit page, reported as Chromium's is: WebKit selects each match, wrapping at the ends, and the isolated
-// script counts the matches in the main frame's text. A new search starts at the first match from the top.
+// Find in a WebKit page, drawn and reported as Chromium's is: the isolated script finds the matches in the main
+// frame's text, marks every one with the active one stronger, scrolls the active one into view and keeps it selected
+// when finding stops, and the scrollbar shows a tick at each match. A new search starts at the first match from the
+// top.
 @MainActor final class WebKitFind {
-  private var text = ""
-  // Steps taken since the search started, backwards negative; the active match is this modulo the count.
-  private var step = 0
-  private var count: Int?
-  // Whether WebKit found the string, and at which step, as the last answered find says.
-  private var found: (matchFound: Bool, step: Int)?
-  // Bumped by every new search, so answers to an older one are dropped.
+  // Bumped when finding ends, so answers to the searches before are dropped.
   private var generation = 0
+  private let ticks = WebKitFindTicks()
 
   func perform(_ operation: FindOperation, in page: WebKitPage) {
     switch operation {
-    case let .find(string, forward):
-      guard string == text, !string.isEmpty else { return start(string, forward: forward, in: page) }
-      step += forward ? 1 : -1
-      search(in: page, backwards: !forward)
-    case let .findAsTyped(string):
-      guard string == text, !string.isEmpty else { return start(string, forward: true, in: page) }
-      report(page)
+    case let .find(string, forward): search(string, step: forward ? 1 : -1, in: page)
+    case let .findAsTyped(string): search(string, step: 0, in: page)
     case .stop:
       end()
+      page.webView.evaluateJavaScript("window.__sailfish.stopFinding()", in: nil, in: WebKitPageScript.world)
     }
   }
 
-  // A new page has nothing found yet, so the next find searches again.
+  // A new page has no marks, so its next find searches again.
   func end() {
     generation += 1
-    text = ""
-    count = nil
-    found = nil
+    ticks.removeFromSuperview()
   }
 
-  // Clears the selection, so WebKit's search starts at the top of the page, and counts the matches before searching;
-  // an empty string only clears.
-  private func start(_ string: String, forward: Bool, in page: WebKitPage) {
-    end()
-    text = string
-    step = forward ? 0 : -1
+  private func search(_ string: String, step: Int, in page: WebKitPage) {
     let generation = self.generation
     page.webView.callAsyncJavaScript(
-      "getSelection().removeAllRanges(); return window.__sailfish.count(text)", arguments: ["text": string], in: nil,
+      "return window.__sailfish.find(text, step)", arguments: ["text": string, "step": step], in: nil,
       in: WebKitPageScript.world
     ) { [weak self, weak page] result in
       guard let self, let page, generation == self.generation else { return }
-      // A page whose script did not run has no count; WebKit's own answer then decides.
-      self.count = (try? result.get()) as? Int ?? 0
-      guard !string.isEmpty else {
-        self.found = (false, 0)
-        return self.report(page)
+      // A page whose script did not run has no matches.
+      let answer = (try? result.get()) as? [Any] ?? [0, 0, NSNull()]
+      if let positions = answer[2] as? [Double] {
+        self.showTicks(positions, in: page.webView)
       }
-      self.search(in: page, backwards: !forward)
+      Engine.shared.webKitPage(page, didFindMatches: answer[0] as? Int ?? 0, activeMatch: answer[1] as? Int ?? 0)
     }
   }
 
-  private func search(in page: WebKitPage, backwards: Bool) {
-    let configuration = WKFindConfiguration()
-    configuration.backwards = backwards
-    configuration.caseSensitive = false
-    configuration.wraps = true
-    let generation = self.generation
-    let step = self.step
-    page.webView.find(text, configuration: configuration) { [weak self, weak page] result in
-      guard let self, let page, generation == self.generation else { return }
-      self.found = (result.matchFound, step)
-      self.report(page)
-    }
+  private func showTicks(_ positions: [Double], in webView: WKWebView) {
+    ticks.positions = positions.shuffled()
+    guard !positions.isEmpty else { return ticks.removeFromSuperview() }
+    let width = WebKitFindTicks.width
+    ticks.frame = NSRect(x: webView.bounds.width - width, y: 0, width: width, height: webView.bounds.height)
+    ticks.autoresizingMask = [.minXMargin, .height]
+    webView.addSubview(ticks)
+  }
+}
+
+// The find ticks along a WebKit page's right edge, drawn as Chromium draws them in its scrollbar: a bar 3 points tall
+// across the scrollbar's width, orange edged with a yellow core, as far down the edge as its match is down the page.
+// Chromium draws them from a hash set, in no fixed order, so close ticks overlap in the same mix of edge and core.
+final class WebKitFindTicks: NSView {
+  static let width: CGFloat = 15
+  private static let edge = NSColor(srgbRed: 0xB0 / 255, green: 0x60 / 255, blue: 0, alpha: 1)
+  private static let core = NSColor(srgbRed: 1, green: 0xDD / 255, blue: 0, alpha: 1)
+
+  var positions: [Double] = [] {
+    didSet { needsDisplay = true }
   }
 
-  // Reports once the count and a find have answered; a search still waiting reports when they do.
-  private func report(_ page: WebKitPage) {
-    guard let count, let found else { return }
-    let matches = found.matchFound ? max(count, 1) : 0
-    let active = matches == 0 ? 0 : (found.step % matches + matches) % matches + 1
-    Engine.shared.webKitPage(page, didFindMatches: matches, activeMatch: active)
+  override var isFlipped: Bool { true }
+
+  override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+  override func draw(_ dirtyRect: NSRect) {
+    for position in positions {
+      let tick = NSRect(x: 0, y: (bounds.height * position).rounded(.down), width: bounds.width, height: 3)
+      Self.edge.setFill()
+      tick.fill()
+      Self.core.setFill()
+      tick.insetBy(dx: 1, dy: 1).fill()
+    }
   }
 }
 
