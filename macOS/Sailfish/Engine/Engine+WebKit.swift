@@ -14,7 +14,9 @@ extension Engine {
   func makeWebKitPage(
     _ tab: UUID, page id: UUID, profile: UUID, configuration: WKWebViewConfiguration? = nil
   ) -> WebKitPage {
-    let page = WebKitPage(id: id, profile: profile, incognito: incognitoTabs.contains(tab), configuration: configuration)
+    let incognito = incognitoTabs.contains(tab)
+    let page = WebKitPage(id: id, profile: profile, incognito: incognito, configuration: configuration)
+    WebKitStores.pageOpened(profile: profile, incognito: incognito)
     page.onUpdate = { [weak self] in self?.webKitPageDidUpdate($0) }
     livePages[id] = page
     owners[ObjectIdentifier(page)] = (tab, id)
@@ -56,7 +58,15 @@ extension Engine {
     hoveredLinks[tab] = nil
     selections[tab] = nil
     switch engine {
-    case .chromium: makeContents(tab, page: record.id, context).loadURL(url)
+    case .chromium:
+      // A typed URL keeps Chromium's typed transition; a link or form from a WebKit page carries its body and
+      // referrer.
+      let contents = makeContents(tab, page: record.id, context)
+      if request.attribution == .user {
+        contents.loadURL(url)
+      } else {
+        contents.load(request)
+      }
     case .webkit: makeWebKitPage(tab, page: record.id, profile: profile).load(request)
     }
     reportShown(tab)

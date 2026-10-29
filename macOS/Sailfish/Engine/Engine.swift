@@ -110,12 +110,15 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     restoringPages.remove(record.id)
     @Shared(.siteEngines) var siteEngines
     let engine = pageEngine(for: url, from: record.engine, choice: choices[tab], cause: .typed, siteEngines)
+    // The user gave the URL, which keeps a switch to Chromium a typed navigation.
+    var request = URLRequest(url: url)
+    request.attribution = .user
     guard engine == record.engine else {
-      return await switchEngine(tab, to: engine, request: URLRequest(url: url))
+      return await switchEngine(tab, to: engine, request: request)
     }
     switch record.engine {
     case .chromium: contents(tab)?.loadURL(url)
-    case .webkit: (page as? WebKitPage)?.load(URLRequest(url: url))
+    case .webkit: (page as? WebKitPage)?.load(request)
     }
   }
 
