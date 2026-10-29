@@ -200,8 +200,8 @@ private struct Pane: View {
         still = nil
         return
       }
-      guard still == nil, let tab, let contents = Engine.shared.tabs[tab.id] else { return }
-      contents.snapshot { still = $0 }
+      guard still == nil, let tab, let page = Engine.shared.page(tab.id) else { return }
+      page.snapshot { still = $0 }
     }
   }
 

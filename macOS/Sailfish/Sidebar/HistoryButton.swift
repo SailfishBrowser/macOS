@@ -1,5 +1,4 @@
 import AppKit
-import EngineCore
 import SwiftUI
 
 // A back or forward button: a click goes one step, ⌘-click or a middle click opens the nearest entry in
@@ -48,17 +47,17 @@ struct HistoryButton: View {
   }
 
   // The entries behind or ahead of the shown page, nearest first, read when a menu or a ⌘-click needs them.
-  private func entries() -> [ECNavigationEntry] {
-    guard let contents = tab.flatMap({ Engine.shared.tabs[$0.id] }) else { return [] }
-    return direction == .back ? contents.backEntries : contents.forwardEntries
+  private func entries() -> [HistoryEntry] {
+    guard let tab else { return [] }
+    return direction == .back ? Engine.shared.backEntries(tab.id) : Engine.shared.forwardEntries(tab.id)
   }
 
   private func go() {
     send(direction == .back ? .goBack : .goForward)
   }
 
-  private func goToEntry(_ index: Int) {
-    send(.goToEntry(index: index))
+  private func goToEntry(_ entry: HistoryEntry) {
+    send(.goToEntry(entry))
   }
 
   private func openInNewTab(_ url: URL) {
@@ -97,13 +96,13 @@ struct HistoryButton: View {
 // An entry in a history menu, with its favicon; ⌘ held while choosing it opens it in a new tab, as in Chrome.
 private final class HistoryMenuItem: NSMenuItem {
   let url: URL
-  private let index: Int
-  private let goToEntry: (Int) -> Void
+  private let entry: HistoryEntry
+  private let goToEntry: (HistoryEntry) -> Void
   private let openInNewTab: (URL) -> Void
 
-  init(entry: ECNavigationEntry, goToEntry: @escaping (Int) -> Void, openInNewTab: @escaping (URL) -> Void) {
+  init(entry: HistoryEntry, goToEntry: @escaping (HistoryEntry) -> Void, openInNewTab: @escaping (URL) -> Void) {
     url = entry.url
-    index = entry.index
+    self.entry = entry
     self.goToEntry = goToEntry
     self.openInNewTab = openInNewTab
     super.init(title: Self.label(entry.url), action: #selector(choose), keyEquivalent: "")
@@ -128,7 +127,7 @@ private final class HistoryMenuItem: NSMenuItem {
     if NSApp.currentEvent?.modifierFlags.contains(.command) == true {
       openInNewTab(url)
     } else {
-      goToEntry(index)
+      goToEntry(entry)
     }
   }
 }

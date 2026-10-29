@@ -111,7 +111,7 @@ final class FavoritePreviews {
   var fetched: [Tab.ID: Date] = [:]
 
   func refresh(_ tab: Tab.ID, _ app: PreviewApp) {
-    Engine.shared.tabs[tab]?.evaluateJavaScript(app.extractor) { json in
+    Engine.shared.page(tab)?.evaluateJavaScript(app.extractor) { json in
       MainActor.assumeIsolated {
         guard let items = PreviewApp.items(json) else { return }
         self.items[tab] = items
@@ -121,7 +121,7 @@ final class FavoritePreviews {
   }
 
   func click(_ item: PreviewItem, in tab: Tab.ID) {
-    Engine.shared.tabs[tab]?.evaluateJavaScript(PreviewApp.clickScript(item)) { _ in }
+    Engine.shared.page(tab)?.evaluateJavaScript(PreviewApp.clickScript(item)) { _ in }
   }
 }
 

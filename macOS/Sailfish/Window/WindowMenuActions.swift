@@ -101,7 +101,7 @@ extension WindowController: NSMenuItemValidation {
   }
 
   @objc func reloadBypassingCache(_ sender: Any?) {
-    space.selectedTabID.map { Engine.shared.perform($0) { $0.reloadBypassingCache() } }
+    space.selectedTabID.flatMap { Engine.shared.page($0) }?.reloadBypassingCache()
   }
 
   @objc func newSplit(_ sender: Any?) {
@@ -334,8 +334,10 @@ extension WindowController: NSMenuItemValidation {
       return !archive.isEmpty
     case #selector(copyURLAsQuote(_:)):
       return space.selectedTabID.flatMap { Engine.shared.selections[$0] } != nil
-    case #selector(showJavaScriptConsole(_:)), #selector(inspectElements(_:)), #selector(viewSource(_:)):
-      return space.selectedTabID.flatMap { Engine.shared.tabs[$0] } != nil
+    case #selector(showJavaScriptConsole(_:)), #selector(inspectElements(_:)):
+      return space.selectedTabID.flatMap { Engine.shared.page($0) }?.hasDeveloperTools == true
+    case #selector(viewSource(_:)):
+      return space.selectedTabID.flatMap { Engine.shared.page($0) } != nil
     case #selector(stopLoading(_:)):
       return true
     // Offered only on a page with an article, as Safari does.
@@ -349,7 +351,7 @@ extension WindowController: NSMenuItemValidation {
     // Enabled for any loaded page, as in Chrome: the page keeps a selection the engine never reported, such as
     // the match the find bar left selected.
     case #selector(jumpToSelection(_:)):
-      return space.selectedTabID.flatMap { Engine.shared.tabs[$0] } != nil
+      return space.selectedTabID.flatMap { Engine.shared.page($0) } != nil
     // Disabled, the key goes on to the field, which moves its caret. A page's own fields keep it in the engine.
     case #selector(goBackWithArrow(_:)), #selector(goForwardWithArrow(_:)):
       return !(window?.firstResponder is NSText)

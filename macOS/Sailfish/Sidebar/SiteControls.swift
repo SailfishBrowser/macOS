@@ -7,14 +7,14 @@ import SwiftUI
 struct SiteControls: View {
   let space: Space
   let tab: Tab.ID
-  let contents: ECWebContents
   let url: URL
   let open: (URL) -> Void
   @State private var revision = 0
 
   var body: some View {
     let _ = revision
-    let permissions = contents.sitePermissions
+    let page = Engine.shared.page(tab)
+    let permissions = Engine.shared.sitePermissions(tab)
     VStack(alignment: .leading, spacing: 0) {
       // Shot 57: 49 pt tiles 7 apart.
       HStack(spacing: 7) {
@@ -46,10 +46,10 @@ struct SiteControls: View {
       setting("gearshape.fill", "Automatic Picture-In-Picture", nil, isOn: false).opacity(0.4).allowsHitTesting(false)
         .accessibilityHidden(true)
       ForEach(permissions.keys.sorted(), id: \.self) { key in
-        let allowed = permissions[key]!.boolValue
+        let allowed = permissions[key]!
         let permission = Engine.permissions[key]
         Button {
-          contents.setSitePermission(key, allowed: !allowed)
+          Engine.shared.setSitePermission(tab, key, allowed: !allowed)
           revision += 1
         } label: {
           setting(permission?.symbol ?? "gearshape.fill", permission?.title ?? key, allowed ? "Allowed" : "Blocked", isOn: allowed)
@@ -58,7 +58,8 @@ struct SiteControls: View {
       }
       Divider().padding(.vertical, 8)
       HStack {
-        Label(contents.isSecure ? "Secure" : "Not Secure", systemImage: contents.isSecure ? "lock.fill" : "lock.open.fill")
+        let isSecure = page?.isSecure == true
+        Label(isSecure ? "Secure" : "Not Secure", systemImage: isSecure ? "lock.fill" : "lock.open.fill")
           .font(.system(size: 13, weight: .medium))
           .padding(.horizontal, 8)
           .frame(height: 30)
@@ -66,8 +67,8 @@ struct SiteControls: View {
         Spacer()
         Menu {
           Button("Copy Link") { copyLink(url) }
-          Button("Save Page…") { contents.savePage() }
-          Button("Print…") { contents.print() }
+          Button("Save Page…") { page?.savePage() }
+          Button("Print…") { page?.printPage() }
         } label: {
           Image(systemName: "ellipsis")
             .font(.system(size: 12, weight: .semibold))
@@ -123,8 +124,8 @@ struct SiteControls: View {
 
   // Copies the visible page as an image and keeps it in Media.
   private func capture() {
-    guard let shown = space.tabs[id: tab] else { return }
-    contents.snapshot { image in
+    guard let shown = space.tabs[id: tab], let page = Engine.shared.page(tab) else { return }
+    page.snapshot { image in
       guard let image else { return }
       MainActor.assumeIsolated { Captures.keep(image, of: shown, in: space) }
       SoundEffect.play(.capture)
@@ -162,7 +163,7 @@ struct PillControls: View {
   @Shared(.pinnedExtensions) private var pinned
 
   var body: some View {
-    if let tab = space.selectedTabID, let contents = Engine.shared.tabs[tab] {
+    if let tab = space.selectedTabID, let page = Engine.shared.page(tab) {
       let quote = Engine.shared.selections[tab]
       // The pill icons are centered 28 pt apart.
       HStack(spacing: 12) {
@@ -182,7 +183,7 @@ struct PillControls: View {
             .help(Engine.shared.readers[tab] == nil ? "Show Reader View" : "Hide Reader View")
         }
         if let quote {
-          icon("quote.bubble") { shareQuote(quote, contents) }
+          icon("quote.bubble") { shareQuote(quote, page) }
             .help("Share Quote")
             .background(AnchorView(view: $anchor))
         } else if isSidebarHovered || isOpen {
@@ -196,7 +197,7 @@ struct PillControls: View {
           icon("slider.horizontal.2.square") { isOpen = true }
             .help("Site Controls")
             .popover(isPresented: $isOpen, arrowEdge: .bottom) {
-              SiteControls(space: space, tab: tab, contents: contents, url: url, open: open)
+              SiteControls(space: space, tab: tab, url: url, open: open)
             }
         }
       }
@@ -211,9 +212,9 @@ struct PillControls: View {
   }
 
   // Shares the quote with a link that scrolls to and highlights it.
-  private func shareQuote(_ quote: String, _ contents: ECWebContents) {
+  private func shareQuote(_ quote: String, _ page: any TabPage) {
     guard let view = anchor else { return }
-    contents.linkToHighlight { link in
+    page.linkToHighlight { link in
       guard let link else { return }
       MainActor.assumeIsolated {
         NSSharingServicePicker(items: ["“\(quote)”\n\(link.absoluteString)"])

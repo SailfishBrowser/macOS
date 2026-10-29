@@ -381,8 +381,8 @@ struct TabsFeature {
     case duplicate(Tab.ID, to: Placement? = nil, before: UUID? = nil)
     case goBack
     case goForward
-    // To the history entry at the index, chosen in a back or forward menu.
-    case goToEntry(index: Int)
+    // To a history entry, chosen in a back or forward menu.
+    case goToEntry(HistoryEntry)
     case load(Tab.ID, URL)
     // Mutes or unmutes every tab of the space, loaded or not.
     case muteAll(Bool)
@@ -650,8 +650,8 @@ struct TabsFeature {
       case .goForward:
         return navigate(state, engine.goForward)
 
-      case let .goToEntry(index):
-        return navigate(state) { await engine.goToEntry($0, index) }
+      case let .goToEntry(entry):
+        return navigate(state) { await engine.goToEntry($0, entry) }
 
       case let .load(id, url):
         guard let tab = state.tabs[id: id] else { return .none }
