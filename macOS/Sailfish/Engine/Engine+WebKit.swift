@@ -14,7 +14,9 @@ extension Engine {
   func makeWebKitPage(
     _ tab: UUID, page id: UUID, profile: UUID, configuration: WKWebViewConfiguration? = nil
   ) -> WebKitPage {
-    let page = WebKitPage(id: id, profile: profile, incognito: incognitoTabs.contains(tab), configuration: configuration)
+    let incognito = incognitoTabs.contains(tab)
+    let page = WebKitPage(id: id, profile: profile, incognito: incognito, configuration: configuration)
+    WebKitStores.pageOpened(profile: profile, incognito: incognito)
     page.onUpdate = { [weak self] in self?.webKitPageDidUpdate($0) }
     livePages[id] = page
     owners[ObjectIdentifier(page)] = (tab, id)

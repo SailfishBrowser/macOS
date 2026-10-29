@@ -36,6 +36,7 @@ final class Shell: NSObject, NSMenuDelegate {
   }
 
   private var recoveryToken: ObserveToken?
+  private var warmToken: ObserveToken?
 
   override init() {
     let writer = SnapshotWriter<Snapshot>.state
@@ -53,6 +54,7 @@ final class Shell: NSObject, NSMenuDelegate {
     ECEngine.dockMenu = dockMenu()
     SoundEffect.register()
     recoveryToken = observe { [weak self] in self?.showRecoveredSpaces() }
+    warmToken = observe { [weak self] in self?.warmWebKit() }
     Engine.shared.windowDelegate = self
     // Separate observations, so a page update that reaches one sync does not run the others.
     windowsToken = observe { [weak self] in self?.syncWindows() }
@@ -211,6 +213,17 @@ final class Shell: NSObject, NSMenuDelegate {
       "The \(spaces.map { "“\($0)”" }.formatted(.list(type: .and))) \(spaces.count == 1 ? "Space uses" : "Spaces use") the Default Profile now."
     alert.runModal()
     store.send(.dismissRecoveredSpaces)
+  }
+
+  // Once the saved windows have loaded, each profile with a tab showing a WebKit page starts WebKit, so its first
+  // WebKit page opens fast. Runs once.
+  private func warmWebKit() {
+    guard store.isLoaded else { return }
+    warmToken = nil
+    let spaces = store.windows.flatMap(\.spaces.spaces).filter { $0.tabs.contains { $0.engine == .webkit } }
+    for profile in Set(spaces.map(\.profileID)) {
+      WebKitStores.warm(profile: profile, incognito: false)
+    }
   }
 
   nonisolated static var isDefaultBrowser: Bool {

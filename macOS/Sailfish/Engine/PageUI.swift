@@ -165,7 +165,11 @@ extension Engine {
   func webContents(_ contents: ECWebContents, didUpdateTargetURL url: URL?) {
     guard let tab = shownTab(of: contents) else { return }
     // Written only on change, so repeated events do not invalidate the views reading it.
-    if hoveredLinks[tab] != url { hoveredLinks[tab] = url }
+    guard hoveredLinks[tab] != url else { return }
+    hoveredLinks[tab] = url
+    if let url {
+      warmWebKit(tab, for: url)
+    }
   }
 
   func webContents(_ contents: ECWebContents, didChangeSelection selectionText: String) {

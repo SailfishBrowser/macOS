@@ -32,6 +32,7 @@ import WebKit
   // Ends the profile's incognito session, so the next one starts with a fresh store.
   static func dropIncognitoStore(profile: UUID) {
     incognitoStores[profile] = nil
+    dropIncognitoWarmView(profile: profile)
   }
 
   // A new configuration on the profile's store, with the page scripts installed. Each page adds itself as the
