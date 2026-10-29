@@ -34,6 +34,7 @@ import WebKit
     webView = WKWebView(frame: .zero, configuration: configuration)
     super.init()
     fresh.userContentController.add(self, contentWorld: WebKitPageScript.world, name: "sailfish")
+    fresh.userContentController.add(self, contentWorld: PasswordFill.world, name: PasswordFill.handlerName)
     // The window's two-finger swipe switches spaces.
     webView.allowsBackForwardNavigationGestures = false
     webView.allowsMagnification = true
@@ -136,6 +137,9 @@ import WebKit
   }
 
   func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+    if message.name == PasswordFill.handlerName {
+      return PasswordFill.handle(message, page: self)
+    }
     guard message.frameInfo.isMainFrame, let body = PageScriptMessage(message.body) else { return }
     switch body {
     case let .icons(icons):
