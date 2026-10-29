@@ -59,6 +59,11 @@ import WebKit
     configuration.preferences.isElementFullscreenEnabled = true
     configuration.preferences.isFraudulentWebsiteWarningEnabled = false
     configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+    // WebKit's private waitsForPaintAfterViewDidMoveToWindow: off, a view coming back into the window no longer blocks
+    // the main thread up to 250 ms for its paint, since the page stays clear until it has drawn (WebKitPage).
+    if configuration.responds(to: NSSelectorFromString("_setWaitsForPaintAfterViewDidMoveToWindow:")) {
+      configuration.setValue(false, forKey: "waitsForPaintAfterViewDidMoveToWindow")
+    }
     let controller = configuration.userContentController
     controller.addUserScript(
       WKUserScript(

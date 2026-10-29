@@ -31,8 +31,11 @@ import WebKit
   var contextMenuHit: (hit: WebKitContextMenu.Hit, time: ContinuousClock.Instant)?
   // The page's media and mute, which WebKitMedia.swift keeps.
   var mediaState = WebKitMediaState()
-  // Set while the page, shown again, waits to come back into the window.
+  // Set while the page, out of the window, waits to come back into it, and from its return until it shows; `returns`
+  // counts the returns, so an answer for an earlier one is dropped.
   private var showsOnReturn = false
+  private var isReturning = false
+  private var returns = 0
   // Shows the page on the display's next frame.
   private var nextFrame: CADisplayLink?
   private static let textDirectiveCharacters = CharacterSet(
@@ -186,33 +189,61 @@ import WebKit
     let configuration = WKSnapshotConfiguration()
     configuration.rect = CGRect(x: 0, y: 0, width: 1, height: 1)
     configuration.snapshotWidth = 1
-    webView.takeSnapshot(with: configuration) { [weak self] _, _ in
-      guard let self, nextFrame == nil else { return }
-      nextFrame = webView.displayLink(target: self, selector: #selector(show(_:)))
-      nextFrame?.add(to: .main, forMode: .common)
-    }
+    webView.takeSnapshot(with: configuration) { [weak self] _, _ in self?.showOnNextFrame() }
+  }
+
+  private func showOnNextFrame() {
+    guard nextFrame == nil else { return }
+    nextFrame = webView.displayLink(target: self, selector: #selector(show(_:)))
+    nextFrame?.add(to: .main, forMode: .common)
   }
 
   // The store's next page takes a web view started once this one shows, so it opens as fast as the first.
   @objc private func show(_ link: CADisplayLink) {
     link.invalidate()
     nextFrame = nil
+    isReturning = false
     webView.alphaValue = 1
     WebKitStores.warm(profile: profile, incognito: incognito)
   }
 
-  // Shown again by Back or Forward: clear until it has drawn again, as its content returns a frame or two after its
-  // view comes back to the window. A page still in the window, under the one that replaced it, shows at once.
-  func reshow() {
-    guard webView.alphaValue > 0, webView.window == nil else { return }
+  // Out of the window, by a tab or space switch, Back or Forward, or moved into another window: clear until it has
+  // drawn again once it is back, as its content returns a frame or more after its view, so the pane keeps the page it
+  // replaces until then. A page still in the window, under the one that replaced it, shows at once.
+  fileprivate func leftWindow() {
+    guard webView.alphaValue > 0 || isReturning else { return }
+    nextFrame?.invalidate()
+    nextFrame = nil
+    isReturning = false
     webView.alphaValue = 0
     showsOnReturn = true
   }
 
+  // A returning page shows once its next drawing is on screen, through WebKit's private
+  // _doAfterNextPresentationUpdate:, since a snapshot can answer while a busy page's main thread is briefly free, before
+  // that drawing; without it WebKit waits for the drawing itself and a snapshot follows it. A page that never draws
+  // shows after 300 ms, as a Chromium page does.
   fileprivate func movedToWindow() {
     guard showsOnReturn else { return }
     showsOnReturn = false
-    showWhenDrawn()
+    isReturning = true
+    returns += 1
+    let current = returns
+    let drawn = { [weak self] in
+      guard let self, isReturning, returns == current else { return }
+      showOnNextFrame()
+    }
+    let presented = NSSelectorFromString("_doAfterNextPresentationUpdate:")
+    if webView.responds(to: presented) {
+      let block: @convention(block) () -> Void = { MainActor.assumeIsolated { drawn() } }
+      webView.perform(presented, with: block)
+    } else {
+      showWhenDrawn()
+    }
+    Task {
+      try? await Task.sleep(for: .milliseconds(300))
+      drawn()
+    }
   }
 
   // MARK: Navigation
@@ -532,10 +563,24 @@ final class WebKitWebView: WKWebView {
     self.init(frame: .zero, configuration: configuration)
   }
 
+  // Moved straight into another window, as into Little Sailfish: drawn there before it shows.
+  override func viewWillMove(toWindow newWindow: NSWindow?) {
+    super.viewWillMove(toWindow: newWindow)
+    if newWindow != nil, window != nil, newWindow !== window {
+      page?.leftWindow()
+    }
+  }
+
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     if window != nil {
       page?.movedToWindow()
+    } else {
+      // A view moved between panes of a window leaves it and comes back in one turn, and stays on screen.
+      DispatchQueue.main.async { [weak self] in
+        guard let self, window == nil else { return }
+        page?.leftWindow()
+      }
     }
   }
 
