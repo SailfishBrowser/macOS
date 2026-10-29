@@ -11,9 +11,12 @@ import WebKit
   // Called on every change of the page's URL, title, loading, progress, history or security, and of its favicon.
   var onUpdate: (@MainActor (WebKitPage) -> Void)?
   private var observations: [NSKeyValueObservation] = []
-  private var favicon: NSImage?
-  // The icon the favicon was fetched from, or is being fetched from.
-  private var iconURL: URL?
+  private(set) var favicon: NSImage?
+  // The icon the favicon is being fetched from, or was, and the one it was fetched from.
+  private(set) var iconURL: URL?
+  private(set) var faviconURL: URL?
+  // The visit history records for the page's current URL.
+  var visit: WebKitVisit?
   private static let iconSession = URLSession(configuration: .ephemeral)
   // The type of the last main-frame navigation allowed, which says at its commit whether it was a new one.
   private var navigationType: WKNavigationType = .other
@@ -251,6 +254,13 @@ import WebKit
       from: tab, url: action.request.url ?? URL(string: "about:blank")!, configuration: configuration)
   }
 
+  func webView(
+    _ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo,
+    type: WKMediaCaptureType, decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void
+  ) {
+    Engine.shared.webKitPage(self, requestsCapture: type, origin: origin, decision: decisionHandler)
+  }
+
   func webViewDidClose(_ webView: WKWebView) {
     Engine.shared.closeRequested(by: self)
   }
@@ -299,6 +309,7 @@ import WebKit
       let data = try? await Self.iconSession.data(from: url).0
       guard iconURL == url else { return }
       favicon = data.flatMap { NSImage(data: $0) }
+      faviconURL = url
       onUpdate?(self)
     }
   }

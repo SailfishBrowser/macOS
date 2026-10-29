@@ -317,10 +317,16 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
 
   // The permissions the user allowed or blocked for the site of the tab's page.
   func sitePermissions(_ tab: UUID) -> [String: Bool] {
-    contents(tab)?.sitePermissions.mapValues(\.boolValue) ?? [:]
+    if let page = page(tab) as? WebKitPage {
+      return sitePermissions(tab, page)
+    }
+    return contents(tab)?.sitePermissions.mapValues(\.boolValue) ?? [:]
   }
 
   func setSitePermission(_ tab: UUID, _ key: String, allowed: Bool) {
+    if let page = page(tab) as? WebKitPage {
+      return setSitePermission(tab, page, key, allowed: allowed)
+    }
     contents(tab)?.setSitePermission(key, allowed: allowed)
   }
 }
