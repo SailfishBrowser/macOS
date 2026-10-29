@@ -39,6 +39,9 @@ import WebKit
   static func configuration(profile: UUID, incognito: Bool) -> WKWebViewConfiguration {
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = store(profile: profile, incognito: incognito)
+    // Plain http loads, as in Safari (Info.plist exempts web content from App Transport Security), and a host known
+    // to serve https is upgraded to it.
+    configuration.upgradeKnownHostsToHTTPS = true
     configuration.applicationNameForUserAgent = "Version/\(safariVersion) Safari/605.1.15"
     configuration.mediaTypesRequiringUserActionForPlayback = []
     configuration.allowsAirPlayForMediaPlayback = true
