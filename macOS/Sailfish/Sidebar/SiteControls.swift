@@ -3,7 +3,7 @@ import EngineCore
 import SwiftUI
 
 // The site controls popover on the URL pill: a dark card with share, capture and full-page capture tiles, the
-// extensions' actions, the site's settings and permissions, and its security with a "…" menu.
+// extensions' actions (none on a WebKit page), the site's settings and permissions, and its security with a "…" menu.
 struct SiteControls: View {
   let space: Space
   let tab: Tab.ID
@@ -24,22 +24,24 @@ struct SiteControls: View {
         tile("text.viewfinder").opacity(0.4).allowsHitTesting(false).accessibilityHidden(true)
       }
       .buttonStyle(.plain)
-      header("Extensions")
-      // Four tiles a row; past three rows the grid scrolls.
-      let actions = Engine.shared.extensionActions(tab, in: space)
-      ScrollView {
-        LazyVGrid(columns: Array(repeating: GridItem(.fixed(49), spacing: 7), count: 4), alignment: .leading, spacing: 7) {
-          ForEach(actions, id: \.id) { item in
-            ActionTile(item: item) { Engine.shared.runExtensionAction(item.id, tab, in: space) }
+      if Engine.shared.shownEngine(tab) != .webkit {
+        header("Extensions")
+        // Four tiles a row; past three rows the grid scrolls.
+        let actions = Engine.shared.extensionActions(tab, in: space)
+        ScrollView {
+          LazyVGrid(columns: Array(repeating: GridItem(.fixed(49), spacing: 7), count: 4), alignment: .leading, spacing: 7) {
+            ForEach(actions, id: \.id) { item in
+              ActionTile(item: item) { Engine.shared.runExtensionAction(item.id, tab, in: space) }
+            }
+            // Shot 57: the add tile is a light one, white 5% over the popover.
+            Button { open(URL(string: "https://chromewebstore.google.com")!) } label: { tile("plus", fill: .white.opacity(0.05)) }
+              .buttonStyle(.plain)
+              .help("Add Extension")
           }
-          // Shot 57: the add tile is a light one, white 5% over the popover.
-          Button { open(URL(string: "https://chromewebstore.google.com")!) } label: { tile("plus", fill: .white.opacity(0.05)) }
-            .buttonStyle(.plain)
-            .help("Add Extension")
         }
+        .frame(height: CGFloat(min((actions.count + 1 + 3) / 4, 3)) * 37 - 7)
+        .scrollDisabled(actions.count + 1 <= 12)
       }
-      .frame(height: CGFloat(min((actions.count + 1 + 3) / 4, 3)) * 37 - 7)
-      .scrollDisabled(actions.count + 1 <= 12)
       header("Settings")
       // Developer mode follows the page's URL, so its row reports and does not toggle.
       setting("hammer.fill", "Developer Mode", url.isDeveloperPage ? "On" : "Off", isOn: url.isDeveloperPage)
