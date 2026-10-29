@@ -104,18 +104,3 @@ extension WebKitContextMenu.Hit {
       }
   }
 }
-
-// A WebKit page's web view, whose context menu is Sailfish's page menu, the same as a Chromium page's.
-final class WebKitWebView: WKWebView {
-  weak var page: WebKitPage?
-
-  // WebKit's items give way to Sailfish's, built from the hit test that arrived just before.
-  override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
-    super.willOpenMenu(menu, with: event)
-    guard let page, let tab = Engine.shared.tab(of: page) else { return }
-    let hit = page.contextMenuHit.flatMap { ContinuousClock.now - $0.time < .milliseconds(100) ? $0.hit : nil }
-    page.contextMenuHit = nil
-    menu.items = Engine.shared.pageMenuItems(
-      WebKitContextMenu(hit: hit ?? .empty, page: page, event: event), for: tab, page: page)
-  }
-}

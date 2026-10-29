@@ -234,6 +234,16 @@ enum WebKitPageScript {
   );
 
   if (isTop) {
+    // The page's first content, or for a page that shows none, two frames after its load.
+    new PerformanceObserver((list, observer) => {
+      if (!list.getEntriesByName("first-contentful-paint").length) return;
+      observer.disconnect();
+      post("painted");
+    }).observe({ type: "paint", buffered: true });
+    addEventListener("load", () => requestAnimationFrame(() => requestAnimationFrame(() => post("painted"))), {
+      once: true,
+    });
+
     let selected = "";
     let pending = false;
     document.addEventListener("selectionchange", () => {
@@ -434,6 +444,8 @@ enum PageScriptMessage {
   case selection(String)
   // The main frame's icons, best first.
   case icons([URL])
+  // The main frame painted its first content.
+  case painted
   // What a right click in any frame is on.
   case contextMenu(WebKitContextMenu.Hit)
   // A report on a frame's media, from any frame, with the id the frame's script gave itself.
@@ -445,6 +457,7 @@ enum PageScriptMessage {
     case let ("hover", href as String): self = .hover(URL(string: href))
     case let ("selection", text as String): self = .selection(text)
     case let ("icons", hrefs as [String]): self = .icons(hrefs.compactMap { URL(string: $0) })
+    case ("painted", _): self = .painted
     case let ("contextMenu", hit as [String: Any]): self = .contextMenu(WebKitContextMenu.Hit(hit))
     case let (kind, data):
       guard let frame = body["frame"] as? String, let report = MediaReport(kind, data) else { return nil }

@@ -31,6 +31,8 @@ import WebKit
   var contextMenuHit: (hit: WebKitContextMenu.Hit, time: ContinuousClock.Instant)?
   // The page's media and mute, which WebKitMedia.swift keeps.
   var mediaState = WebKitMediaState()
+  // Set while the page, shown again, waits to come back into the window.
+  private var showsOnReturn = false
   private static let textDirectiveCharacters = CharacterSet(
     charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._~")
 
@@ -57,9 +59,16 @@ import WebKit
     webView.isInspectable = !incognito
     webView.navigationDelegate = self
     webView.uiDelegate = self
+    // Clear until its first content is on screen, as a new Chromium page is, so the card or the page this one replaces
+    // shows through.
+    webView.alphaValue = 0
     observations = [
       observe(\.url), observe(\.title), observe(\.isLoading), observe(\.estimatedProgress), observe(\.canGoBack),
       observe(\.canGoForward), observe(\.hasOnlySecureContent),
+      // In the system's appearance, as Chromium's pages are, not the window's, which follows the space's theme.
+      NSApp.observe(\.effectiveAppearance, options: .initial) { [weak self] app, _ in
+        MainActor.assumeIsolated { self?.webView.appearance = app.effectiveAppearance }
+      },
     ]
   }
 
@@ -168,9 +177,33 @@ import WebKit
       }
     case let .hover(url) where isMainFrame: Engine.shared.webKitPage(self, hovered: url)
     case let .selection(text) where isMainFrame: Engine.shared.webKitPage(self, selected: text)
+    case .painted where isMainFrame: showWhenDrawn()
     case let .media(frame, report): receive(report, frame: frame, from: message.frameInfo)
-    case .icons, .hover, .selection: break
+    case .icons, .hover, .selection, .painted: break
     }
+  }
+
+  // Shows the view once WebKit has put the page's pending drawing on screen, which a snapshot taken after screen
+  // updates waits for; one point of it costs nothing.
+  private func showWhenDrawn() {
+    let configuration = WKSnapshotConfiguration()
+    configuration.rect = CGRect(x: 0, y: 0, width: 1, height: 1)
+    configuration.snapshotWidth = 1
+    webView.takeSnapshot(with: configuration) { [weak self] _, _ in self?.webView.alphaValue = 1 }
+  }
+
+  // Shown again by Back or Forward: clear until it has drawn again, as its content returns a frame or two after its
+  // view comes back to the window. A page still in the window, under the one that replaced it, shows at once.
+  func reshow() {
+    guard webView.alphaValue > 0, webView.window == nil else { return }
+    webView.alphaValue = 0
+    showsOnReturn = true
+  }
+
+  fileprivate func movedToWindow() {
+    guard showsOnReturn else { return }
+    showsOnReturn = false
+    showWhenDrawn()
   }
 
   // MARK: Navigation
@@ -239,10 +272,12 @@ import WebKit
 
   func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
     isProvisional = false
+    webView.alphaValue = 1
   }
 
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
     isProvisional = false
+    webView.alphaValue = 1
   }
 
   // HTTP Basic and Digest ask for a name and password; server trust and everything else are left to macOS, so an
@@ -469,5 +504,28 @@ import WebKit
     case .pasteAndMatchStyle: NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: webView, from: nil)
     case .selectAll: NSApp.sendAction(#selector(NSText.selectAll(_:)), to: webView, from: nil)
     }
+  }
+}
+
+// A WebKit page's web view, which tells its page when it comes into a window and whose context menu is Sailfish's
+// page menu, the same as a Chromium page's.
+final class WebKitWebView: WKWebView {
+  weak var page: WebKitPage?
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if window != nil {
+      page?.movedToWindow()
+    }
+  }
+
+  // WebKit's items give way to Sailfish's, built from the hit test that arrived just before.
+  override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+    super.willOpenMenu(menu, with: event)
+    guard let page, let tab = Engine.shared.tab(of: page) else { return }
+    let hit = page.contextMenuHit.flatMap { ContinuousClock.now - $0.time < .milliseconds(100) ? $0.hit : nil }
+    page.contextMenuHit = nil
+    menu.items = Engine.shared.pageMenuItems(
+      WebKitContextMenu(hit: hit ?? .empty, page: page, event: event), for: tab, page: page)
   }
 }
