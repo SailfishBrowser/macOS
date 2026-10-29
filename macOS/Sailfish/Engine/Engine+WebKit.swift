@@ -56,7 +56,15 @@ extension Engine {
     hoveredLinks[tab] = nil
     selections[tab] = nil
     switch engine {
-    case .chromium: makeContents(tab, page: record.id, context).loadURL(url)
+    case .chromium:
+      // A typed URL keeps Chromium's typed transition; a link or form from a WebKit page carries its body and
+      // referrer.
+      let contents = makeContents(tab, page: record.id, context)
+      if request.attribution == .user {
+        contents.loadURL(url)
+      } else {
+        contents.load(request)
+      }
     case .webkit: makeWebKitPage(tab, page: record.id, profile: profile).load(request)
     }
     reportShown(tab)
