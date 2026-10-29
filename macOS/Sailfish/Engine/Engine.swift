@@ -184,11 +184,17 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   }
 
   func zoom(_ tab: UUID, _ step: ZoomStep) -> Int? {
+    if let page = page(tab) as? WebKitPage {
+      return zoom(page, of: tab, step)
+    }
     guard let contents = self.contents(tab) else { return nil }
     switch step {
     case .in: contents.zoomIn()
     case .out: contents.zoomOut()
     case .reset: contents.resetZoom()
+    }
+    if let host = contents.url?.host(), let context = tabContexts[tab] {
+      applyZoom(contents.zoomPercent, host: host, in: context)
     }
     return contents.zoomPercent
   }

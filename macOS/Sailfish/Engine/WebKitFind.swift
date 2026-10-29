@@ -101,14 +101,55 @@ extension FindOperation {
   }
 }
 
+// Page zoom in WebKit pages, in Chrome's steps and remembered per host in the Chromium context's zoom map, so a
+// site keeps one zoom in both engines.
 extension Engine {
+  static let zoomFactors: [Double] = [0.25, 1 / 3, 0.5, 2 / 3, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5]
+
   func webKitPage(_ page: WebKitPage, didFindMatches matches: Int, activeMatch: Int) {
     guard let tab = shownTab(of: page) else { return }
     Self.continuation.yield(.found(tab: tab, matches: matches, activeMatch: activeMatch))
   }
 
-  // A committed page has nothing found yet.
+  // Steps the page's zoom and writes it for its host, which every open page of the host in both engines takes.
+  func zoom(_ page: WebKitPage, of tab: UUID, _ step: ZoomStep) -> Int? {
+    guard let context = tabContexts[tab], let host = page.webView.url?.host() else { return nil }
+    let current = Double(page.webView.pageZoom)
+    let factor: Double =
+      switch step {
+      case .in: Self.zoomFactors.first { $0 > current + 0.001 } ?? current
+      case .out: Self.zoomFactors.last { $0 < current - 0.001 } ?? current
+      case .reset: 1
+      }
+    let percent = Int((factor * 100).rounded())
+    context.setZoomPercent(percent, forHost: host)
+    applyZoom(percent, host: host, in: context)
+    return percent
+  }
+
+  // Every open WebKit page of the host takes its zoom at once, as Chromium's pages of the host do.
+  func applyZoom(_ percent: Int, host: String, in context: ECBrowserContext) {
+    for live in livePages.values {
+      guard let live = live as? WebKitPage, let owner = owners[ObjectIdentifier(live)],
+        tabContexts[owner.tab] === context, live.webView.url?.host() == host
+      else { continue }
+      applyZoom(percent, to: live)
+    }
+  }
+
+  // A committed page takes its host's zoom.
   func webKitPageDidCommit(_ page: WebKitPage) {
     page.finder.end()
+    guard let tab = tab(of: page), let context = tabContexts[tab], let host = page.webView.url?.host() else { return }
+    applyZoom(context.zoomPercent(forHost: host), to: page)
+  }
+
+  private func applyZoom(_ percent: Int, to page: WebKitPage) {
+    let factor = Self.zoomFactors.first { Int(($0 * 100).rounded()) == percent } ?? Double(percent) / 100
+    guard page.webView.pageZoom != factor else { return }
+    page.webView.pageZoom = factor
+    if let tab = shownTab(of: page) {
+      Self.continuation.yield(.zoomChanged(tab: tab, percent: percent))
+    }
   }
 }
