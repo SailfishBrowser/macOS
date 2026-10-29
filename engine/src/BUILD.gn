@@ -78,6 +78,7 @@ source_set("engine_core") {
     "//services/network/public/cpp",
     "//services/network/public/mojom:cookies_mojom",
     "//skia",
+    "//third_party/blink/public/common",
     "//third_party/blink/public/mojom:mojom_platform_headers",
     "//third_party/metrics_proto",
     "//ui/base",

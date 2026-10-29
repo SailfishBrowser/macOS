@@ -270,6 +270,20 @@ EC_EXPORT
            completion:(void (^)(NSInteger count))completion;
 @end
 
+@interface ECBrowserContext (SiteSettings)
+// As ECWebContents's sitePermissions and setSitePermission:allowed:, for an
+// origin rather than a page.
+- (NSDictionary<NSString*, NSNumber*>*)permissionsForOrigin:(NSURL*)origin;
+- (void)setPermission:(NSString*)permission
+              allowed:(BOOL)allowed
+            forOrigin:(NSURL*)origin;
+// The host's remembered page zoom as a percentage, 100 at the default, as
+// web contents' zoomPercent shows on its pages; setting it changes the zoom
+// of the host's open pages too.
+- (NSInteger)zoomPercentForHost:(NSString*)host;
+- (void)setZoomPercent:(NSInteger)percent forHost:(NSString*)host;
+@end
+
 @interface ECBrowserContext (Downloads)
 // The downloads the context has, including those restored from history, as
 // reported so far; later ones arrive in the downloadDelegate.

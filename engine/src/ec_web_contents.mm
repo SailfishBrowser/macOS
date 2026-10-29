@@ -56,6 +56,7 @@
 #include "components/zoom/zoom_controller.h"
 #include "components/zoom/zoom_observer.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/context_menu_params.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/file_select_listener.h"
@@ -87,6 +88,7 @@
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/blink/public/common/context_menu_data/context_menu_data.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/page/page_zoom.h"
 #include "third_party/blink/public/mojom/choosers/file_chooser.mojom.h"
 #include "third_party/blink/public/mojom/context_menu/context_menu.mojom-shared.h"
 #include "third_party/blink/public/mojom/link_to_text/link_to_text.mojom.h"
@@ -94,6 +96,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
+#include "url/url_constants.h"
 
 @interface ECContextMenu ()
 - (instancetype)initWithFrame:(content::RenderFrameHost&)frame
@@ -1602,6 +1605,37 @@ void AddNavigationThrottles(content::NavigationThrottleRegistry& registry) {
   if (_contents) {
     _contents->PasteAndMatchStyle();
   }
+}
+
+@end
+
+@implementation ECBrowserContext (SiteSettings)
+
+- (NSDictionary<NSString*, NSNumber*>*)permissionsForOrigin:(NSURL*)origin {
+  return SitePermissions(self.profile, net::GURLWithNSURL(origin));
+}
+
+- (void)setPermission:(NSString*)permission
+              allowed:(BOOL)allowed
+            forOrigin:(NSURL*)origin {
+  SetSitePermission(self.profile, net::GURLWithNSURL(origin), permission,
+                    allowed);
+}
+
+// As ZoomController's zoomPercent reads the level the host's pages get.
+- (NSInteger)zoomPercentForHost:(NSString*)host {
+  double level = content::HostZoomMap::GetDefaultForBrowserContext(self.profile)
+                     ->GetZoomLevelForHostAndScheme(
+                         url::kHttpsScheme, base::SysNSStringToUTF8(host));
+  return static_cast<NSInteger>(blink::ZoomLevelToZoomFactor(level) * 100 +
+                                0.5);
+}
+
+// A percentage at the default zoom removes the host's own level.
+- (void)setZoomPercent:(NSInteger)percent forHost:(NSString*)host {
+  content::HostZoomMap::GetDefaultForBrowserContext(self.profile)
+      ->SetZoomLevelForHost(base::SysNSStringToUTF8(host),
+                            blink::ZoomFactorToZoomLevel(percent / 100.0));
 }
 
 @end
