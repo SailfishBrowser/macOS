@@ -364,12 +364,21 @@ import WebKit
     return Dictionary(cookies.map { ($0.key, $0) }) { $1 }
   }
 
+  // Sent all at once: WebKit applies them in order, and awaiting each would hold the next for a round trip to its
+  // network process.
   private func setInWebKit(_ cookies: [HTTPCookie], removing keys: [CookieKey]) async {
-    for cookie in cookies {
-      await store.setCookie(cookie)
-    }
-    for key in keys {
-      await store.deleteCookie(key.webKitCookie)
+    guard !cookies.isEmpty || !keys.isEmpty else { return }
+    await withCheckedContinuation { continuation in
+      let group = DispatchGroup()
+      for cookie in cookies {
+        group.enter()
+        store.setCookie(cookie) { group.leave() }
+      }
+      for key in keys {
+        group.enter()
+        store.delete(key.webKitCookie) { group.leave() }
+      }
+      group.notify(queue: .main) { continuation.resume() }
     }
   }
 
