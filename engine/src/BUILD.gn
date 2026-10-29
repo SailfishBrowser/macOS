@@ -61,6 +61,8 @@ source_set("engine_core") {
     "//components/favicon/core",
     "//components/find_in_page",
     "//components/history/core/browser",
+    "//components/js_injection/browser",
+    "//components/js_injection/common:common_mojom",
     "//components/input",
     "//components/zoom",
     "//components/keyed_service/core",

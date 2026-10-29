@@ -39,6 +39,11 @@
 #include "components/find_in_page/find_tab_helper.h"
 #include "components/find_in_page/find_types.h"
 #include "components/input/native_web_keyboard_event.h"
+#include "components/js_injection/browser/js_communication_host.h"
+#include "components/js_injection/browser/web_message.h"
+#include "components/js_injection/browser/web_message_host.h"
+#include "components/js_injection/browser/web_message_host_factory.h"
+#include "components/js_injection/common/enum.mojom.h"
 #include "components/permissions/permission_prompt.h"
 #include "components/permissions/permission_request.h"
 #include "components/permissions/permission_request_manager.h"
@@ -76,6 +81,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/isolated_world_ids.h"
 #import "engine_core/ec_browser_context_private.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/apple/url_conversions.h"
@@ -712,6 +718,71 @@ class HandoffThrottle : public content::NavigationThrottle {
   const char* GetNameForLogging() override { return "HandoffThrottle"; }
 };
 
+// Passes a message object's string messages from one frame to the delegate,
+// on a later turn of the main thread, so the delegate may close the web
+// contents.
+class MessageHost : public js_injection::WebMessageHost {
+ public:
+  MessageHost(ECWebContents* owner, NSString* name, NSURL* origin,
+              bool main_frame)
+      : owner_(owner), name_(name), origin_(origin), main_frame_(main_frame) {}
+
+  void OnPostMessage(std::unique_ptr<js_injection::WebMessage> message) override {
+    const std::u16string* text = std::get_if<std::u16string>(&message->message);
+    if (!text) {
+      return;
+    }
+    __weak ECWebContents* weak_owner = owner_;
+    NSString* body = base::SysUTF16ToNSString(*text);
+    NSString* name = name_;
+    NSURL* origin = origin_;
+    BOOL main_frame = main_frame_;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      ECWebContents* owner = weak_owner;
+      if (owner.contents &&
+          [owner.delegate respondsToSelector:@selector
+                          (webContents:didReceiveMessage:fromObject:origin:
+                                 mainFrame:)]) {
+        [owner.delegate webContents:owner
+                  didReceiveMessage:body
+                         fromObject:name
+                             origin:origin
+                          mainFrame:main_frame];
+      }
+    });
+  }
+
+ private:
+  __weak ECWebContents* owner_;
+  NSString* name_;
+  NSURL* origin_;
+  bool main_frame_;
+};
+
+// Makes the host of a message object for each frame that uses it.
+class MessageHostFactory : public js_injection::WebMessageHostFactory {
+ public:
+  MessageHostFactory(ECWebContents* owner, NSString* name)
+      : owner_(owner), name_(name) {}
+
+  std::unique_ptr<js_injection::WebMessageHost> CreateHost(
+      const std::string& top_level_origin_string,
+      const std::string& origin_string,
+      bool is_main_frame,
+      js_injection::WebMessageReplyProxy* proxy) override {
+    // js_injection names opaque and local origins "null".
+    NSURL* origin =
+        origin_string == "null"
+            ? nil
+            : [NSURL URLWithString:base::SysUTF8ToNSString(origin_string)];
+    return std::make_unique<MessageHost>(owner_, name_, origin, is_main_frame);
+  }
+
+ private:
+  __weak ECWebContents* owner_;
+  NSString* name_;
+};
+
 // The other-site throttle comes first, so Peek keeps priority.
 void AddNavigationThrottles(content::NavigationThrottleRegistry& registry) {
   OtherSiteLinkThrottle::MaybeCreateAndAdd(registry);
@@ -892,6 +963,8 @@ void AddNavigationThrottles(content::NavigationThrottleRegistry& registry) {
   ECBrowserContext* _context;
   std::unique_ptr<WebContentsDelegateBridge> _bridge;
   std::unique_ptr<content::WebContents> _contents;
+  // The main-world scripts and message objects, made on first use.
+  std::unique_ptr<js_injection::JsCommunicationHost> _scriptHost;
   // Kept past close, so the view outlives the web contents, detached and
   // empty.
   NSView* _view;
@@ -1231,6 +1304,34 @@ void AddNavigationThrottles(content::NavigationThrottleRegistry& registry) {
       ISOLATED_WORLD_ID_CHROME_INTERNAL);
 }
 
+- (js_injection::JsCommunicationHost*)scriptHost {
+  if (!_scriptHost) {
+    _scriptHost =
+        std::make_unique<js_injection::JsCommunicationHost>(_contents.get());
+  }
+  return _scriptHost.get();
+}
+
+- (void)addDocumentStartScript:(NSString*)script {
+  if (!_contents) {
+    return;
+  }
+  [self scriptHost]->AddPersistentJavaScript(
+      base::SysNSStringToUTF16(script),
+      js_injection::mojom::DocumentInjectionTime::kDocumentStart, {"*"},
+      content::ISOLATED_WORLD_ID_GLOBAL);
+}
+
+- (void)addMessageObjectNamed:(NSString*)name {
+  if (!_contents) {
+    return;
+  }
+  [self scriptHost]->AddWebMessageHostFactory(
+      std::make_unique<MessageHostFactory>(self, name),
+      base::SysNSStringToUTF16(name), {"*"},
+      content::ISOLATED_WORLD_ID_GLOBAL);
+}
+
 // As Chrome's "Copy link to highlight", for the focused frame.
 - (void)linkToHighlight:(void (^)(NSURL*))completion {
   content::RenderFrameHost* frame =
@@ -1463,6 +1564,7 @@ void AddNavigationThrottles(content::NavigationThrottleRegistry& registry) {
   _bridge->Observe(nullptr);
   zoom::ZoomController::FromWebContents(_contents.get())
       ->RemoveObserver(_bridge.get());
+  _scriptHost.reset();
   _contents.reset();
   _bridge.reset();
 }
