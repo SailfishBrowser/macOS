@@ -26,6 +26,14 @@ extension SiteEngines {
       rules.append(SiteRule(id: UUID(), host: site, engine: engine))
     }
   }
+
+  // Typed text as a rule's host: lowercased, without scheme or path, as its registrable domain.
+  static func site(from text: String) -> String {
+    let text = text.trimmingCharacters(in: .whitespaces).lowercased()
+    guard !text.isEmpty else { return "" }
+    let host = URL(string: text.contains("://") ? text : "https://" + text)?.host() ?? text
+    return ECEngine.registrableDomain(forHost: host)
+  }
 }
 
 extension Engine {
