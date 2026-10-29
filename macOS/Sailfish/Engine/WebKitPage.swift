@@ -29,6 +29,8 @@ import WebKit
   let finder = WebKitFind()
   // The isolated script's hit test of the last right click, and when it arrived.
   var contextMenuHit: (hit: WebKitContextMenu.Hit, time: ContinuousClock.Instant)?
+  // The page's media and mute, which WebKitMedia.swift keeps.
+  var mediaState = WebKitMediaState()
   private static let textDirectiveCharacters = CharacterSet(
     charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._~")
 
@@ -41,6 +43,7 @@ import WebKit
     let fresh = WebKitStores.configuration(profile: profile, incognito: incognito)
     let configuration = configuration ?? fresh
     configuration.userContentController = fresh.userContentController
+    Self.allowPictureInPicture(configuration)
     let webView = WebKitWebView(frame: .zero, configuration: configuration)
     self.webView = webView
     super.init()
@@ -71,7 +74,8 @@ import WebKit
   var page: WebPage {
     WebPage(
       url: webView.url, title: title, favicon: favicon, isLoading: webView.isLoading, canGoBack: webView.canGoBack,
-      canGoForward: webView.canGoForward, pages: [PageRecord(id: id, engine: .webkit)], shownPage: 0)
+      canGoForward: webView.canGoForward, isAudible: isAudible, isMuted: isMuted, media: media,
+      pages: [PageRecord(id: id, engine: .webkit)], shownPage: 0)
   }
 
   // The page's title, or its URL while it has none, as Chromium's.
@@ -149,16 +153,18 @@ import WebKit
 
   func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
     guard let body = PageScriptMessage(message.body) else { return }
+    let isMainFrame = message.frameInfo.isMainFrame
     switch body {
-    // A right click's hit test comes from the frame clicked; everything else only from the main frame.
+    // A right click's hit test and media reports come from any frame; everything else only from the main frame.
     case let .contextMenu(hit): contextMenuHit = (hit, .now)
-    case _ where !message.frameInfo.isMainFrame: break
-    case let .icons(icons):
+    case let .icons(icons) where isMainFrame:
       if let icon = icons.first {
         fetchFavicon(icon)
       }
-    case let .hover(url): Engine.shared.webKitPage(self, hovered: url)
-    case let .selection(text): Engine.shared.webKitPage(self, selected: text)
+    case let .hover(url) where isMainFrame: Engine.shared.webKitPage(self, hovered: url)
+    case let .selection(text) where isMainFrame: Engine.shared.webKitPage(self, selected: text)
+    case let .media(frame, report): receive(report, frame: frame, from: message.frameInfo)
+    case .icons, .hover, .selection: break
     }
   }
 
@@ -209,6 +215,7 @@ import WebKit
   func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
     isProvisional = false
     Engine.shared.webKitPageDidCommit(self)
+    mediaDidCommit()
     Engine.shared.pageDidCommit(
       self, url: committedURL, isNewNavigation: navigationType != .backForward && navigationType != .reload)
   }

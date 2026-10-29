@@ -29,8 +29,8 @@ extension Engine {
   }
 
   // Hands the tab to `engine`: the pages after the shown one close, the shown one stays behind the new page with its
-  // media paused (or is dropped when nothing committed in it), and a new page of `engine` loads the request. The
-  // tab's choice keeps it in that engine while it stays on the request's site.
+  // media paused (or is dropped when nothing committed in it), and a new page of `engine`, muted as the tab is, loads
+  // the request. The tab's choice keeps it in that engine while it stays on the request's site.
   func switchEngine(_ tab: UUID, to engine: PageEngineKind, request: URLRequest) async {
     guard var pages = pageRecords[tab], let shown = shownPages[tab], let context = tabContexts[tab],
       let profile = tabProfiles[tab], let url = request.url
@@ -39,6 +39,7 @@ extension Engine {
     pages[(shown + 1)...].forEach { dropPage($0) }
     pages.removeSubrange((shown + 1)...)
     let left = pages[shown]
+    let muted = livePages[left.id]?.isMuted == true
     if let page = livePages[left.id], page.sessionState != nil {
       hold(tab, left.id)
       page.pauseMedia()
@@ -68,6 +69,9 @@ extension Engine {
         contents.load(request)
       }
     case .webkit: makeWebKitPage(tab, page: record.id, profile: profile).load(request)
+    }
+    if muted {
+      page(tab)?.isMuted = true
     }
     reportShown(tab)
   }
