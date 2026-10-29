@@ -43,6 +43,10 @@ import WebKit
     observations = [
       observe(\.url), observe(\.title), observe(\.isLoading), observe(\.estimatedProgress), observe(\.canGoBack),
       observe(\.canGoForward), observe(\.hasOnlySecureContent),
+      // In the system's appearance, as Chromium's pages are, not the window's, which follows the space's theme.
+      NSApp.observe(\.effectiveAppearance, options: .initial) { [weak self] app, _ in
+        MainActor.assumeIsolated { self?.webView.appearance = app.effectiveAppearance }
+      },
     ]
   }
 
