@@ -401,6 +401,10 @@ EC_EXPORT
 // call.
 - (BOOL)webContents:(ECWebContents*)contents
     shouldHandOffNavigation:(NSURLRequest*)request;
+// A navigation committed a new document in the page; `isHistory` is YES for
+// a back, forward or history entry step.
+- (void)webContents:(ECWebContents*)contents
+    didCommitNavigationIsHistory:(BOOL)isHistory;
 // The Chrome Web Store asks to install an extension. `permissions` are the
 // warnings Chrome lists for it. Without this method installs are refused.
 - (void)webContents:(ECWebContents*)contents

@@ -360,6 +360,16 @@ class WebContentsDelegateBridge : public content::WebContentsDelegate,
     }
   }
 
+  void DidFinishNavigation(content::NavigationHandle* handle) override {
+    if (handle->HasCommitted() && handle->IsInPrimaryMainFrame() &&
+        !handle->IsSameDocument() &&
+        [owner_.delegate respondsToSelector:@selector
+                         (webContents:didCommitNavigationIsHistory:)]) {
+      [owner_.delegate webContents:owner_
+          didCommitNavigationIsHistory:handle->IsHistory()];
+    }
+  }
+
   // The modifier keys held at the last click or key press in the page, which
   // a link it opens follows (kRawKeyDown is the key press; kKeyDown is not
   // reported here).
