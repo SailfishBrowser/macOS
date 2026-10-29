@@ -210,13 +210,13 @@ struct ContentRule: Hashable, Sendable {
 
 // The default filter lists' texts: each list's last fetched copy in URL.dataDirectory/ContentBlocker, or else the
 // bundled uBlock Origin's, with where and how often uBlock Origin fetches it.
-struct FilterLists: Sendable {
+private struct FilterLists: Sendable {
   // The lists uBlock Origin enables by default, by their key in its assets.json.
-  static let keys = [
+  private static let keys = [
     "ublock-filters", "ublock-badware", "ublock-privacy", "ublock-quick-fixes", "ublock-unbreak", "easylist",
     "easyprivacy", "urlhaus-1", "plowe-0",
   ]
-  static let directory = URL.dataDirectory.appending(path: "ContentBlocker")
+  private static let directory = URL.dataDirectory.appending(path: "ContentBlocker")
   private static let session = URLSession(configuration: .ephemeral)
 
   struct List: Sendable {
