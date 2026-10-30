@@ -2468,7 +2468,7 @@ private struct TabRow: View {
 }
 
 // The tab's own icon if it was given one, else its favicon.
-private struct TabIcon: View {
+struct TabIcon: View {
   let tab: Tab
   let space: Space
 
