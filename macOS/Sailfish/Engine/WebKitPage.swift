@@ -24,6 +24,7 @@ import WebKit
   private var navigationType: WKNavigationType = .other
   // Whether a main-frame navigation has started and not committed or failed: an action arriving then is its redirect.
   private var isProvisional = false
+  var isAskingToOpenApp = false
   // Set when a terminated content process reloads the page, until a load finishes.
   private var reloadedAfterTermination = false
   let finder = WebKitFind()
@@ -259,6 +260,11 @@ import WebKit
   // The clauses keep this order, each its task's: downloads; a modified link or form opening elsewhere; the
   // other-site Peek; the engine choice. Every other action is allowed, which keeps redirects and script navigations
   // in WebKit, and a main-frame one is never offered to the app that owns the site's universal links.
+  // Whether the page itself shows the URL; any other scheme belongs to another app, which WebKit never opens.
+  static func rendersInPage(_ url: URL) -> Bool {
+    ["http", "https", "about", "blob", "data", "file"].contains(url.scheme?.lowercased())
+  }
+
   func webView(
     _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
     decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
@@ -272,6 +278,10 @@ import WebKit
     let engine = Engine.shared
     guard let tab = engine.tab(of: self), let url = action.request.url else {
       return decisionHandler(.allowWithoutTryingAppLink)
+    }
+    if !Self.rendersInPage(url) {
+      decisionHandler(.cancel)
+      return engine.webKitPage(self, asksToOpen: url, from: committedURL)
     }
     let cause: NavigationCause? =
       switch (isProvisional, action.navigationType) {
@@ -294,7 +304,9 @@ import WebKit
         return engine.requestNewWindow(tab, url, disposition: .newWindow, modifierFlags: [], from: webView)
       }
       @Shared(.siteEngines) var siteEngines
-      if pageEngine(for: url, from: .webkit, choice: engine.choices[tab], cause: cause, siteEngines) == .chromium {
+      if ["http", "https"].contains(url.scheme?.lowercased()),
+        pageEngine(for: url, from: .webkit, choice: engine.choices[tab], cause: cause, siteEngines) == .chromium
+      {
         decisionHandler(.cancel)
         let request = action.request
         Task { await engine.switchEngine(tab, to: .chromium, request: request) }

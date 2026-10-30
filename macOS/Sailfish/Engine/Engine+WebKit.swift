@@ -115,6 +115,20 @@ extension Engine {
     return true
   }
 
+  // A link or redirect of a WebKit page to another app, asked as Chromium's pages ask. A page that asks again while its
+  // question is open is ignored.
+  func webKitPage(_ page: WebKitPage, asksToOpen url: URL, from origin: URL?) {
+    guard !page.isAskingToOpenApp, let app = NSWorkspace.shared.urlForApplication(toOpen: url) else { return }
+    page.isAskingToOpenApp = true
+    let name = FileManager.default.displayName(atPath: app.path(percentEncoded: false))
+    askToOpen(page, app: name, from: origin) { [weak page] accepted in
+      page?.isAskingToOpenApp = false
+      if accepted {
+        NSWorkspace.shared.open(url)
+      }
+    }
+  }
+
   // A script's popup: a WebKit page in a tab of its own under the tab's id, reported at once so the tab is never
   // saved as Chromium, for the opener's space to adopt.
   func adoptPopup(from opener: UUID, url: URL, configuration: WKWebViewConfiguration) -> WKWebView? {

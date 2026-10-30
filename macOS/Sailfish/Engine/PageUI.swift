@@ -171,19 +171,20 @@ extension Engine {
     _ contents: ECWebContents, requestsOpeningURL url: URL, inApplicationNamed appName: String, fromOrigin origin: URL?,
     completionHandler: @escaping (Bool) -> Void
   ) {
-    if defers(contents, {
-      self.webContents(
-        contents, requestsOpeningURL: url, inApplicationNamed: appName, fromOrigin: origin,
-        completionHandler: completionHandler)
-    }) { return }
-    guard let tab = tab(of: contents) else { return completionHandler(false) }
+    askToOpen(contents, app: appName, from: origin, completion: completionHandler)
+  }
+
+  // Either engine's page.
+  func askToOpen(_ page: AnyObject, app appName: String, from origin: URL?, completion: @escaping (Bool) -> Void) {
+    if defers(page, { self.askToOpen(page, app: appName, from: origin, completion: completion) }) { return }
+    guard let tab = owners[ObjectIdentifier(page)]?.tab else { return completion(false) }
     let alert = NSAlert()
     alert.messageText = "Open “\(appName)”?"
     alert.informativeText = "\(origin?.host() ?? "A website") wants to open this application."
     alert.addButton(withTitle: "Open \(appName)").keyEquivalent = ""
     alert.addButton(withTitle: "Cancel").keyEquivalent = "\r"
     present(alert.window, for: tab, { alert.beginSheetModal(for: $0, completionHandler: $1) }) {
-      completionHandler($0 == .alertFirstButtonReturn)
+      completion($0 == .alertFirstButtonReturn)
     }
   }
 
