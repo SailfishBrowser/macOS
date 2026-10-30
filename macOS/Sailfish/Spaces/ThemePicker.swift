@@ -56,7 +56,7 @@ struct ThemePicker: View {
           // Shot 33: 23.5 pt swatches at a 29.5 pt pitch.
           Circle().fill(Color(hex: swatch)).frame(width: 23.5, height: 23.5).frame(width: 29.5)
             .onTapGesture {
-              handles = [Self.handle(swatch)] + handles.dropFirst()
+              withAnimation(Motion.layout) { handles = [Self.handle(swatch)] + handles.dropFirst() }
               tick()
               update()
             }
@@ -71,25 +71,31 @@ struct ThemePicker: View {
       HStack {
         Button("Reset to original colors") {
           theme = original
-          handles = original.colors.map(Self.handle)
-          mode = .free
+          withAnimation(Motion.layout) {
+            handles = original.colors.map(Self.handle)
+            mode = .free
+          }
           tick()
         }
         .disabled(theme == original)
         Spacer()
         Menu("Advanced color controls") {
           Button("Invert Lightness") {
-            for index in handles.indices { handles[index].lightness = 1 - handles[index].lightness }
-            mode = .free
+            withAnimation(Motion.layout) {
+              for index in handles.indices { handles[index].lightness = 1 - handles[index].lightness }
+              mode = .free
+            }
             tick()
             update()
           }
           Button("Original Saturation") {
             let originals = original.colors.map(Self.handle)
-            for index in handles.indices where originals.indices.contains(index) {
-              let angle = atan2(handles[index].offset.y, handles[index].offset.x)
-              let saturation = hypot(originals[index].offset.x, originals[index].offset.y)
-              handles[index].offset = CGPoint(x: cos(angle) * saturation, y: sin(angle) * saturation)
+            withAnimation(Motion.layout) {
+              for index in handles.indices where originals.indices.contains(index) {
+                let angle = atan2(handles[index].offset.y, handles[index].offset.x)
+                let saturation = hypot(originals[index].offset.x, originals[index].offset.y)
+                handles[index].offset = CGPoint(x: cos(angle) * saturation, y: sin(angle) * saturation)
+              }
             }
             tick()
             update()
@@ -123,35 +129,46 @@ struct ThemePicker: View {
         }
       }
       .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
-      .gesture(SpatialTapGesture().onEnded {
+      .gesture(SpatialTapGesture().onEnded { tap in
         guard handles.isEmpty else { return }
-        handles = [Handle(offset: .zero, lightness: mode.lightness ?? 0.65)]
-        move(0, to: $0.location)
+        withAnimation(Motion.layout) {
+          handles = [Handle(offset: .zero, lightness: mode.lightness ?? 0.65)]
+          place(0, at: tap.location)
+        }
+        update()
       })
       if handles.isEmpty {
         Text("Tap to pick a color for this space").font(.system(size: 13, weight: .semibold)).allowsHitTesting(false)
       }
       ForEach(handles.indices, id: \.self) { index in
+        let point = Self.point(handles[index])
         Circle()
           .fill(Color(hex: Self.hex(handles[index])))
           .frame(width: index == 0 ? 44 : 26, height: index == 0 ? 44 : 26)
           .overlay(Circle().strokeBorder(.white, lineWidth: index == 0 ? 4 : 3))
           .shadow(color: .black.opacity(0.3), radius: 3)
-          .position(
-            x: Self.size / 2 + handles[index].offset.x * Self.radius,
-            y: Self.size / 2 + handles[index].offset.y * Self.radius)
-          .gesture(DragGesture().onChanged { move(index, to: $0.location) })
+          .position(point)
+          .gesture(DragGesture().onChanged {
+            place(index, at: $0.location)
+            update()
+          })
+          // A color added or removed grows in from, or shrinks out to, 60% where it sits.
+          .transition(
+            .scale(scale: 0.6, anchor: UnitPoint(x: point.x / Self.size, y: point.y / Self.size))
+              .combined(with: .opacity))
       }
       VStack {
         // Shot 33: the mode buttons 40 pt apart, their row 24 pt under the canvas's top; minus and plus 16 pt above its bottom.
         HStack(spacing: 8) {
           ForEach(Mode.allCases, id: \.self) { item in
             button(item.rawValue, isSelected: mode == item) {
-              mode = item
-              tick()
-              if let lightness = item.lightness {
-                for index in handles.indices { handles[index].lightness = lightness }
+              withAnimation(Motion.layout) {
+                mode = item
+                if let lightness = item.lightness {
+                  for index in handles.indices { handles[index].lightness = lightness }
+                }
               }
+              tick()
               update()
             }
           }
@@ -159,7 +176,7 @@ struct ThemePicker: View {
         Spacer()
         HStack(spacing: 8) {
           button("minus", isSelected: false) {
-            handles.removeLast()
+            withAnimation(Motion.layout) { _ = handles.removeLast() }
             tick()
             update()
           }
@@ -168,10 +185,12 @@ struct ThemePicker: View {
           button("plus", isSelected: false) {
             let turn = 2 * Double.pi / 3
             let last = handles.last!.offset
-            handles.append(
-              Handle(
-                offset: CGPoint(x: last.x * cos(turn) - last.y * sin(turn), y: last.x * sin(turn) + last.y * cos(turn)),
-                lightness: handles.last!.lightness))
+            withAnimation(Motion.layout) {
+              handles.append(
+                Handle(
+                  offset: CGPoint(x: last.x * cos(turn) - last.y * sin(turn), y: last.x * sin(turn) + last.y * cos(turn)),
+                  lightness: handles.last!.lightness))
+            }
             tick()
             update()
           }
@@ -210,12 +229,15 @@ struct ThemePicker: View {
     .buttonStyle(.plain)
   }
 
-  private func move(_ index: Int, to location: CGPoint) {
+  private func place(_ index: Int, at location: CGPoint) {
     let x = (location.x - Self.size / 2) / Self.radius
     let y = (location.y - Self.size / 2) / Self.radius
     let scale = max(hypot(x, y), 1)
     handles[index].offset = CGPoint(x: x / scale, y: y / scale)
-    update()
+  }
+
+  private static func point(_ handle: Handle) -> CGPoint {
+    CGPoint(x: size / 2 + handle.offset.x * radius, y: size / 2 + handle.offset.y * radius)
   }
 
   private func update() {
