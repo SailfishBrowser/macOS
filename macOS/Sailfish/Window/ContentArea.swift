@@ -119,7 +119,8 @@ private struct Pane: View {
   let isThemed: Bool
   let isSplit: Bool
   // The page as a still while the Library is open or a swipe brings it in: a web view's frame cannot animate,
-  // and the still rides along in the card at the window's edge.
+  // and the still rides along in the card at the window's edge. The page stays in the window under it, so it is drawn
+  // when the still goes; a WebKit page out of the window would be clear until it had drawn again.
   @State private var still: NSImage?
 
   private var space: Space { store.spaces.selected }
@@ -182,6 +183,12 @@ private struct Pane: View {
   @ViewBuilder private var page: some View {
     let hasBar = tab.map { isSplit || $0.url.isDeveloperPage && !isFullScreen } ?? false
     ZStack {
+      if let tab, let view = Engine.shared.view(tab.id) {
+        WebView(view: view, roundsTop: !hasBar, cornerRadius: isFullScreen ? 0 : 6, onMouseDown: { select() })
+      } else if let tab {
+        // A tab a space switch selected gets its page once the strip settles; until then the card names it.
+        PagePlaceholder(tab: tab, space: space)
+      }
       if let still {
         Image(nsImage: still).resizable().scaledToFill()
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -189,11 +196,6 @@ private struct Pane: View {
             UnevenRoundedRectangle(
               topLeadingRadius: hasBar ? 0 : 6, bottomLeadingRadius: 6, bottomTrailingRadius: 6,
               topTrailingRadius: hasBar ? 0 : 6))
-      } else if let tab, let view = Engine.shared.view(tab.id) {
-        WebView(view: view, roundsTop: !hasBar, cornerRadius: isFullScreen ? 0 : 6, onMouseDown: { select() })
-      } else if let tab {
-        // A tab a space switch selected gets its page once the strip settles; until then the card names it.
-        PagePlaceholder(tab: tab, space: space)
       }
       if let tab {
         ReaderOverlay(tab: tab.id, url: tab.url)
