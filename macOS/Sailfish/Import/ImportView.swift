@@ -16,7 +16,7 @@ struct ImportView: View {
 
   var body: some View {
     ImportDialog(
-      title: title, message: message,
+      step: store.step, movesBack: { store.step == .browsers }, title: title, message: message,
       close: store.step == .browsers && !store.isOnboarding ? { store.send(.backTapped) } : nil
     ) {
       if store.step == .theme, let name = Binding($store.spaceName) {
@@ -201,7 +201,12 @@ struct ImportView: View {
   }
 }
 
+// Each step's title and words crossfade in place and its choices slide, while the logo and the button row stay still,
+// so the primary button never moves under the pointer.
 private struct ImportDialog<Leading: View, Content: View, Buttons: View>: View {
+  let step: ImportFeature.Step
+  // Back, which returns only to the browsers.
+  let movesBack: @MainActor () -> Bool
   let title: String
   let message: String?
   let close: (() -> Void)?
@@ -214,21 +219,31 @@ private struct ImportDialog<Leading: View, Content: View, Buttons: View>: View {
       HStack(alignment: .top, spacing: 32) {
         VStack(alignment: .leading, spacing: 14) {
           Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 48, height: 48).padding(.bottom, 26)
-          Text(title).font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
-          if let message {
-            Text(message).font(.system(size: 14)).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
+          ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 14) {
+              Text(title).font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+              if let message {
+                Text(message).font(.system(size: 14)).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
+              }
+              leading
+            }
+            .id(step)
+            .transition(.opacity)
           }
-          leading
         }
         .frame(width: 250, alignment: .leading)
-        content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        ZStack {
+          content.frame(maxWidth: .infinity, maxHeight: .infinity).id(step).transition(StepSlide(movesBack: movesBack))
+        }
       }
       HStack(spacing: 8) {
         Spacer()
         buttons
       }
       .padding(.top, 24)
+      .transaction { $0.animation = nil }
     }
+    .animation(Motion.layout, value: step)
     .foregroundStyle(Color(hex: 0xD6D6D9))
     .padding(ImportView.padding)
     .frame(width: ImportView.size.width, height: ImportView.size.height)
@@ -243,6 +258,18 @@ private struct ImportDialog<Leading: View, Content: View, Buttons: View>: View {
         .padding(20)
       }
     }
+  }
+}
+
+// The step's choices move 24 pt as they fade: in from the trailing side and out toward the leading one, the other way
+// on Back. The direction is read as the step changes, since the outgoing step last drew before it did.
+private struct StepSlide: Transition {
+  let movesBack: @MainActor () -> Bool
+
+  func body(content: Content, phase: TransitionPhase) -> some View {
+    content
+      .offset(x: phase.value * (movesBack() ? 24 : -24))
+      .opacity(phase.isIdentity ? 1 : 0)
   }
 }
 
