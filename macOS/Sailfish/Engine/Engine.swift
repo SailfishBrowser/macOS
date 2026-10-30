@@ -245,8 +245,9 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     context.close()
   }
 
-  // Closes the profile's context, then has the engine delete its data.
-  func deleteProfile(_ profile: UUID) {
+  // Closes the profile's context, after a load in flight has given it, then has the engine delete its data.
+  func deleteProfile(_ profile: UUID) async {
+    if let load = loads[profile] { _ = await load.value }
     if let context = contexts.removeValue(forKey: profile) {
       Autocomplete.forget(context)
       closeTabs(of: context)
