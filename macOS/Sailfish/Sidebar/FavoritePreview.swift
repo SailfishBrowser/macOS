@@ -138,14 +138,11 @@ struct FavoritePreviewCard: View {
     Group {
       switch app {
       case .gmail where items.isEmpty:
-        VStack(spacing: 2) {
-          Text("No unread emails, you can exhale!")
-          Text("🍃")
-        }
-        .font(.system(size: 13))
-        .foregroundStyle(.white.opacity(0.87))
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
+        Text("No unread emails")
+          .font(.system(size: 13))
+          .foregroundStyle(.white.opacity(0.87))
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 14)
       case .gmail:
         VStack(spacing: 0) {
           ForEach(items.prefix(6)) { item in PreviewRow(item: item) { open(item) } }
