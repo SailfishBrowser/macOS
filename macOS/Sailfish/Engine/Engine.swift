@@ -8,6 +8,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   nonisolated static let userDataDir = URL.dataDirectory.appending(path: "Engine").path
   nonisolated static let (events, continuation) = AsyncStream.makeStream(of: WebEngineEvent.self)
   private(set) var contexts: [UUID: ECBrowserContext] = [:]
+  @ObservationIgnored private var loads: [UUID: Task<ECBrowserContext, Never>] = [:]
   private(set) var tabs: [UUID: ECWebContents] = [:]
   // Changes with extensions and their actions, so views reading them update.
   var extensionsRevision = 0
@@ -287,16 +288,23 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     return contents
   }
 
+  // Callers asking while a profile loads await the same load, so each profile gets one context.
   func context(_ profile: UUID) async -> ECBrowserContext {
     if let context = contexts[profile] { return context }
-    let context = await withCheckedContinuation { continuation in
-      ECBrowserContext.load(withPath: Self.userDataDir + "/" + profile.uuidString) {
-        continuation.resume(returning: $0!)
+    if let load = loads[profile] { return await load.value }
+    let load = Task {
+      let context = await withCheckedContinuation { continuation in
+        ECBrowserContext.load(withPath: Self.userDataDir + "/" + profile.uuidString) {
+          continuation.resume(returning: $0!)
+        }
       }
+      contexts[profile] = context
+      loads[profile] = nil
+      applyAdBlocking(context)
+      return context
     }
-    contexts[profile] = context
-    applyAdBlocking(context)
-    return context
+    loads[profile] = load
+    return await load.value
   }
 
   func webContentsDidUpdate(_ contents: ECWebContents) {
