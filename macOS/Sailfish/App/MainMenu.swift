@@ -12,7 +12,7 @@ extension Shell {
     NSApp.servicesMenu = services
     menu.items = [
       submenu(appName, [
-        item("About \(appName)", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+        item("About \(appName)", #selector(showAbout(_:)), target: self),
         checkForUpdates(),
         .separator(),
         item("Settings…", #selector(showSettings(_:)), ",", target: self),

@@ -32,10 +32,6 @@ struct PinnedHint: View {
         .padding(.bottom, 2)
       Text("Pin tabs to save for later").font(.system(size: 13, weight: .semibold))
         .foregroundStyle(Theme.primaryText)
-      Text("Like a bookmarks bar, your Pinned Tabs keep the things you need within reach").font(.system(size: 12))
-        .foregroundStyle(Theme.favoritesHintText)
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 12)
     }
   }
 }
@@ -49,11 +45,8 @@ struct AutoArchiveBannerView: View {
   var body: some View {
     SidebarHintCard(dismiss: dismiss) {
       Image(systemName: "archivebox.fill").font(.system(size: 18)).foregroundStyle(Theme.primaryText).padding(.bottom, 2)
-      Text("Auto Archive").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.primaryText)
-      Text("Tabs you haven’t used in the past \(Self.threshold(after))\nare archived. You can adjust this in Settings.")
-        .font(.system(size: 12))
-        .foregroundStyle(Theme.favoritesHintText)
-        .multilineTextAlignment(.center)
+      Text("Auto Archive after \(Self.threshold(after))").font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(Theme.primaryText)
       // The Profiles pane, where "Archive tabs after" is set.
       Button("Settings") {
         let item = NSMenuItem()

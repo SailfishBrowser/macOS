@@ -21,6 +21,7 @@
 #include "components/download/content/public/all_download_item_notifier.h"
 #include "components/download/public/common/download_item.h"
 #include "components/prefs/pref_service.h"
+#include "components/search_engines/default_search_manager.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_data_util.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
@@ -129,9 +130,15 @@ class CookieObserver : public network::mojom::CookieChangeListener {
   mojo::Receiver<network::mojom::CookieChangeListener> receiver_{this};
 };
 
-// Makes Google, from Chrome's prepopulated engines, the default search.
-// The profile lists it unless its region's engines leave it out.
+// Makes Google, from Chrome's prepopulated engines, the default search of a
+// profile that still has its region's default, so a default chosen later in
+// settings stays. The profile lists Google unless its region's engines leave
+// it out.
 void UseGoogle(TemplateURLService* service) {
+  if (service->default_search_provider_source() !=
+      DefaultSearchManager::FROM_FALLBACK) {
+    return;
+  }
   constexpr char16_t kKeyword[] = u"google.com";
   TemplateURL* engine = service->GetTemplateURLForKeyword(kKeyword);
   if (!engine) {

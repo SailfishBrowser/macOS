@@ -18,16 +18,16 @@ struct ShortcutsPane: View {
       query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || $0.keys.localizedCaseInsensitiveContains(query)
     }
     let custom = shortcuts.filter { bindings[$0.id] != nil }
-    HStack(alignment: .top, spacing: 20) {
+    VStack(alignment: .trailing, spacing: 10) {
       VStack(alignment: .leading, spacing: 0) {
         HStack {
           Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-          TextField("Type a feature name or shortcut (like “Command+T”)", text: $query).textFieldStyle(.plain)
+          TextField("Search", text: $query).textFieldStyle(.plain)
         }
         .font(.system(size: 13))
         .padding(.horizontal, 16)
         .frame(height: 40)
-        .background(.white.opacity(0.04))
+        .background(Color.primary.opacity(0.04))
         Divider()
         ScrollView {
           VStack(spacing: 0) {
@@ -39,26 +39,14 @@ struct ShortcutsPane: View {
         }
       }
       .settingsCard()
-      VStack(alignment: .leading, spacing: 8) {
-        HStack(spacing: 10) {
-          glyph("command")
-          glyph("face.smiling")
-        }
-        .padding(.bottom, 14)
-        Text("Custom Shortcuts").font(.system(size: 13, weight: .semibold))
-        Text("Click a shortcut to change it. Right-click one to reset or remove it.")
-          .font(.system(size: 12)).foregroundStyle(.secondary)
-        Spacer()
-        Button("Reset All Shortcuts") {
-          $bindings.withLock { $0 = [:] }
-          NSApp.mainMenu.map(MenuShortcuts.apply)
-        }
-        .disabled(bindings.isEmpty)
+      Button("Reset All Shortcuts") {
+        $bindings.withLock { $0 = [:] }
+        NSApp.mainMenu.map(MenuShortcuts.apply)
       }
-      .frame(width: 190)
+      .disabled(bindings.isEmpty)
     }
     .padding(.vertical, 20)
-    .padding(.horizontal, 40)
+    .padding(.horizontal, 64)
     .onDisappear { stopRecording() }
   }
 
@@ -98,13 +86,6 @@ struct ShortcutsPane: View {
       Button("Reset Shortcut to Default") { set(nil, for: shortcut.id) }
         .disabled(bindings[shortcut.id] == nil)
     }
-  }
-
-  private func glyph(_ symbol: String) -> some View {
-    Image(systemName: symbol).font(.system(size: 26, weight: .medium)).foregroundStyle(.white)
-      .frame(width: 60, height: 60)
-      .background(Color(hex: 0x3B82F6), in: RoundedRectangle(cornerRadius: 14))
-      .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.35), lineWidth: 2))
   }
 
   // Takes the next keys pressed in the Settings window as the row's shortcut; Esc keeps the old one, and so does

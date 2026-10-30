@@ -48,7 +48,6 @@ struct SpaceLinking: View {
     .padding(.vertical, 19)
     .padding(.top, 19)
     .frame(width: 506, height: 498)
-    .background(Color(hex: 0x161C2F))
     // The sheet opens with no field focused.
     .onAppear { DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) } }
   }

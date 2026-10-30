@@ -37,7 +37,7 @@ struct UpdatePill: View {
         .fill(Theme.rowSelection(theme))
         .shadow(color: Theme.rowShadow, radius: 2, y: 1.5)
     }
-    .hoverTooltip("Sailfish \(version) is ready", subtitle: "Restart to install")
+    .hoverTooltip("Sailfish \(version)")
     .padding(.horizontal, 8)
     .padding(.bottom, 4)
   }

@@ -216,13 +216,8 @@ private struct LittleSailfishHint: View {
   var body: some View {
     VStack(alignment: .trailing, spacing: 0) {
       Triangle().fill(Theme.accent).frame(width: 14, height: 7).padding(.trailing, 48)
-      HStack(alignment: .top, spacing: 8) {
-        VStack(alignment: .leading, spacing: 3) {
-          Text("Links Open in Little Sailfish").font(.system(size: 13, weight: .semibold))
-          Text("Click Open in to move this page in a full window, or ⌘W to close").font(.system(size: 12))
-            .opacity(0.9)
-        }
-        .foregroundStyle(.white)
+      HStack(spacing: 8) {
+        Text("Links Open in Little Sailfish").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
         Button(action: dismiss) {
           Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.8))
             .frame(width: 18, height: 18)
@@ -232,7 +227,6 @@ private struct LittleSailfishHint: View {
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 10)
-      .frame(width: 290, alignment: .leading)
       .background(Theme.accent, in: RoundedRectangle(cornerRadius: 10))
     }
     .shadow(color: .black.opacity(0.3), radius: 12, y: 4)

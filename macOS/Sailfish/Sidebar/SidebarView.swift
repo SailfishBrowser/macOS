@@ -729,12 +729,9 @@ struct SidebarView: View {
           .padding(.bottom, 2)
         Text("Drag to add Favorites").font(.system(size: 13, weight: .semibold))
           .foregroundStyle(Theme.primaryText)
-        Text("Favorites keep your most\nused sites and apps close").font(.system(size: 12))
-          .foregroundStyle(Theme.favoritesHintText)
-          .multilineTextAlignment(.center)
       }
       .frame(maxWidth: .infinity)
-      .frame(height: 94)
+      .padding(.vertical, 12)
       // The favorites tile, whose slot this holds: 12.05pt continuous.
       .background(
         drag?.shownTarget?.isFavorite == true ? Theme.fillHover : Theme.favoritesHintFill, in: RoundedRectangle(cornerRadius: 12))
@@ -973,7 +970,7 @@ struct SidebarView: View {
         // A closed row goes in one frame and the rows below close up; only a just opened or restored
         // one fades in.
         .transition(.asymmetric(insertion: space.arrivals.contains(tab.id) ? .opacity : .identity, removal: .identity))
-        // The row moves as one piece, so a subtitle a pin adds travels with it rather than appearing in the new slot.
+        // The row moves as one piece when a pin or unpin moves it.
         .geometryGroup()
         // The selected row passes over the others when a pin or unpin moves it.
         .zIndex(tab.id == space.selectedTabID ? 1 : 0)
@@ -2443,7 +2440,7 @@ private struct TabRow: View {
     }
     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
     .onHover { isHovering = $0 }
-    .hoverTooltip(tab.displayTitle, subtitle: "Double-click to rename", isEnabled: name == nil)
+    .hoverTooltip(tab.displayTitle, isEnabled: name == nil)
   }
 
   // Where the split half the dragged tab will take begins, once it is shown to the title's right.
@@ -2463,7 +2460,7 @@ private struct TabRow: View {
     if isIconHovered { return "Back to Pinned URL" }
     // Developer mode adds the host.
     if tab.url.isDeveloperPage { return tab.url.developerSubtitle }
-    return isSelected && tab.pinnedURL != nil ? "Double-click to rename" : nil
+    return nil
   }
 
   private var icon: some View {
@@ -3028,10 +3025,7 @@ private struct EditPinnedURLDialog: View {
       onCancel: dismiss
     ) {
       Text("Edit Pinned URL").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
-      Text("This is what opens first when you click this tab or its favicon.")
-        .font(.system(size: 13)).foregroundStyle(.white.opacity(0.7))
-        .padding(.top, 6)
-      ModalField(placeholder: "https://", text: $url).padding(.top, 16)
+      ModalField(placeholder: "https://", text: $url).padding(.top, 20)
     }
     .frame(width: 450)
   }

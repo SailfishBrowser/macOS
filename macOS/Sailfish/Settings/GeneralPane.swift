@@ -22,22 +22,21 @@ struct GeneralPane: View {
         SettingsToggle("Block ads and trackers with uBlock Origin", isOn: $blocksAds)
           .onChange(of: blocksAds) { Engine.shared.adBlockingDidChange() }
         Divider().padding(.horizontal, 10)
-        SettingsToggle("Tidy Downloads: let Sailfish rename downloads so they're easier to find later", isOn: $tidyDownloads)
+        SettingsToggle("Tidy Downloads", isOn: $tidyDownloads)
         if !isDefaultBrowser {
           Divider().padding(.horizontal, 10)
-          SettingsRow("Make Sailfish your default browser so links open here") {
+          SettingsRow("Default browser") {
             Button("Set as Default", action: makeDefault)
           }
         }
       }
       .settingsCard()
-      SettingsRow("Manage your default search engine, Auto-Archive, and downloads in Profile Settings.") {
-        Button("Profile Settings…", action: showProfiles)
-      }
-      .settingsCard()
-      VStack(alignment: .leading, spacing: 0) {
-        Text("Import Data").font(.system(size: 13, weight: .semibold)).padding([.horizontal, .top], 10)
-        SettingsRow("Bring in Arc's spaces, or bookmarks and history from Chrome, Dia, Edge or Safari.") {
+      VStack(spacing: 0) {
+        SettingsRow("Search engine, Auto-Archive and downloads") {
+          Button("Profile Settings…", action: showProfiles)
+        }
+        Divider().padding(.horizontal, 10)
+        SettingsRow("Import Data") {
           Button("Import…", action: importData)
         }
       }

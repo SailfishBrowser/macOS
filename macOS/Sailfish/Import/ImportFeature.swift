@@ -214,9 +214,16 @@ struct ImportFeature {
     var failure: ImportError?
   }
 
+  // The first launch's intro, which the window plays over the dialog: the sheet is invisible while the icon shows on
+  // black, and fades in once the icon lands on its corner.
+  enum Intro: Equatable {
+    case playing, landing
+  }
+
   @ObservableState
   struct State: Equatable {
     var step = Step.browsers
+    var intro: Intro?
     // The step it opened on, which Back from leaves the import.
     var entry = Step.browsers
     var sources: [BrowserSource] = []
@@ -249,6 +256,8 @@ struct ImportFeature {
     case doneTapped
     case finished(Summary)
     case importTapped
+    case introEnded
+    case introLanded
     case makeDefaultTapped
     // Raises the macOS access prompts for the Library's Media folders, then moves on.
     case mediaFoldersTapped
@@ -257,12 +266,15 @@ struct ImportFeature {
     case passwordsFileChosen(URL)
     case profileChosen(BrowserProfile)
     case sourcesLoaded([BrowserSource])
+    case themeChanged(SpaceTheme)
     case themeChosen(SpaceTheme)
 
     @CasePathable
     enum Delegate {
       // The theme onboarding picks for the space the window shows, and its name when changed.
       case theme(SpaceTheme, name: String?)
+      // The theme being picked, which the window shows until Continue keeps it or Not Now clears it.
+      case previewTheme(SpaceTheme?)
       case merge(ArcData, ArcShortcuts, Set<ArcImportFeature.Category>, from: SourceBrowser)
     }
   }
@@ -340,6 +352,14 @@ struct ImportFeature {
       case .doneTapped:
         return state.isOnboarding && state.step != .welcome ? next(&state) : finish(&state)
 
+      case .introEnded:
+        state.intro = nil
+        return .none
+
+      case .introLanded:
+        state.intro = .landing
+        return .none
+
       case .makeDefaultTapped:
         return .run { send in
           await browserImport.makeDefaultBrowser()
@@ -356,12 +376,15 @@ struct ImportFeature {
         }
 
       case .nextTapped:
-        return next(&state)
+        return .concatenate(state.step == .theme ? .send(.delegate(.previewTheme(nil))) : .none, next(&state))
 
       case let .passwordsFileChosen(file):
         state.options?.passwordsFile = file
         state.options?.includesPasswords = true
         return .none
+
+      case let .themeChanged(theme):
+        return .send(.delegate(.previewTheme(theme)))
 
       case let .themeChosen(theme):
         let name = state.spaceName?.trimmingCharacters(in: .whitespaces)

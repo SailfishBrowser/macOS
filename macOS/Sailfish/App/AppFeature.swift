@@ -403,10 +403,12 @@ struct AppFeature {
         )
 
       case let .loaded(result):
+        var isFirstLaunch = false
         do {
           let snapshot = try result.get()
           if snapshot == nil, state.onboarding == .undecided {
             state.$onboarding.withLock { $0 = .pending }
+            isFirstLaunch = true
           }
           // No saved state, on a new install or after the data folder was wiped, is a first launch.
           if snapshot == nil {
@@ -417,7 +419,7 @@ struct AppFeature {
         } catch {
           Logger().error("State not restored, saving disabled: \(error)")
         }
-        return start(&state)
+        return start(&state, playsIntro: isFirstLaunch)
 
       case let .recovered(snapshot):
         apply(snapshot, &state)
@@ -427,7 +429,7 @@ struct AppFeature {
           }
         }
         state.isLoaded = true
-        return start(&state)
+        return start(&state, playsIntro: false)
 
       case let .restoreBackup(snapshot):
         // The Shell backed the sidebar up before sending this. Profiles and the archive stay as they are; only
@@ -446,7 +448,7 @@ struct AppFeature {
               await engine.close(tab)
             }
           },
-          start(&state)
+          start(&state, playsIntro: false)
         )
 
       case .newIncognitoWindow:
@@ -700,7 +702,8 @@ struct AppFeature {
   }
 
   // Opens the windows' pages once the state is in place, and the URLs that arrived before it.
-  private func start(_ state: inout State) -> Effect<Action> {
+  // The onboarding of the very first launch opens on the app icon's intro.
+  private func start(_ state: inout State, playsIntro: Bool) -> Effect<Action> {
     if state.windows.isEmpty {
       state.windows.append(makeWindow(state))
     }
@@ -714,6 +717,7 @@ struct AppFeature {
     if state.onboarding == .pending, urls.isEmpty {
       let window = state.windows.count - 1
       state.windows[window].importer = .onboarding(spaceName: state.windows[window].spaces.selected.name)
+      state.windows[window].importer?.intro = playsIntro ? .playing : nil
     }
     state.pendingURLs = nil
     // Installs from before onboarding asked for Media's folders, or that never saw it, are asked at their next launch.

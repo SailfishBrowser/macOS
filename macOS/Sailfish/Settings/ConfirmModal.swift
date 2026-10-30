@@ -284,12 +284,8 @@ struct CreateProfileDialog: View {
         onCancel: { isChoosing = false }
       ) {
         header("Which Spaces should use this Profile?")
-        Text(
-          "These Spaces will start fresh in your brand new Profile — so you'll have to log back in to websites, "
-            + "re-save your passwords, add extensions, etc. You can always switch back to your previous Profile "
-            + "though if you forgot something!"
-        )
-        .font(.system(size: 14)).padding(.top, 12)
+        Text("These Spaces start in the new Profile without your logins, saved passwords or extensions.")
+          .font(.system(size: 14)).padding(.top, 12)
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(alignment: .top, spacing: 12) {
             ForEach(spaces) { space in
@@ -316,13 +312,7 @@ struct CreateProfileDialog: View {
         onConfirm: { isChoosing = true }, onCancel: dismiss
       ) {
         header("Create a new Profile")
-        Text(
-          "Profiles make your Spaces truly separate — with their own history, saved passwords, extensions, "
-            + "and other browsing data. No more flipping between work and personal accounts!"
-        )
-        .font(.system(size: 14)).padding(.top, 12)
-        Text("What do you want to call this Profile?").font(.system(size: 14, weight: .medium)).padding(.top, 24)
-        ModalField(placeholder: "Personal", text: $name).padding(.top, 12)
+        ModalField(placeholder: "Profile name", text: $name).padding(.top, 20)
         (Text(Image(systemName: "arrow.triangle.2.circlepath")) + Text(" Profiles are ")
           + Text("not synced").bold() + Text(" between computers."))
           .font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 8)

@@ -149,7 +149,6 @@ enum Theme {
   static let favoritesBorder = adaptive(Color(hex: 0x3F3F55), .white.opacity(0.3))
   // The hint box has no fill on dark themes.
   static let favoritesHintFill = adaptive(.clear, .white.opacity(0.2))
-  static let favoritesHintText = adaptive(Color(hex: 0xA4A5BF), .black.opacity(0.45))
   // Sidebar colors follow the window's appearance, which follows the theme. On a dark theme the secondary text and
   // icons are white over the window, so they take its tint: the space title 45%, icons 60%, the empty pill's text
   // 30% and its magnifier 40%. The lit New Tab label is #DEDFFF.
