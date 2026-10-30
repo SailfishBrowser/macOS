@@ -44,6 +44,8 @@ enum Motion {
   // (2026-10-27, rows, pinned rows and tiles): the same spring both ways, 18% past its target about 100 ms in and at
   // rest by 250 ms; this spring fits three presses and releases within 1.4% of the travel.
   static var press: Animation? { motion(.spring(response: 0.2, dampingFraction: 0.49)) }
+  // The first launch's app icon growing in on black; not measured, as Arc's intro is unrecorded.
+  static var intro: Animation? { motion(.spring(duration: 0.5, bounce: 0.2)) }
   // The footer's "+" menu scaling in from its corner; not measured.
   static var menu: Animation? { motion(.spring(duration: 0.18, bounce: 0.15)) }
   // A fresh space's New Tab label breathing until its first tab; not measured.

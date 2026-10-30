@@ -10,13 +10,20 @@ struct ImportView: View {
   static let size = CGSize(width: 720, height: 622)
   static let padding: CGFloat = 28
   @Bindable var store: StoreOf<ImportFeature>
+  // After the first launch's intro all but the icon fade in, as the intro's icon lands on it.
+  @State private var isShown: Bool
   @State private var browser: SourceBrowser?
   @State private var theme = SpaceTheme()
   @Shared(.blocksAds) private var blocksAds
 
+  init(store: StoreOf<ImportFeature>) {
+    self.store = store
+    _isShown = State(initialValue: store.intro == nil)
+  }
+
   var body: some View {
     ImportDialog(
-      step: store.step, movesBack: { store.step == .browsers }, title: title, message: message,
+      step: store.step, isShown: isShown, movesBack: { store.step == .browsers }, title: title, message: message,
       close: store.step == .browsers && !store.isOnboarding ? { store.send(.backTapped) } : nil
     ) {
       if store.step == .theme, let name = Binding($store.spaceName) {
@@ -28,7 +35,10 @@ struct ImportView: View {
       buttons
     }
     .environment(\.colorScheme, .dark)
-    .onAppear { store.send(.appeared) }
+    .onAppear {
+      store.send(.appeared)
+      withAnimation(Motion.layout) { isShown = true }
+    }
   }
 
   private var title: String {
@@ -206,6 +216,7 @@ struct ImportView: View {
 // so the primary button never moves under the pointer.
 private struct ImportDialog<Leading: View, Content: View, Buttons: View>: View {
   let step: ImportFeature.Step
+  let isShown: Bool
   // Back, which returns only to the browsers.
   let movesBack: @MainActor () -> Bool
   let title: String
@@ -231,11 +242,13 @@ private struct ImportDialog<Leading: View, Content: View, Buttons: View>: View {
             .id(step)
             .transition(.opacity)
           }
+          .opacity(isShown ? 1 : 0)
         }
         .frame(width: 250, alignment: .leading)
         ZStack {
           content.frame(maxWidth: .infinity, maxHeight: .infinity).id(step).transition(StepSlide(movesBack: movesBack))
         }
+        .opacity(isShown ? 1 : 0)
       }
       HStack(spacing: 8) {
         Spacer()
@@ -243,6 +256,7 @@ private struct ImportDialog<Leading: View, Content: View, Buttons: View>: View {
       }
       .padding(.top, 24)
       .transaction { $0.animation = nil }
+      .opacity(isShown ? 1 : 0)
     }
     .animation(Motion.layout, value: step)
     .foregroundStyle(Color(hex: 0xD6D6D9))

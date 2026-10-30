@@ -214,9 +214,16 @@ struct ImportFeature {
     var failure: ImportError?
   }
 
+  // The first launch's intro, which the window plays before the dialog: the sheet waits while the icon shows on black,
+  // and comes down as the icon lands in its corner.
+  enum Intro: Equatable {
+    case playing, landing
+  }
+
   @ObservableState
   struct State: Equatable {
     var step = Step.browsers
+    var intro: Intro?
     // The step it opened on, which Back from leaves the import.
     var entry = Step.browsers
     var sources: [BrowserSource] = []
@@ -249,6 +256,8 @@ struct ImportFeature {
     case doneTapped
     case finished(Summary)
     case importTapped
+    case introEnded
+    case introLanded
     case makeDefaultTapped
     // Raises the macOS access prompts for the Library's Media folders, then moves on.
     case mediaFoldersTapped
@@ -342,6 +351,14 @@ struct ImportFeature {
 
       case .doneTapped:
         return state.isOnboarding && state.step != .welcome ? next(&state) : finish(&state)
+
+      case .introEnded:
+        state.intro = nil
+        return .none
+
+      case .introLanded:
+        state.intro = .landing
+        return .none
 
       case .makeDefaultTapped:
         return .run { send in
