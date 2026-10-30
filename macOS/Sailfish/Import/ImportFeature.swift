@@ -257,12 +257,15 @@ struct ImportFeature {
     case passwordsFileChosen(URL)
     case profileChosen(BrowserProfile)
     case sourcesLoaded([BrowserSource])
+    case themeChanged(SpaceTheme)
     case themeChosen(SpaceTheme)
 
     @CasePathable
     enum Delegate {
       // The theme onboarding picks for the space the window shows, and its name when changed.
       case theme(SpaceTheme, name: String?)
+      // The theme being picked, which the window shows until Continue keeps it or Not Now clears it.
+      case previewTheme(SpaceTheme?)
       case merge(ArcData, ArcShortcuts, Set<ArcImportFeature.Category>, from: SourceBrowser)
     }
   }
@@ -356,12 +359,15 @@ struct ImportFeature {
         }
 
       case .nextTapped:
-        return next(&state)
+        return .concatenate(state.step == .theme ? .send(.delegate(.previewTheme(nil))) : .none, next(&state))
 
       case let .passwordsFileChosen(file):
         state.options?.passwordsFile = file
         state.options?.includesPasswords = true
         return .none
+
+      case let .themeChanged(theme):
+        return .send(.delegate(.previewTheme(theme)))
 
       case let .themeChosen(theme):
         let name = state.spaceName?.trimmingCharacters(in: .whitespaces)

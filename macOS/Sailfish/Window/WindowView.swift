@@ -10,7 +10,6 @@ struct WindowView: View {
 
   var body: some View {
     let isFloating = store.sidebar.isFloating
-    let theme = themePreview ?? store.spaces.selected.theme
     let background = store.isIncognito ? Theme.incognitoWindow : LinearGradient(theme: theme)
     ZStack(alignment: .topLeading) {
       // The Library slides in from the left over the sidebar, which stays put, and pushes the page right; a swipe
@@ -126,9 +125,11 @@ struct WindowView: View {
     return store.spaces.selectedID == store.spaces.spaces.first?.id ? min(max(slide, 0), 1) : 0
   }
 
+  // A theme being picked, in the space editor or the onboarding, shows before it is kept.
+  private var theme: SpaceTheme { themePreview ?? store.themePreview ?? store.spaces.selected.theme }
+
   private func backdrop(_ background: LinearGradient) -> some View {
-    let theme = themePreview ?? store.spaces.selected.theme
-    return background.opacity(store.isIncognito ? 1 : theme.opacity)
+    background.opacity(store.isIncognito ? 1 : theme.opacity)
       .background(WindowBlur())
       .overlay { Grain(amount: store.isIncognito ? 0 : theme.grain) }
   }
@@ -148,7 +149,6 @@ struct WindowView: View {
   @ViewBuilder private func browser(
     isFloating: Bool, background: LinearGradient, library: (shown: CGFloat, push: CGFloat)
   ) -> some View {
-    let theme = themePreview ?? store.spaces.selected.theme
     HStack(spacing: 0) {
       if !isFloating {
         SidebarView(store: store)

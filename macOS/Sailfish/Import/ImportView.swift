@@ -77,6 +77,7 @@ struct ImportView: View {
       Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 128, height: 128)
     case .theme:
       ThemePicker(theme: $theme, original: SpaceTheme())
+        .onChange(of: theme) { store.send(.themeChanged(theme)) }
     case .adBlocker:
       Toggle("Block ads and trackers with uBlock Origin", isOn: Binding($blocksAds))
         .toggleStyle(.switch)
