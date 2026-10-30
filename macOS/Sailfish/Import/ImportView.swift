@@ -254,6 +254,7 @@ private struct ImportDialog<Leading: View, Content: View, Buttons: View>: View {
         Spacer()
         buttons
       }
+      .frame(height: 36)
       .padding(.top, 24)
       .transaction { $0.animation = nil }
       .opacity(isShown ? 1 : 0)
