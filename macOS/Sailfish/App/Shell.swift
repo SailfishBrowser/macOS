@@ -36,12 +36,17 @@ final class Shell: NSObject, NSMenuDelegate {
   }
 
   #if DEBUG
-    private lazy var about = makeAboutWindow(checkForUpdates: nil)
+    private lazy var about = makeAboutWindow(checkForUpdates: nil) { [weak self] in
+      self?.acknowledgements.makeKeyAndOrderFront(nil)
+    }
   #else
     private lazy var about = makeAboutWindow { [weak self] in
       self?.updater.controller.checkForUpdates(nil)
+    } showAcknowledgements: { [weak self] in
+      self?.acknowledgements.makeKeyAndOrderFront(nil)
     }
   #endif
+  private lazy var acknowledgements = makeAcknowledgementsWindow()
 
   private var recoveryToken: ObserveToken?
 

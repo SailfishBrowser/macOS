@@ -1,0 +1,74 @@
+[
+  {
+    "name": "Chromium",
+    "license": "The Chromium Authors. BSD 3-Clause, with its third-party components under their own licenses (chrome://credits)."
+  },
+  {
+    "name": "uBlock Origin 1.75.0",
+    "license": "Raymond Hill and contributors. GPLv3. A separate program, bundled unchanged but for an added manifest key; its license is LICENSE.txt in Contents/Resources/uBlock0.chromium. Source: https://github.com/gorhill/uBlock/tree/1.75.0"
+  },
+  {
+    "name": "Sparkle",
+    "license": "Andy Matuschak, the Sparkle Project contributors and others. MIT, with its bundled components under their own licenses."
+  },
+  {
+    "name": "Readability",
+    "license": "Arc90 Inc and Mozilla. Apache 2.0."
+  },
+  {
+    "name": "swift-composable-architecture",
+    "license": "Point-Free. MIT."
+  },
+  {
+    "name": "swift-sharing",
+    "license": "Point-Free. MIT."
+  },
+  {
+    "name": "swift-dependencies",
+    "license": "Point-Free. MIT."
+  },
+  {
+    "name": "swift-navigation",
+    "license": "Point-Free. MIT."
+  },
+  {
+    "name": "swift-perception",
+    "license": "Point-Free. MIT."
+  },
+  {
+    "name": "swift-case-paths",
+    "license": "Point-Free. MIT."
+  },
+  {
+    "name": "swift-clocks",
+    "license": "Point-Free. MIT."
+  },
+  {
+    "name": "swift-concurrency-extras",
+    "license": "Point-Free. MIT."
+  },
+  {
+    "name": "swift-custom-dump",
+    "license": "Point-Free. MIT."
+  },
+  {
+    "name": "swift-identified-collections",
+    "license": "Point-Free. MIT."
+  },
+  {
+    "name": "combine-schedulers",
+    "license": "Point-Free. MIT."
+  },
+  {
+    "name": "xctest-dynamic-overlay",
+    "license": "Point-Free. MIT."
+  },
+  {
+    "name": "swift-collections",
+    "license": "Apple Inc. Apache 2.0."
+  },
+  {
+    "name": "swift-syntax",
+    "license": "Apple Inc. Apache 2.0."
+  }
+]
