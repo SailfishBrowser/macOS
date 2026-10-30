@@ -66,6 +66,7 @@
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/javascript_dialog_manager.h"
+#include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/media_session.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -494,6 +495,24 @@ class WebContentsDelegateBridge : public content::WebContentsDelegate,
     return base::TimeTicks::Now() - last_interaction_ <= base::Seconds(1)
                ? last_modifier_flags_
                : 0;
+  }
+
+  // A reserved shortcut goes to the main menu before the renderer, as Chrome's
+  // tab and window shortcuts do, so a busy page cannot hold it. The menu may
+  // close the web contents, which deletes this bridge.
+  content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      content::WebContents* source,
+      const input::NativeWebKeyboardEvent& event) override {
+    NSEvent* ns_event = event.os_event.Get();
+    if (event.GetType() != blink::WebInputEvent::Type::kRawKeyDown ||
+        !ns_event ||
+        ![owner_.delegate respondsToSelector:@selector
+                          (webContents:reservesKeyEquivalent:)] ||
+        ![owner_.delegate webContents:owner_ reservesKeyEquivalent:ns_event] ||
+        ![NSApp.mainMenu performKeyEquivalent:ns_event]) {
+      return content::KeyboardEventProcessingResult::NOT_HANDLED;
+    }
+    return content::KeyboardEventProcessingResult::HANDLED;
   }
 
   // Gives the shell's main menu the shortcuts the page did not handle.

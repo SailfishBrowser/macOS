@@ -139,6 +139,11 @@ denied or cancelled (permissions stay pending, Chrome's context menu shows).
   full screen for security (`ForSecurityDropFullscreen`) through
   `GetFullscreenState`. Without the delegate method requests are refused,
   as before.
+- Shortcuts: a key press goes to the page first and to `NSApp.mainMenu` if
+  the page leaves it, unless the delegate reserves it
+  (`webContents:reservesKeyEquivalent:`, `PreHandleKeyboardEvent`), in
+  which case the menu performs it before the renderer sees it, as Chrome's
+  tab and window shortcuts, so a busy page cannot hold it.
 - Zoom: `zoomPercent` and `webContentsDidChangeZoom:` read Chrome's
   `ZoomController`, so a tab's zoom follows the site's as in Chrome.
 - Session restore: `sessionState` serializes the navigation entries with
@@ -384,7 +389,8 @@ navigation on.
   delegate, and may replace `NSApp.mainMenu` once launching has finished.
   The engine keeps Chrome's bookmark and history menu bridges unbound (they
   `CHECK` for Chrome's menu items) and sends the shortcuts a page leaves
-  unhandled to `NSApp.mainMenu`; the web view otherwise takes every ⌘ key.
+  unhandled, and those the delegate reserves, to `NSApp.mainMenu`; the web
+  view otherwise takes every ⌘ key.
 - Chrome never opens a browser window. On
   `NSApplicationWillFinishLaunchingNotification` the engine changes the
   delegate's class to `ECAppController`, an `AppController` subclass

@@ -185,6 +185,24 @@ extension Engine {
     closeRequested(by: contents)
   }
 
+  // The menu's commands on the app's own chrome, which the main menu performs before a Chromium page sees them, as
+  // Chrome does with its tab and window shortcuts: a busy page cannot hold them, and no page can claim them.
+  static let reservedActions: Set<Selector> = [
+    #selector(NSApplication.terminate(_:)), #selector(NSWindow.performClose(_:)), #selector(Shell.closeTab(_:)),
+    #selector(WindowController.newTab(_:)), #selector(Shell.newWindow(_:)), #selector(Shell.newIncognitoWindow(_:)),
+    #selector(Shell.newLittleSailfish(_:)), #selector(Shell.reopenClosedTab(_:)),
+    #selector(WindowController.openLocation(_:)), #selector(WindowController.toggleSidebarDocking(_:)),
+    #selector(WindowController.nextTab(_:)), #selector(WindowController.previousTab(_:)),
+    #selector(WindowController.cycleTabForward(_:)), #selector(WindowController.cycleTabBackward(_:)),
+    #selector(WindowController.selectSidebarItem(_:)), #selector(WindowController.nextSpace(_:)),
+    #selector(WindowController.previousSpace(_:)), #selector(WindowController.selectSpace(_:)),
+  ]
+
+  func webContents(_ contents: ECWebContents, reservesKeyEquivalent event: NSEvent) -> Bool {
+    guard let menu = NSApp.mainMenu, let action = MenuShortcuts.item(for: event, in: menu)?.action else { return false }
+    return Self.reservedActions.contains(action)
+  }
+
   func webContents(_ contents: ECWebContents, showContextMenu menu: ECContextMenu) {
     guard let tab = tab(of: contents) else { return }
     showPageMenu(menu, for: tab, page: contents)
