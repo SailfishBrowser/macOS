@@ -370,6 +370,14 @@ extension Engine {
     }
     if let page = page as? WebKitPage {
       CookieSync.pageDidClose(page)
+      // The store's last WebKit page takes the store's warm view and its content process with it; the next page is
+      // warmed again by a typed address or a hovered link.
+      let sameStore = livePages.values.contains {
+        ($0 as? WebKitPage).map { $0.profile == page.profile && $0.incognito == page.incognito } == true
+      }
+      if !sameStore {
+        WebKitStores.dropWarmView(profile: page.profile, incognito: page.incognito)
+      }
     }
     (page as? ECWebContents)?.delegate = nil
     pendingSheets.removeValue(forKey: id)?.forEach { $0() }
