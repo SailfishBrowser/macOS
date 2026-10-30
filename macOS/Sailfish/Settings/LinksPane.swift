@@ -17,7 +17,9 @@ struct LinksPane: View {
   @Shared(.peeksLinksToOtherSites) private var peeksLinksToOtherSites
   @Shared(.littleSailfishOnOptionCommandClick) private var littleSailfishOnOptionCommandClick
   @Shared(.peeksOnShiftClick) private var peeksOnShiftClick
+  @Shared(.siteEngines) private var siteEngines
   @State private var isSpaceLinkingShown = false
+  @State private var isWebKitSitesShown = false
 
   // The toggle is Space Linking's default: on is Little Sailfish, off the most recent space.
   private var linksOpenInLittleSailfish: Binding<Bool> {
@@ -77,11 +79,26 @@ struct LinksPane: View {
         .frame(minHeight: 36)
         .settingsCard()
         .padding(.horizontal, 64)
+        VStack(spacing: 0) {
+          SettingsToggle("Open streaming sites in WebKit", isOn: $siteEngines.streamingSitesInWebKit)
+          Divider().padding(.horizontal, 10)
+          HStack {
+            Spacer()
+            Button("WebKit Sites…") { isWebKitSitesShown = true }
+          }
+          .padding(.horizontal, 10)
+          .frame(minHeight: 36)
+        }
+        .settingsCard()
+        .padding(.horizontal, 64)
       }
       .padding(.bottom, 20)
     }
     .sheet(isPresented: $isSpaceLinkingShown) {
       SpaceLinking(spaces: spaceChoices) { isSpaceLinkingShown = false }
+    }
+    .sheet(isPresented: $isWebKitSitesShown) {
+      WebKitSites { isWebKitSitesShown = false }
     }
   }
 

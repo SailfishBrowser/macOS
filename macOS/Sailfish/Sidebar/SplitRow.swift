@@ -19,7 +19,7 @@ struct SplitRow<Menu: View>: View {
           Rectangle().fill(Theme.divider).frame(width: 1).padding(.vertical, 6)
         }
         HStack(spacing: 8) {
-          TabFavicon(tab: tab, space: space).frame(width: 16)
+          TabFavicon(tab: tab, space: space).frame(width: 16).engineMark(tab)
           Text(tab.displayTitle).foregroundStyle(Theme.rowText)
           if hoveredChip == tab.id {
             Spacer(minLength: 0)

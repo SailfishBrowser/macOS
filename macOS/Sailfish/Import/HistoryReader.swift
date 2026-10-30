@@ -11,7 +11,7 @@ struct HistorySource: Equatable, Hashable, Identifiable, Sendable {
   var title: String { profile.isEmpty ? browser : "\(browser) – \(profile)" }
 }
 
-struct HistoryEntry: Equatable, Sendable {
+struct HistoryRecord: Equatable, Sendable {
   var url: String
   var title: String
   var visitCount: Int
@@ -32,7 +32,7 @@ enum ImportError: Error, Equatable {
 }
 
 enum HistoryReader {
-  static func read(_ source: HistorySource) throws -> [HistoryEntry] {
+  static func read(_ source: HistorySource) throws -> [HistoryRecord] {
     // Columns: URL, title, visit count, typed count, last visit in seconds since 1970.
     let query =
       switch source.browser {
@@ -50,7 +50,7 @@ enum HistoryReader {
       default: "SELECT url, title, visit_count, typed_count, last_visit_time / 1e6 - 11644473600 FROM urls WHERE hidden = 0"
       }
     return try ImportDatabase.rows(source.file, query) { row in
-      HistoryEntry(
+      HistoryRecord(
         url: row.text(0), title: row.text(1), visitCount: row.int(2), typedCount: row.int(3),
         lastVisit: Date(timeIntervalSince1970: row.double(4)))
     }

@@ -20,7 +20,7 @@ final class WindowFeatureTests: XCTestCase {
       WindowFeature()
     } withDependencies: {
       $0.date = .constant(now)
-      $0.webEngine.create = { _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
     }
     store.exhaustivity = .off

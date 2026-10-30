@@ -2,11 +2,12 @@ import ComposableArchitecture
 import Foundation
 import OSLog
 
-// Each tab's saved history: the engine's sessionState, one file per tab in Sessions beside State.json, written
-// when the tab's page closes and with each snapshot while it is open. Incognito tabs' stays in memory, for undo.
-// The engine saves and loads on the main actor; the session writer prunes from its flush, off it.
+// Each page's saved history: Chromium's sessionState in Sessions, or WebKit's interactionState in WebKitSessions,
+// beside State.json, one file per page, written when the page closes and with each snapshot while it is open.
+// Incognito pages' stays in memory, for undo. The engine saves and loads on the main actor; the session writer
+// prunes from its flush, off it.
 final class SessionStore: Sendable {
-  // The engine cuts an entry's page state at 1 MB; a state past this is left as it was.
+  // Chromium cuts an entry's page state at 1 MB; a state past this, from either engine, is left as it was.
   static let maxSize = 1 << 20
   private let directory: URL
   private let memory = LockIsolated<[UUID: Data]>([:])
@@ -62,7 +63,7 @@ final class SessionStore: Sendable {
     }
   }
 
-  // Drops the saved histories of every other tab.
+  // Drops the saved histories of every other page.
   func keep(_ ids: Set<UUID>) {
     memory.withValue { $0 = $0.filter { ids.contains($0.key) } }
     written.withValue { $0 = $0.filter { ids.contains($0.key) } }

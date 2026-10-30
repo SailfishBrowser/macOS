@@ -19,12 +19,13 @@ struct ContentArea: View {
       if let selected = space.selectedTabID {
         // One layout for a split and a lone page, so a pane closed from a split keeps the other page's view: it
         // takes the card the next frame. Expand Current Split shows the focused pane alone, still
-        // with its pane bar.
-        let expanded = split != nil && store.expandedPane == selected
+        // with its pane bar; a page in element full screen shows alone without it.
+        let isFullScreen = Engine.shared.fullScreenPages[selected] != nil
+        let expanded = split != nil && store.expandedPane == selected || isFullScreen
         SplitPanes(
           store: store, tabIDs: expanded ? [selected] : split?.tabIDs ?? [selected],
           widths: expanded || split == nil ? [1] : split!.widths, isVertical: split?.isVertical == true,
-          isSplit: split != nil, accent: accent, isThemed: isThemed)
+          isSplit: split != nil && !isFullScreen, accent: accent, isThemed: isThemed)
       } else {
         Pane(store: store, tab: nil, accent: accent, isThemed: isThemed, isSplit: false)
       }
@@ -75,8 +76,12 @@ private struct SplitPanes: View {
       let vertical = isVertical
       let available = (vertical ? proxy.size.height : proxy.size.width) - gutter * Double(tabIDs.count - 1)
       let layout = vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+      // A lone page keeps one pane as its tab changes, so the page it replaces stays under a WebKit page until that
+      // one has drawn; a split's panes follow their tabs.
+      let keys = tabIDs.count == 1 ? [nil] : tabIDs.map(Optional.some)
       layout {
-        ForEach(Array(tabIDs.enumerated()), id: \.element) { index, id in
+        ForEach(Array(keys.enumerated()), id: \.element) { index, _ in
+          let id = tabIDs[index]
           if index > 0 {
             divider(index - 1, available)
           }
@@ -114,10 +119,13 @@ private struct Pane: View {
   let isThemed: Bool
   let isSplit: Bool
   // The page as a still while the Library is open or a swipe brings it in: a web view's frame cannot animate,
-  // and the still rides along in the card at the window's edge.
+  // and the still rides along in the card at the window's edge. The page stays in the window under it, so it is drawn
+  // when the still goes; a WebKit page out of the window would be clear until it had drawn again.
   @State private var still: NSImage?
 
   private var space: Space { store.spaces.selected }
+
+  private var isFullScreen: Bool { tab.map { Engine.shared.fullScreenPages[$0.id] != nil } == true }
 
   private var isFrozen: Bool {
     store.isLibraryOpen
@@ -151,7 +159,7 @@ private struct Pane: View {
   }
 
   @ViewBuilder private var bar: some View {
-    if let tab, tab.url.isDeveloperPage {
+    if let tab, tab.url.isDeveloperPage, !isFullScreen {
       DeveloperBar(tab: tab, accent: accent, close: isSplit ? { close() } : nil) { store.send(.editSelectedTab) }
     } else if let tab, isSplit {
       let panes = space.split(of: tab.id)?.tabIDs ?? [tab.id]
@@ -173,8 +181,14 @@ private struct Pane: View {
   }
 
   @ViewBuilder private var page: some View {
-    let hasBar = tab.map { isSplit || $0.url.isDeveloperPage } ?? false
+    let hasBar = tab.map { isSplit || $0.url.isDeveloperPage && !isFullScreen } ?? false
     ZStack {
+      if let tab, let view = Engine.shared.view(tab.id) {
+        WebView(view: view, roundsTop: !hasBar, cornerRadius: isFullScreen ? 0 : 6, onMouseDown: { select() })
+      } else if let tab {
+        // A tab a space switch selected gets its page once the strip settles; until then the card names it.
+        PagePlaceholder(tab: tab, space: space)
+      }
       if let still {
         Image(nsImage: still).resizable().scaledToFill()
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -182,27 +196,28 @@ private struct Pane: View {
             UnevenRoundedRectangle(
               topLeadingRadius: hasBar ? 0 : 6, bottomLeadingRadius: 6, bottomTrailingRadius: 6,
               topTrailingRadius: hasBar ? 0 : 6))
-      } else if let tab, let view = Engine.shared.view(tab.id) {
-        WebView(view: view, roundsTop: !hasBar, cornerRadius: 6, onMouseDown: { select() })
-      } else if let tab {
-        // A tab a space switch selected gets its page once the strip settles; until then the card names it.
-        PagePlaceholder(tab: tab, space: space)
       }
       if let tab {
         ReaderOverlay(tab: tab.id, url: tab.url)
         PageDialogOverlay(tab: tab.id)
       }
     }
-    .task(id: isFrozen) {
+    .task(id: Frozen(isFrozen: isFrozen, tab: tab?.id)) {
       guard isFrozen else {
         // The still stays through the Library's closing motion, then the live page returns.
         guard (try? await Task.sleep(for: .milliseconds(300))) != nil else { return }
         still = nil
         return
       }
-      guard still == nil, let tab, let contents = Engine.shared.tabs[tab.id] else { return }
-      contents.snapshot { still = $0 }
+      guard still == nil, let tab, let page = Engine.shared.page(tab.id) else { return }
+      page.snapshot { still = $0 }
     }
+  }
+
+  // A lone pane's tab changes under it, and a still is of one tab.
+  private struct Frozen: Equatable {
+    let isFrozen: Bool
+    let tab: Tab.ID?
   }
 
   private func select() {

@@ -48,8 +48,9 @@ final class PersistenceTests: XCTestCase {
       $0.persistence.save = { data in saved.setValue(data) }
       $0.webEngine.saveSessions = {}
       $0.webEngine.keepSessions = { _ in }
+      $0.webEngine.removeDeletedStores = {}
       $0.webEngine.events = { .finished }
-      $0.webEngine.create = { _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
     }
     let space = Space(
@@ -101,11 +102,12 @@ final class PersistenceTests: XCTestCase {
       $0.persistence.save = { _ in }
       $0.webEngine.saveSessions = {}
       $0.webEngine.keepSessions = { _ in }
+      $0.webEngine.removeDeletedStores = {}
       $0.persistence.setAside = { setAside.setValue(true) }
       $0.persistence.backups = { backups }
       $0.persistence.loadBackup = { $0 == backups[0] ? Data(today.utf8) : Data() }
       $0.webEngine.events = { .finished }
-      $0.webEngine.create = { _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
     }
     store.exhaustivity = .off
@@ -146,6 +148,7 @@ final class PersistenceTests: XCTestCase {
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.persistence.load = { Data(#"{"version": 99, "windows": []}"#.utf8) }
       $0.webEngine.events = { .finished }
+      $0.webEngine.removeDeletedStores = {}
     }
     store.exhaustivity = .off
 

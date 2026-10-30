@@ -68,6 +68,10 @@ extension WindowController: NSMenuItemValidation {
       Engine.shared.captureThumbnail(tab)
     }
     store.send(.cycleRecentTab(older: older))
+    // A cycle that starts with ⌃ already released, as after leaving a WebKit page's full screen, ends on its tab.
+    if !NSEvent.modifierFlags.contains(.control) {
+      store.send(.endRecentCycle)
+    }
   }
 
   // ⌥⌘V: the clipboard's link, or a search for its text, in a new tab.
@@ -100,8 +104,15 @@ extension WindowController: NSMenuItemValidation {
     store.send(.tab(.togglePinnedSection, in: space.id), animation: Motion.row)
   }
 
+  // Open Page in WebKit or Chromium: the shown page again in the other engine.
+  @objc func openPageInOtherEngine(_ sender: Any?) {
+    guard let tab = space.selectedTabID, let engine = Engine.shared.otherEngine(tab) else { return }
+    store.send(.tab(.switchEngine(tab, engine), in: space.id))
+  }
+
   @objc func reloadBypassingCache(_ sender: Any?) {
-    space.selectedTabID.map { Engine.shared.perform($0) { $0.reloadBypassingCache() } }
+    guard let tab = space.selectedTabID else { return }
+    Task { await Engine.shared.reload(tab, bypassingCache: true) }
   }
 
   @objc func newSplit(_ sender: Any?) {
@@ -334,8 +345,10 @@ extension WindowController: NSMenuItemValidation {
       return !archive.isEmpty
     case #selector(copyURLAsQuote(_:)):
       return space.selectedTabID.flatMap { Engine.shared.selections[$0] } != nil
-    case #selector(showJavaScriptConsole(_:)), #selector(inspectElements(_:)), #selector(viewSource(_:)):
-      return space.selectedTabID.flatMap { Engine.shared.tabs[$0] } != nil
+    case #selector(showJavaScriptConsole(_:)), #selector(inspectElements(_:)):
+      return space.selectedTabID.flatMap { Engine.shared.page($0) }?.hasDeveloperTools == true
+    case #selector(viewSource(_:)):
+      return space.selectedTabID.flatMap { Engine.shared.page($0) } != nil
     case #selector(stopLoading(_:)):
       return true
     // Offered only on a page with an article, as Safari does.
@@ -344,12 +357,16 @@ extension WindowController: NSMenuItemValidation {
       let isShown = Engine.shared.readers[tab] != nil
       item.title = isShown ? "Hide Reader View" : "Show Reader View"
       return isShown || Engine.shared.readerable.contains(tab)
+    case #selector(openPageInOtherEngine(_:)):
+      let engine = space.selectedTabID.flatMap { Engine.shared.otherEngine($0) }
+      item.title = "Open Page in \((engine ?? .webkit).name)"
+      return engine != nil
     case #selector(useSelectionForFind(_:)):
       return space.selectedTabID.flatMap { Engine.shared.selections[$0] } != nil
     // Enabled for any loaded page, as in Chrome: the page keeps a selection the engine never reported, such as
     // the match the find bar left selected.
     case #selector(jumpToSelection(_:)):
-      return space.selectedTabID.flatMap { Engine.shared.tabs[$0] } != nil
+      return space.selectedTabID.flatMap { Engine.shared.page($0) } != nil
     // Disabled, the key goes on to the field, which moves its caret. A page's own fields keep it in the engine.
     case #selector(goBackWithArrow(_:)), #selector(goForwardWithArrow(_:)):
       return !(window?.firstResponder is NSText)

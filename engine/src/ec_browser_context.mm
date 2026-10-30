@@ -29,9 +29,14 @@
 #include "components/search_engines/template_url_service_observer.h"
 #include "content/public/browser/download_item_utils.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #import "engine_core/ec_web_contents_private.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "net/base/apple/url_conversions.h"
+#include "net/cookies/canonical_cookie.h"
+#include "net/cookies/cookie_change_dispatcher.h"
+#include "services/network/public/mojom/cookie_manager.mojom.h"
 
 @implementation ECDownload
 
@@ -90,6 +95,39 @@ class DownloadObserver : public download::AllDownloadItemNotifier::Observer {
  private:
   __weak ECBrowserContext* owner_;
   download::AllDownloadItemNotifier notifier_;
+};
+
+// Reports changes to cookies under the context's observedCookieDomains, as
+// chrome.cookies.onChanged hears them.
+class CookieObserver : public network::mojom::CookieChangeListener {
+ public:
+  explicit CookieObserver(ECBrowserContext* owner) : owner_(owner) { Listen(); }
+
+  void OnCookieChange(const net::CookieChangeInfo& change) override {
+    if (change.cookie.IsPartitioned() ||
+        change.cause == net::CookieChangeCause::OVERWRITE ||
+        !CookieIsUnderDomains(change.cookie, owner_.observedCookieDomains)) {
+      return;
+    }
+    [owner_.cookieDelegate
+        browserContext:owner_
+       cookieDidChange:[[ECCookie alloc] initWithCanonicalCookie:change.cookie]
+               removed:net::CookieChangeCauseIsDeletion(change.cause)];
+  }
+
+ private:
+  // Listens again when the network service restarts.
+  void Listen() {
+    receiver_.reset();
+    owner_.profile->GetDefaultStoragePartition()
+        ->GetCookieManagerForBrowserProcess()
+        ->AddGlobalChangeListener(receiver_.BindNewPipeAndPassRemote());
+    receiver_.set_disconnect_handler(
+        base::BindOnce(&CookieObserver::Listen, base::Unretained(this)));
+  }
+
+  __weak ECBrowserContext* owner_;
+  mojo::Receiver<network::mojom::CookieChangeListener> receiver_{this};
 };
 
 // Makes Google, from Chrome's prepopulated engines, the default search of a
@@ -153,6 +191,7 @@ class SiteSearchActivator : public TemplateURLServiceObserver {
   ECBrowserContext* _offTheRecordContext;
   base::CallbackListSubscription _searchEnginesLoaded;
   std::unique_ptr<SiteSearchActivator> _siteSearchActivator;
+  std::unique_ptr<CookieObserver> _cookieObserver;
 }
 
 @synthesize profile = _profile;
@@ -160,6 +199,8 @@ class SiteSearchActivator : public TemplateURLServiceObserver {
 @synthesize autocompletes = _autocompletes;
 @synthesize downloadDelegate = _downloadDelegate;
 @synthesize extensionsDelegate = _extensionsDelegate;
+@synthesize cookieDelegate = _cookieDelegate;
+@synthesize observedCookieDomains = _observedCookieDomains;
 
 + (void)loadWithPath:(NSString*)path
           completion:(void (^)(ECBrowserContext*))completion {
@@ -182,6 +223,7 @@ class SiteSearchActivator : public TemplateURLServiceObserver {
 - (instancetype)initWithProfile:(Profile*)profile {
   if ((self = [super init])) {
     _profile = profile;
+    _observedCookieDomains = @[];
     _webContents = [NSHashTable weakObjectsHashTable];
     _autocompletes = [NSHashTable weakObjectsHashTable];
     // Chrome destroys its profiles when it quits.
@@ -227,6 +269,19 @@ class SiteSearchActivator : public TemplateURLServiceObserver {
       base::apple::NSURLToFilePath(url));
 }
 
+- (NSArray<NSString*>*)observedCookieDomains {
+  return _observedCookieDomains;
+}
+
+- (void)setObservedCookieDomains:(NSArray<NSString*>*)domains {
+  _observedCookieDomains = [domains copy];
+  if (!domains.count) {
+    _cookieObserver.reset();
+  } else if (!_cookieObserver) {
+    _cookieObserver = std::make_unique<CookieObserver>(self);
+  }
+}
+
 - (BOOL)searchSuggestEnabled {
   return _profile->GetPrefs()->GetBoolean(prefs::kSearchSuggestEnabled);
 }
@@ -256,6 +311,7 @@ class SiteSearchActivator : public TemplateURLServiceObserver {
   }
   _downloadObserver.reset();
   _siteSearchActivator.reset();
+  _cookieObserver.reset();
   _keepAlive.reset();
   _profile = nullptr;
 }
