@@ -625,8 +625,12 @@ final class WebKitWebView: WKWebView {
     }
     // WebKit passes back a shortcut the page left as the current event, with AppKit's variants of it such as ⌘+ for ⌘=.
     guard NSApp.currentEvent.map(offered.contains) != true, window?.firstResponder === self,
-      let menu = NSApp.mainMenu, MenuShortcuts.binds(event, in: menu)
+      let menu = NSApp.mainMenu, let item = MenuShortcuts.item(for: event, in: menu)
     else { return super.performKeyEquivalent(with: event) }
+    // The app's reserved shortcuts are the menu's before the page sees them, as on a Chromium page.
+    if let action = item.action, Engine.reservedActions.contains(action) {
+      return menu.performKeyEquivalent(with: event)
+    }
     waitCount += 1
     let wait = waitCount
     waiting[wait] = event

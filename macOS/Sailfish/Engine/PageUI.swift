@@ -185,8 +185,8 @@ extension Engine {
     closeRequested(by: contents)
   }
 
-  // The menu's commands on the app's own chrome, which the main menu performs before a Chromium page sees them, as
-  // Chrome does with its tab and window shortcuts: a busy page cannot hold them, and no page can claim them.
+  // The menu's commands on the app's own chrome, which the main menu performs before a page of either engine sees them,
+  // as Chrome does with its tab and window shortcuts: a busy page cannot hold them, and no page can claim them.
   static let reservedActions: Set<Selector> = [
     #selector(NSApplication.terminate(_:)), #selector(NSWindow.performClose(_:)), #selector(Shell.closeTab(_:)),
     #selector(WindowController.newTab(_:)), #selector(Shell.newWindow(_:)), #selector(Shell.newIncognitoWindow(_:)),
