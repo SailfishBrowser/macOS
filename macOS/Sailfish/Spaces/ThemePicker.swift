@@ -136,10 +136,10 @@ struct ThemePicker: View {
         }
       }
       .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+      // A click on the canvas places the first color there, or moves the main one there, as the system color wheel does.
       .gesture(SpatialTapGesture().onEnded { tap in
-        guard handles.isEmpty else { return }
         withAnimation(Motion.layout) {
-          handles = [Handle(offset: .zero, lightness: mode.lightness ?? 0.65)]
+          if handles.isEmpty { handles = [Handle(offset: .zero, lightness: mode.lightness ?? 0.65)] }
           place(0, at: tap.location)
         }
         update()
