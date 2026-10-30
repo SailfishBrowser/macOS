@@ -3,14 +3,17 @@ import SwiftUI
 
 // The theme picker (354x506): up to three color handles on a dotted canvas, where the angle around the center
 // is hue and the distance from it saturation, with light and dark modes, pages of swatches, an intensity slider,
-// a grain dial, Reset to original colors and the Advanced color controls.
+// a grain dial, and for an existing space Reset to original colors and the Advanced color controls.
 struct ThemePicker: View {
   @Binding var theme: SpaceTheme
   @State private var handles: [Handle]
   @State private var mode = Mode.free
   @State private var page = 0
+  @State private var grab: Grab?
   // The theme as the editor opened, for Reset to original colors and Original Saturation.
   private let original: SpaceTheme
+  // An existing space's theme, which has original colors to go back to.
+  private let isEditing: Bool
 
   enum Mode: String, CaseIterable {
     case free = "sparkles", light = "sun.max", dark = "moon"
@@ -31,6 +34,12 @@ struct ThemePicker: View {
     var lightness: Double
   }
 
+  // Where a drag began, and the handle's center less that point, so the handle keeps its place under the pointer.
+  struct Grab {
+    var start: CGPoint
+    var offset: CGSize
+  }
+
   private static let size: CGFloat = 340
   private static let radius: CGFloat = 162
   // Brand, drab, greyscale and pastel pages.
@@ -41,9 +50,10 @@ struct ThemePicker: View {
     [0xFDFBFA, 0xFBEAF3, 0xECD2EA, 0xF7CDD2, 0xFAE1D5, 0xFEF9E7, 0xE4FCEC, 0xE0F2FB, 0xC5C6E2],
   ]
 
-  init(theme: Binding<SpaceTheme>, original: SpaceTheme) {
+  init(theme: Binding<SpaceTheme>, original: SpaceTheme, isEditing: Bool) {
     _theme = theme
     self.original = original
+    self.isEditing = isEditing
     _handles = State(initialValue: theme.wrappedValue.colors.map(Self.handle))
   }
 
@@ -56,7 +66,9 @@ struct ThemePicker: View {
           // Shot 33: 23.5 pt swatches at a 29.5 pt pitch.
           Circle().fill(Color(hex: swatch)).frame(width: 23.5, height: 23.5).frame(width: 29.5)
             .onTapGesture {
-              handles = [Self.handle(swatch)] + handles.dropFirst()
+              var handle = Self.handle(swatch)
+              handle.lightness = mode.lightness ?? handle.lightness
+              withAnimation(Motion.layout) { handles = [handle] + handles.dropFirst() }
               tick()
               update()
             }
@@ -68,46 +80,63 @@ struct ThemePicker: View {
         GrainDial(value: $theme.grain, isEnabled: !handles.isEmpty)
       }
       .padding(.leading, 10)
-      HStack {
-        Button("Reset to original colors") {
-          theme = original
-          handles = original.colors.map(Self.handle)
-          mode = .free
-          tick()
-        }
-        .disabled(theme == original)
-        Spacer()
-        Menu("Advanced color controls") {
-          Button("Invert Lightness") {
-            for index in handles.indices { handles[index].lightness = 1 - handles[index].lightness }
-            mode = .free
-            tick()
-            update()
-          }
-          Button("Original Saturation") {
-            let originals = original.colors.map(Self.handle)
-            for index in handles.indices where originals.indices.contains(index) {
-              let angle = atan2(handles[index].offset.y, handles[index].offset.x)
-              let saturation = hypot(originals[index].offset.x, originals[index].offset.y)
-              handles[index].offset = CGPoint(x: cos(angle) * saturation, y: sin(angle) * saturation)
+      if isEditing {
+        HStack {
+          Button("Reset to original colors") {
+            theme = original
+            withAnimation(Motion.layout) {
+              handles = original.colors.map(Self.handle)
+              mode = .free
             }
             tick()
-            update()
           }
-          .disabled(original.colors.isEmpty)
+          .disabled(theme == original)
+          Spacer()
+          Menu("Advanced color controls") {
+            Button("Invert Lightness") {
+              withAnimation(Motion.layout) {
+                for index in handles.indices { handles[index].lightness = 1 - handles[index].lightness }
+                mode = .free
+              }
+              tick()
+              update()
+            }
+            Button("Original Saturation") {
+              let originals = original.colors.map(Self.handle)
+              withAnimation(Motion.layout) {
+                for index in handles.indices where originals.indices.contains(index) {
+                  let angle = atan2(handles[index].offset.y, handles[index].offset.x)
+                  let saturation = hypot(originals[index].offset.x, originals[index].offset.y)
+                  handles[index].offset = CGPoint(x: cos(angle) * saturation, y: sin(angle) * saturation)
+                }
+              }
+              tick()
+              update()
+            }
+            .disabled(original.colors.isEmpty)
+          }
+          .fixedSize()
+          .disabled(handles.isEmpty)
         }
-        .fixedSize()
-        .disabled(handles.isEmpty)
+        .font(.system(size: 12))
+        .controlSize(.small)
+        .padding(.horizontal, 10)
       }
-      .font(.system(size: 12))
-      .controlSize(.small)
-      .padding(.horizontal, 10)
     }
     .padding(7)
     .frame(width: 354, height: 506, alignment: .top)
-    // Its controls are white, so it brings its own dark surface: a popover shows the page through it.
-    .background(Color(hex: 0x141517).ignoresSafeArea())
+    .presentationBackground(panel)
     .environment(\.colorScheme, .dark)
+  }
+
+  // Shots 33 to 35: the panel is #2A2838 with no color, else the colors' average at half its brightness, which is
+  // within 2 of the shots (#7FB8D6 gives #3F5C6B, measured #3F5A6B; #7FB8D6 and #D69C7E give #555555, measured #555557).
+  private var panel: Color {
+    if theme.colors.isEmpty { return Color(hex: 0x2A2838) }
+    let channels = [16, 8, 0].map { (shift: UInt32) in
+      theme.colors.map { Double($0 >> shift & 0xFF) }.reduce(0, +) / Double(theme.colors.count) / 255 / 2
+    }
+    return Color(red: channels[0], green: channels[1], blue: channels[2])
   }
 
   // The trackpad ticks as colors change.
@@ -126,35 +155,53 @@ struct ThemePicker: View {
         }
       }
       .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
-      .gesture(SpatialTapGesture().onEnded {
-        guard handles.isEmpty else { return }
-        handles = [Handle(offset: .zero, lightness: mode.lightness ?? 0.65)]
-        move(0, to: $0.location)
+      // A click on the canvas places the first color there, or moves the main one there, as the system color wheel does.
+      .gesture(SpatialTapGesture().onEnded { tap in
+        withAnimation(Motion.layout) {
+          if handles.isEmpty { handles = [Handle(offset: .zero, lightness: 0.65)] }
+          handles[0].lightness = mode.lightness ?? handles[0].lightness
+          place(0, at: tap.location)
+        }
+        update()
       })
       if handles.isEmpty {
         Text("Tap to pick a color for this space").font(.system(size: 13, weight: .semibold)).allowsHitTesting(false)
       }
       ForEach(handles.indices, id: \.self) { index in
+        let point = Self.point(handles[index])
         Circle()
           .fill(Color(hex: Self.hex(handles[index])))
           .frame(width: index == 0 ? 44 : 26, height: index == 0 ? 44 : 26)
           .overlay(Circle().strokeBorder(.white, lineWidth: index == 0 ? 4 : 3))
           .shadow(color: .black.opacity(0.3), radius: 3)
-          .position(
-            x: Self.size / 2 + handles[index].offset.x * Self.radius,
-            y: Self.size / 2 + handles[index].offset.y * Self.radius)
-          .gesture(DragGesture().onChanged { move(index, to: $0.location) })
+          .position(point)
+          .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+            let grab =
+              grab.flatMap { $0.start == drag.startLocation ? $0 : nil }
+              ?? Grab(
+                start: drag.startLocation,
+                offset: CGSize(width: point.x - drag.startLocation.x, height: point.y - drag.startLocation.y))
+            self.grab = grab
+            place(index, at: CGPoint(x: drag.location.x + grab.offset.width, y: drag.location.y + grab.offset.height))
+            update()
+          })
+          // A color added or removed grows in from, or shrinks out to, 60% where it sits.
+          .transition(
+            .scale(scale: 0.6, anchor: UnitPoint(x: point.x / Self.size, y: point.y / Self.size))
+              .combined(with: .opacity))
       }
       VStack {
         // Shot 33: the mode buttons 40 pt apart, their row 24 pt under the canvas's top; minus and plus 16 pt above its bottom.
         HStack(spacing: 8) {
           ForEach(Mode.allCases, id: \.self) { item in
             button(item.rawValue, isSelected: mode == item) {
-              mode = item
-              tick()
-              if let lightness = item.lightness {
-                for index in handles.indices { handles[index].lightness = lightness }
+              withAnimation(Motion.layout) {
+                mode = item
+                if let lightness = item.lightness {
+                  for index in handles.indices { handles[index].lightness = lightness }
+                }
               }
+              tick()
               update()
             }
           }
@@ -162,19 +209,23 @@ struct ThemePicker: View {
         Spacer()
         HStack(spacing: 8) {
           button("minus", isSelected: false) {
-            handles.removeLast()
+            withAnimation(Motion.layout) { _ = handles.removeLast() }
             tick()
             update()
           }
           .disabled(handles.isEmpty)
-          // Up to three colors, each a third of a turn from the last.
+          // Up to three colors spaced evenly round the first at its distance: the second opposite it, as in shot 35.
           button("plus", isSelected: false) {
-            let turn = 2 * Double.pi / 3
-            let last = handles.last!.offset
-            handles.append(
-              Handle(
-                offset: CGPoint(x: last.x * cos(turn) - last.y * sin(turn), y: last.x * sin(turn) + last.y * cos(turn)),
-                lightness: handles.last!.lightness))
+            let turn = 2 * Double.pi / Double(handles.count + 1)
+            withAnimation(Motion.layout) {
+              handles.append(Handle(offset: .zero, lightness: handles.last!.lightness))
+              let first = handles[0].offset
+              for index in handles.indices.dropFirst() {
+                let angle = turn * Double(index)
+                handles[index].offset = CGPoint(
+                  x: first.x * cos(angle) - first.y * sin(angle), y: first.x * sin(angle) + first.y * cos(angle))
+              }
+            }
             tick()
             update()
           }
@@ -213,12 +264,15 @@ struct ThemePicker: View {
     .buttonStyle(.plain)
   }
 
-  private func move(_ index: Int, to location: CGPoint) {
+  private func place(_ index: Int, at location: CGPoint) {
     let x = (location.x - Self.size / 2) / Self.radius
     let y = (location.y - Self.size / 2) / Self.radius
     let scale = max(hypot(x, y), 1)
     handles[index].offset = CGPoint(x: x / scale, y: y / scale)
-    update()
+  }
+
+  private static func point(_ handle: Handle) -> CGPoint {
+    CGPoint(x: size / 2 + handle.offset.x * radius, y: size / 2 + handle.offset.y * radius)
   }
 
   private func update() {

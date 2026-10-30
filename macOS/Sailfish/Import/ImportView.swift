@@ -42,7 +42,7 @@ struct ImportView: View {
             if let name = Binding($store.spaceName) {
               TextField("Space name", text: name)
             }
-            ThemePicker(theme: $theme, original: SpaceTheme())
+            ThemePicker(theme: $theme, original: SpaceTheme(), isEditing: false)
           }
         } buttons: {
           ImportDialogButton(title: "Not Now") { store.send(.nextTapped) }.keyboardShortcut(.cancelAction)
