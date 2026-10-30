@@ -105,6 +105,9 @@ struct ThemePicker: View {
     }
     .padding(7)
     .frame(width: 354, height: 506, alignment: .top)
+    // Its controls are white, so it brings its own dark surface: a popover shows the page through it.
+    .background(Color(hex: 0x141517).ignoresSafeArea())
+    .environment(\.colorScheme, .dark)
   }
 
   // The trackpad ticks as colors change.
