@@ -78,6 +78,19 @@ struct WindowView: View {
     .overlay {
       DownloadThrowLayer(canThrow: (!isFloating || store.sidebar.isPeeking) && !store.isLibraryOpen)
     }
+    // Over all of the window, which it dims and keeps from clicks.
+    .overlay {
+      if store.isConfirmingQuit {
+        ZStack {
+          Color.black.opacity(0.45)
+          QuitDialog { store.send(.confirmQuit(false)) }
+            .shadow(color: .black.opacity(0.4), radius: 20, y: 8)
+            .environment(\.colorScheme, .dark)
+        }
+        .transition(.opacity)
+      }
+    }
+    .animation(Motion.fade, value: store.isConfirmingQuit)
     .coordinateSpace(.named(DownloadThrows.space))
     .environment(downloadThrows)
     .ignoresSafeArea()

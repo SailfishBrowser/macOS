@@ -1,4 +1,5 @@
 import AppKit
+import ComposableArchitecture
 import SwiftUI
 
 private final class ModalPanel: NSPanel {
@@ -30,13 +31,15 @@ func presentModal<V: View>(over window: NSWindow, content: (_ dismiss: @escaping
   panel.makeKey()
 }
 
-// The modal: a navy rounded panel with "Cancel ESC" and an accent confirm button with a ↩ keycap.
+// The modal: a navy rounded panel with "Cancel ESC" and an accent confirm button with a ↩ keycap, and an optional
+// third button at the leading edge.
 struct ConfirmModal<Content: View>: View {
   let confirm: String
   var cancel = "Cancel"
   // The accent, or red for a destructive action.
   var confirmFill = Theme.accent
   var confirmKeycap = Color.white.opacity(0.2)
+  var alternate: (title: String, action: () -> Void)?
   let isValid: Bool
   let onConfirm: () -> Void
   let onCancel: () -> Void
@@ -46,7 +49,10 @@ struct ConfirmModal<Content: View>: View {
     VStack(alignment: .leading, spacing: 0) {
       content
       HStack(spacing: 8) {
-        Spacer()
+        if let alternate {
+          button(alternate.title, key: nil, fill: Color(hex: 0x302F60), keycap: .clear, action: alternate.action)
+        }
+        Spacer(minLength: 0)
         button(cancel, key: "ESC", fill: Color(hex: 0x302F60), keycap: Color(hex: 0x494772), action: onCancel)
           .keyboardShortcut(.cancelAction)
         button(confirm, key: "↩", fill: confirmFill, keycap: confirmKeycap, action: onConfirm)
@@ -62,17 +68,20 @@ struct ConfirmModal<Content: View>: View {
     .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.1)))
   }
 
-  private func button(_ title: String, key: String, fill: Color, keycap: Color, action: @escaping () -> Void) -> some View {
+  private func button(_ title: String, key: String?, fill: Color, keycap: Color, action: @escaping () -> Void) -> some View {
     Button(action: action) {
       HStack(spacing: 10) {
         // Shots 40 and 78: 13 pt regular ("Cancel" 41 pt, "Delete" 39 pt) on a 38 pt button.
         Text(title).font(.system(size: 13))
-        Text(key).font(.system(size: 10, weight: .bold)).padding(.horizontal, 6).frame(height: 20)
-          .background(keycap, in: RoundedRectangle(cornerRadius: 4))
+        if let key {
+          Text(key).font(.system(size: 10, weight: .bold)).padding(.horizontal, 6).frame(height: 20)
+            .background(keycap, in: RoundedRectangle(cornerRadius: 4))
+        }
       }
+      .fixedSize()
       .foregroundStyle(.white)
       .padding(.leading, 14)
-      .padding(.trailing, 8)
+      .padding(.trailing, key == nil ? 14 : 8)
       .frame(height: 38)
       .background(fill, in: RoundedRectangle(cornerRadius: 6))
       .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.white.opacity(0.15)))
@@ -376,6 +385,32 @@ struct DeleteSpaceDialog: View {
       // Shot 40: 17 pt bold, 256 pt for “Clone Ref”.
       Text("Delete your “\(name)” Space?").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
       Text("This will archive all the tabs and folders inside it.").font(.system(size: 14)).padding(.top, 14)
+    }
+    .frame(width: 450)
+  }
+}
+
+// Arc's "Quit Arc?": Return or a second quit quits, Esc cancels, and the leading button turns the warning off first.
+struct QuitDialog: View {
+  let cancel: () -> Void
+  @Shared(.warnBeforeQuitting) private var warnBeforeQuitting
+
+  var body: some View {
+    ConfirmModal(
+      confirm: "Quit",
+      alternate: (
+        "Quit, and don't ask again",
+        {
+          $warnBeforeQuitting.withLock { $0 = false }
+          NSApp.terminate(nil)
+        }
+      ),
+      isValid: true,
+      onConfirm: { NSApp.terminate(nil) },
+      onCancel: cancel
+    ) {
+      Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56).padding(.bottom, 14)
+      Text("Quit Sailfish?").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
     }
     .frame(width: 450)
   }

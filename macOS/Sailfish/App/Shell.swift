@@ -17,7 +17,7 @@ final class Shell: NSObject, NSMenuDelegate {
   private var extensionWindowsToken: ObserveToken?
   // What each space's extension window was last synced from, so unchanged spaces skip the sync.
   var extensionWindowKeys: [Space.ID: ExtensionWindowKey] = [:]
-  private lazy var quitWarning = QuitWarning(store: store)
+  private lazy var quitWarning = QuitWarning(store: store) { [weak self] in self?.controllers[$0]?.showWindow(nil) }
   #if !DEBUG
     // Created at launch, as nothing may touch NSApp before ChromeMain.
     private(set) lazy var updater = Updater { [weak self] in

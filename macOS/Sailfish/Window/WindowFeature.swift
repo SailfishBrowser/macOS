@@ -31,6 +31,8 @@ struct WindowFeature {
     var undoStack: [Undo] = []
     // The toast showing, if any: one at a time.
     var toast: Toast?
+    // "Quit Sailfish?" over this window, while "Warn before quitting" asks.
+    var isConfirmingQuit = false
     // The zoom percent shown over the page after a zoom step, until it fades.
     var zoomIndicator: Int?
     // The tab a New Split command bar puts its page beside.
@@ -192,11 +194,10 @@ struct WindowFeature {
     case toggleExpandedPane
     // Clear Archive: empties the archive, which no undo brings back.
     case clearArchive
-    // Shows a toast, replacing any showing; it goes after its duration unless another replaces it first.
-    case showToast(
-      String, Toast.Action? = nil, tap: Toast.Action? = nil, placement: Toast.Placement = .bottom,
-      duration: Duration = Toast.duration)
+    // Shows a toast, replacing any showing; it goes after Toast.duration unless another replaces it first.
+    case showToast(String, Toast.Action? = nil, tap: Toast.Action? = nil, placement: Toast.Placement = .bottom)
     case dismissToast(Toast.ID)
+    case confirmQuit(Bool)
     case toastAction(Toast.Action)
     // View > Zoom In / Zoom Out / Zoom to Actual Size on the selected tab's page, then the percent indicator.
     case zoom(ZoomStep)
@@ -508,7 +509,7 @@ struct WindowFeature {
         guard let space = state.spaces.spaces[id: id], let placement = space.tabs[id: tab]?.placement else { return .none }
         return .send(.showToast(placement == .pinned ? "Pinned Tab to \(space.name)" : "Un-Pinned Tab from \(space.name)"))
 
-      case let .showToast(message, action, tap, placement, duration):
+      case let .showToast(message, action, tap, placement):
         let replaced = state.toast
         let toast = Toast(
           id: uuid(), message: message, action: action, tap: tap, placement: placement,
@@ -517,7 +518,7 @@ struct WindowFeature {
         return .merge(
           dropLogin(of: replaced),
           .run { send in
-            try await clock.sleep(for: duration)
+            try await clock.sleep(for: Toast.duration)
             await send(.dismissToast(toast.id), animation: Motion.layout)
           }
           .cancellable(id: ToastDismissal(window: state.id), cancelInFlight: true))
@@ -654,6 +655,10 @@ struct WindowFeature {
         let restored = Tab(
           id: tab, url: archived.url, title: archived.title, placement: .unpinned, createdAt: now, lastActiveAt: now)
         return .send(.tab(.restore([ClosedTab(tab: restored, index: 0, wasShown: true)]), in: state.spaces.selectedID))
+
+      case let .confirmQuit(isShown):
+        state.isConfirmingQuit = isShown
+        return .none
 
       case .toggleExpandedPane:
         let selected = state.spaces.selected.selectedTabID
