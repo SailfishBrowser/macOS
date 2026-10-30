@@ -205,8 +205,21 @@ extension Engine {
     }
   }
 
-  func reload(_ tab: UUID) async {
-    page(tab)?.reload()
+  // A Chromium page on a site the table opens in WebKit reloads there, unless the tab's choice keeps it.
+  func reload(_ tab: UUID, bypassingCache: Bool = false) async {
+    guard let record = shownRecord(tab), let page = page(tab) else { return }
+    @Shared(.siteEngines) var siteEngines
+    let engine = page.url.map {
+      pageEngine(for: $0, from: record.engine, choice: choices[tab], cause: .reload, siteEngines)
+    }
+    if let engine, engine != record.engine {
+      return await reopen(tab, in: engine)
+    }
+    if bypassingCache {
+      page.reloadBypassingCache()
+    } else {
+      page.reload()
+    }
   }
 
   func stop(_ tab: UUID) async {

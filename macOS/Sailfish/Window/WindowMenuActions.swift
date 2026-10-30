@@ -107,7 +107,8 @@ extension WindowController: NSMenuItemValidation {
   }
 
   @objc func reloadBypassingCache(_ sender: Any?) {
-    space.selectedTabID.flatMap { Engine.shared.page($0) }?.reloadBypassingCache()
+    guard let tab = space.selectedTabID else { return }
+    Task { await Engine.shared.reload(tab, bypassingCache: true) }
   }
 
   @objc func newSplit(_ sender: Any?) {
