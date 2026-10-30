@@ -7,9 +7,10 @@
 #     "Developer ID Application" identity; with none the app is signed ad-hoc without the hardened runtime (for
 #     this Mac; elsewhere Gatekeeper blocks it until the quarantine attribute is removed).
 #   Notarization credentials, the first set given; with none the app and DMG are not notarized:
-#   NOTARY_PROFILE: a notarytool keychain profile, in NOTARY_KEYCHAIN (empty means the login keychain).
+#   NOTARY_PROFILE: a notarytool keychain profile, in NOTARY_KEYCHAIN (empty means the login keychain). An Apple ID
+#     and its app-specific password are saved in one by `xcrun notarytool store-credentials <profile>`, which prompts
+#     for the password; notarytool otherwise takes it only on the command line, where ps shows it.
 #   NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER: an App Store Connect API key's .p8 file, its ID and its issuer ID.
-#   NOTARY_APPLE_ID, NOTARY_PASSWORD, NOTARY_TEAM_ID: an Apple ID, an app-specific password for it and the team ID.
 #   PROVISIONING_PROFILE: a Developer ID provisioning profile carrying the passkey entitlement
 #     (com.apple.developer.web-browser.public-key-credential); it is embedded in the app and the app is signed with
 #     scripts/entitlements/app-passkeys.plist. Empty signs with app.plist and no profile, so passkeys stay off.
@@ -29,7 +30,6 @@ SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 NOTARY_KEYCHAIN="${NOTARY_KEYCHAIN:-}"
 NOTARY_KEY="${NOTARY_KEY:-}"
-NOTARY_APPLE_ID="${NOTARY_APPLE_ID:-}"
 IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: .*\)"$/\1/p' | head -1)}"
 
 cd "$ROOT"
@@ -85,8 +85,6 @@ if [ -n "$NOTARY_PROFILE" ]; then
   notary() { xcrun notarytool "$@" --keychain-profile "$NOTARY_PROFILE" ${NOTARY_KEYCHAIN:+--keychain "$NOTARY_KEYCHAIN"}; }
 elif [ -n "$NOTARY_KEY" ]; then
   notary() { xcrun notarytool "$@" --key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER"; }
-elif [ -n "$NOTARY_APPLE_ID" ]; then
-  notary() { xcrun notarytool "$@" --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM_ID"; }
 fi
 
 # dmgbuild writes the install window's layout (scripts/dmg/dmg.json) into the DMG's .DS_Store, without Finder.
