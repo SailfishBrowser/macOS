@@ -960,7 +960,7 @@ struct SidebarView: View {
         // A closed row goes in one frame and the rows below close up; only a just opened or restored
         // one fades in.
         .transition(.asymmetric(insertion: space.arrivals.contains(tab.id) ? .opacity : .identity, removal: .identity))
-        // The row moves as one piece, so a subtitle a pin adds travels with it rather than appearing in the new slot.
+        // The row moves as one piece when a pin or unpin moves it.
         .geometryGroup()
         // The selected row passes over the others when a pin or unpin moves it.
         .zIndex(tab.id == space.selectedTabID ? 1 : 0)
@@ -2447,7 +2447,7 @@ private struct TabRow: View {
     if isIconHovered { return "Back to Pinned URL" }
     // Developer mode adds the host.
     if tab.url.isDeveloperPage { return tab.url.developerSubtitle }
-    return isSelected && tab.pinnedURL != nil ? "Double-click to rename" : nil
+    return nil
   }
 
   private var icon: some View {
