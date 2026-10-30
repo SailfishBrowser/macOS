@@ -56,10 +56,11 @@ struct WindowFeature {
       let selected = spaces.selected
       let others = isIncognito ? [] : spaces.spaces.filter { $0.id != spaces.selectedID }
       // A favorite the selected space shares is listed once, as its own.
-      let elsewhere = others.flatMap { space in space.tabs.filter { selected.tabs[id: $0.id] == nil }.map { ($0, space.name) } }
+      let shown = selected.tabs
+      let elsewhere = others.flatMap { space in space.tabs.filter { shown[id: $0.id] == nil }.map { ($0, space.name) } }
       var listed: Set<Tab.ID> = []
       return CommandBarFeature.State(
-        tabs: (selected.tabs.elements + elsewhere.map(\.0)).filter { $0.id != selected.selectedTabID && listed.insert($0.id).inserted }
+        tabs: (shown.elements + elsewhere.map(\.0)).filter { $0.id != selected.selectedTabID && listed.insert($0.id).inserted }
           .sorted { $0.lastActiveAt > $1.lastActiveAt },
         profile: selected.profileID,
         spaceNames: Dictionary(elsewhere.map { ($0.id, $1) }) { $1 },
