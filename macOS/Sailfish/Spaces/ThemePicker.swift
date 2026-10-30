@@ -9,6 +9,7 @@ struct ThemePicker: View {
   @State private var handles: [Handle]
   @State private var mode = Mode.free
   @State private var page = 0
+  @State private var grab: Grab?
   // The theme as the editor opened, for Reset to original colors and Original Saturation.
   private let original: SpaceTheme
 
@@ -29,6 +30,12 @@ struct ThemePicker: View {
   struct Handle {
     var offset: CGPoint
     var lightness: Double
+  }
+
+  // Where a drag began, and the handle's center less that point, so the handle keeps its place under the pointer.
+  struct Grab {
+    var start: CGPoint
+    var offset: CGSize
   }
 
   private static let size: CGFloat = 340
@@ -148,8 +155,14 @@ struct ThemePicker: View {
           .overlay(Circle().strokeBorder(.white, lineWidth: index == 0 ? 4 : 3))
           .shadow(color: .black.opacity(0.3), radius: 3)
           .position(point)
-          .gesture(DragGesture().onChanged {
-            place(index, at: $0.location)
+          .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+            let grab =
+              grab.flatMap { $0.start == drag.startLocation ? $0 : nil }
+              ?? Grab(
+                start: drag.startLocation,
+                offset: CGSize(width: point.x - drag.startLocation.x, height: point.y - drag.startLocation.y))
+            self.grab = grab
+            place(index, at: CGPoint(x: drag.location.x + grab.offset.width, y: drag.location.y + grab.offset.height))
             update()
           })
           // A color added or removed grows in from, or shrinks out to, 60% where it sits.
