@@ -163,7 +163,7 @@ struct AppFeature {
     case windows(IdentifiedActionOf<WindowFeature>)
   }
 
-  enum CancelID { case save }
+  enum CancelID { case save, macTabs }
 
   // Shared with the quit save, so that every write goes through its lock. Cancelling the in-flight save is
   // only the debounce: cancellable registers inside the effect body, so a save that starts late can cancel a
@@ -175,6 +175,7 @@ struct AppFeature {
 
   @Dependency(\.continuousClock) var clock
   @Dependency(\.date.now) var now
+  @Dependency(\.macTabs) var macTabs
   @Dependency(\.persistence) var persistence
   @Dependency(\.requestMediaFolders) var requestMediaFolders
   @Dependency(\.uuid) var uuid
@@ -634,6 +635,14 @@ struct AppFeature {
           try sessionWriter.flush()
         }
         .cancellable(id: CancelID.save, cancelInFlight: true)
+      }
+    }
+    // A newer state's update replaces one still resolving icons, so the publisher gets the states in order.
+    .onChange(of: \.macTabs) { _, value in
+      Reduce { _, _ in
+        guard let value else { return .none }
+        return .run { _ in await macTabs.update(value) }
+          .cancellable(id: CancelID.macTabs, cancelInFlight: true)
       }
     }
   }

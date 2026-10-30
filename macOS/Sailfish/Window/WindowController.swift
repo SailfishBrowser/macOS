@@ -104,6 +104,12 @@ final class WindowController: NSWindowController, NSWindowDelegate {
         page.exitFullscreen(resizingView: true)
         return nil
       }
+      // Esc leaves the command bar wherever focus is: the bar's own Esc needs its field to have the keys. Text being
+      // composed keeps its Esc, which cancels the composition.
+      if event.keyCode == 53, let bar = store.commandBar, (window.firstResponder as? NSTextView)?.hasMarkedText() != true {
+        store.send(bar.keyword != nil || bar.isActions ? .commandBar(.presented(.leaveKeyword)) : .commandBar(.dismiss))
+        return nil
+      }
       if event.keyCode == 53, store.peek != nil {
         // Sent after the key event, whose handling would skip Peek's closing animation.
         DispatchQueue.main.async { self.store.send(.closePeek) }

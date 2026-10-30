@@ -133,6 +133,8 @@ struct WindowView: View {
         .background { covering(background, window: size, at: x) }
         .offset(x: x)
         .allowsHitTesting(shown > 0)
+        // Off the window it would still take focus, and its search field then gets what is typed for the command bar.
+        .disabled(shown == 0)
     }
   }
 
