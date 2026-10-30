@@ -40,8 +40,6 @@ func makeSettingsWindow(
   window.toolbarStyle = .preference
   window.title = panes[0].0
   window.isReleasedWhenClosed = false
-  window.appearance = NSAppearance(named: .darkAqua)
-  window.backgroundColor = NSColor(Color(hex: 0x292C32))
   window.center()
   return window
 }
@@ -105,9 +103,9 @@ struct SettingsToggle: View {
 }
 
 extension View {
-  // The settings cards: darker than the window, with a hairline border.
+  // The settings cards: a faint tint of the window, with a hairline border, in either appearance.
   func settingsCard() -> some View {
-    background(Color(hex: 0x2C2F34), in: RoundedRectangle(cornerRadius: 6))
-      .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.white.opacity(0.08)))
+    background(Color.primary.opacity(0.015), in: RoundedRectangle(cornerRadius: 6))
+      .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
   }
 }

@@ -33,9 +33,6 @@ struct LinksPane: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 24) {
         LittleSailfishBanner()
-        Text("Little Sailfish is a small window for a quick look at a link, without adding a tab to your sidebar.")
-          .font(.system(size: 13))
-          .padding(.horizontal, 74)
         VStack(spacing: 0) {
           SettingsToggle("Open Little Sailfish when I press ⌥⌘N in any app", isOn: $littleSailfishHotKey)
           Divider().padding(.horizontal, 10)
@@ -48,35 +45,17 @@ struct LinksPane: View {
         .settingsCard()
         .padding(.horizontal, 64)
         Divider().padding(.horizontal, 64)
-        Text("Peek is a way to preview a link without opening a new tab. It’s perfect for quickly looking at a link from an email, news article, or tweet.")
-          .font(.system(size: 13))
-          .padding(.horizontal, 74)
         VStack(spacing: 0) {
           SettingsToggle("Open a Peek window when clicking on links with Shift held", isOn: $peeksOnShiftClick)
           Divider().padding(.horizontal, 10)
-          HStack {
-            VStack(alignment: .leading, spacing: 2) {
-              Text("Open a Peek window when clicking on links to other sites")
-              Text("Note: This only affects Favorites and Pinned tabs").italic().foregroundStyle(.secondary)
-            }
-            .font(.system(size: 13))
-            Spacer()
-            Toggle("", isOn: Binding($peeksLinksToOtherSites)).toggleStyle(.switch).controlSize(.mini).labelsHidden()
-          }
-          .padding(10)
+          SettingsToggle("Open links to other sites from Favorites and Pinned tabs in Peek", isOn: $peeksLinksToOtherSites)
         }
         .settingsCard()
         .padding(.horizontal, 64)
         Divider().padding(.horizontal, 64)
-        HStack(spacing: 6) {
-          Text("Choose where links open inside Sailfish.").font(.system(size: 13))
-          Image(systemName: "info.circle").foregroundStyle(.secondary)
-            .help("Routes let you choose where specific sites open inside Sailfish. For example, you can route Spotify links to always open inside your Personal space.")
-          Spacer()
-          Button("Space Linking…") { isSpaceLinkingShown = true }
+        SettingsRow("Space Linking") {
+          Button("Edit…") { isSpaceLinkingShown = true }
         }
-        .padding(.horizontal, 10)
-        .frame(minHeight: 36)
         .settingsCard()
         .padding(.horizontal, 64)
         VStack(spacing: 0) {
