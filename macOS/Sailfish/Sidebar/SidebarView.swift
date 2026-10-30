@@ -2974,10 +2974,7 @@ private struct EditPinnedURLDialog: View {
       onCancel: dismiss
     ) {
       Text("Edit Pinned URL").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
-      Text("This is what opens first when you click this tab or its favicon.")
-        .font(.system(size: 13)).foregroundStyle(.white.opacity(0.7))
-        .padding(.top, 6)
-      ModalField(placeholder: "https://", text: $url).padding(.top, 16)
+      ModalField(placeholder: "https://", text: $url).padding(.top, 20)
     }
     .frame(width: 450)
   }

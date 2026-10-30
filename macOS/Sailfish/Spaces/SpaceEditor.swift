@@ -57,13 +57,7 @@ struct SpaceEditor: View {
         .task {
           isPickingTheme = opening == .theme
         }
-      // 17 pt semibold and 12 pt: the title's and first line's ink widths are 120 and 149 pt.
-      Text(title).font(.system(size: 17, weight: .semibold)).padding(.top, 8)
-      Text("Separate your tabs for life,\nwork, projects, and more.")
-        .font(.system(size: 12))
-        .multilineTextAlignment(.center)
-        .padding(.top, 3)
-        .padding(.bottom, 24)
+      Text(title).font(.system(size: 17, weight: .semibold)).padding(.top, 8).padding(.bottom, 16)
       row(fill: Theme.field) {
         Button { isPickingIcon.toggle() } label: {
           Group {
@@ -194,11 +188,6 @@ private struct NewProfileDialog: View {
       onCancel: dismiss
     ) {
       Text("Create a new Profile").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
-      Text(
-        "Profiles make your Spaces truly separate — with their own history, saved passwords, extensions, "
-          + "and other browsing data. No more flipping between work and personal accounts!"
-      )
-      .font(.system(size: 14)).padding(.top, 12)
       ModalField(placeholder: "Profile name", text: $name).padding(.top, 20)
     }
     .frame(width: 450)
