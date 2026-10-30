@@ -26,9 +26,7 @@ struct LibraryView: View {
       case .media:
         column(placeholder: "Search Media...", hasFilter: false) {
           if mediaItems(query: "").isEmpty {
-            empty(
-              "photo.on.rectangle", "Nothing here yet!",
-              "Save media to your Documents, Desktop, and Download Folders to see them here, alongside your Captures in Sailfish.")
+            empty("photo.on.rectangle", "No Media")
           } else {
             mediaGrid
           }
@@ -49,7 +47,7 @@ struct LibraryView: View {
       case .archive:
         column(placeholder: "Search Archive...", hasFilter: true) {
           if archive.isEmpty {
-            empty("archivebox", "Nothing here yet!", "Hover your mouse over a tab and press the × to archive it.")
+            empty("archivebox", "No Archived Tabs")
           } else {
             archiveList
           }
@@ -213,12 +211,11 @@ struct LibraryView: View {
     .scrollIndicators(.never)
   }
 
-  private func empty(_ symbol: String, _ title: String, _ message: String) -> some View {
+  private func empty(_ symbol: String, _ title: String) -> some View {
     VStack(spacing: 10) {
       Spacer()
       Image(systemName: symbol).font(.system(size: 36)).foregroundStyle(.secondary)
       Text(title).font(.system(size: 17, weight: .semibold))
-      Text(message).font(.system(size: 14)).foregroundStyle(.secondary).multilineTextAlignment(.center)
       Spacer()
     }
     .padding(.horizontal, 16)
