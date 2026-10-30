@@ -214,8 +214,8 @@ actor MacTabsPublisher {
       }
       let device = CKRecord(recordType: "Device", recordID: recordID(deviceID))
       device.encryptedValues["name"] = deviceName
-      device.encryptedValues["spaces"] = names
-      device.encryptedValues["current"] = value.current.map(recordName)
+      device["spaces"] = names
+      device["current"] = value.current.map(recordName)
       let deletions = owned.subtracting(names)
 
       // Space saves first, within CloudKit's request limits; the Device record and the deletions go last, so a
@@ -279,7 +279,7 @@ actor MacTabsPublisher {
     let listed: [String]
     do {
       // CloudKit drops an empty list, so a Device record without one lists none.
-      listed = try await database.record(for: recordID(deviceID)).encryptedValues["spaces"] ?? []
+      listed = try await database.record(for: recordID(deviceID))["spaces"] ?? []
     } catch let error as CKError where error.code == .unknownItem {
       listed = []
     }
