@@ -63,7 +63,9 @@ struct ThemePicker: View {
           // Shot 33: 23.5 pt swatches at a 29.5 pt pitch.
           Circle().fill(Color(hex: swatch)).frame(width: 23.5, height: 23.5).frame(width: 29.5)
             .onTapGesture {
-              withAnimation(Motion.layout) { handles = [Self.handle(swatch)] + handles.dropFirst() }
+              var handle = Self.handle(swatch)
+              handle.lightness = mode.lightness ?? handle.lightness
+              withAnimation(Motion.layout) { handles = [handle] + handles.dropFirst() }
               tick()
               update()
             }
@@ -139,7 +141,8 @@ struct ThemePicker: View {
       // A click on the canvas places the first color there, or moves the main one there, as the system color wheel does.
       .gesture(SpatialTapGesture().onEnded { tap in
         withAnimation(Motion.layout) {
-          if handles.isEmpty { handles = [Handle(offset: .zero, lightness: mode.lightness ?? 0.65)] }
+          if handles.isEmpty { handles = [Handle(offset: .zero, lightness: 0.65)] }
+          handles[0].lightness = mode.lightness ?? handles[0].lightness
           place(0, at: tap.location)
         }
         update()
