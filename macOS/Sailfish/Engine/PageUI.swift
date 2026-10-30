@@ -198,8 +198,10 @@ extension Engine {
     #selector(WindowController.previousSpace(_:)), #selector(WindowController.selectSpace(_:)),
   ]
 
+  // The engine also offers modifier-only presses (flagsChanged), which have no characters to match.
   func webContents(_ contents: ECWebContents, reservesKeyEquivalent event: NSEvent) -> Bool {
-    guard let menu = NSApp.mainMenu, let action = MenuShortcuts.item(for: event, in: menu)?.action else { return false }
+    guard event.type == .keyDown, let menu = NSApp.mainMenu, let action = MenuShortcuts.item(for: event, in: menu)?.action
+    else { return false }
     return Self.reservedActions.contains(action)
   }
 
