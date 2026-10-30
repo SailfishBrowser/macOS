@@ -9,6 +9,7 @@ final class Shell: NSObject, NSMenuDelegate {
   private let writer: SnapshotWriter<Snapshot>
   // Restore Data reads the backups and writes the pre-restore one through the same client the writer uses.
   @Dependency(\.persistence) private var persistence
+  @Dependency(\.macTabs) private var macTabs
   let store: StoreOf<AppFeature>
   var controllers: [WindowFeature.State.ID: WindowController] = [:]
   var littleSailfishes: [LittleSailfishFeature.State.ID: LittleSailfishWindowController] = [:]
@@ -92,6 +93,14 @@ final class Shell: NSObject, NSMenuDelegate {
     } catch {
       Logger().error("Saving state on quit failed: \(error)")
     }
+    // The last change to the spaces reaches iCloud, waiting at most two seconds.
+    let macTabs = macTabs
+    let done = DispatchSemaphore(value: 0)
+    Task.detached {
+      await macTabs.flush()
+      done.signal()
+    }
+    _ = done.wait(timeout: .now() + 2)
   }
 
   // From the Dock menu the app may not be frontmost, so the window is brought forward.
