@@ -10,72 +10,67 @@ struct ProfilesPane: View {
   @State private var selection: Profile.ID?
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Text("Profiles keep your history, logins, cookies and extensions apart. Each Space uses one profile, and a profile can serve several Spaces.")
-        .font(.system(size: 13))
-        .frame(width: 546, alignment: .leading)
-      HStack(alignment: .top, spacing: 10) {
-        VStack(alignment: .leading, spacing: 0) {
-          Text("Your Profiles").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-            .padding(.horizontal, 16).frame(height: 28)
-          Divider()
-          // The rows: 40 pt with separators and a subtle highlight for the selected one.
-          ScrollView {
-            VStack(spacing: 0) {
-              ForEach(profiles) { profile in
-                let count = store.state.spaceCount(profile.id)
-                HStack {
-                  Text(profile.name).font(.system(size: 13)).lineLimit(1)
-                  Spacer()
-                  Text(count == 0 ? "Not used" : count == 1 ? "1 Space" : "\(count) Spaces")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 8)
-                .frame(height: 40)
-                .background(selection == profile.id ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 6))
-                .contentShape(Rectangle())
-                .onTapGesture { selection = profile.id }
-                .contextMenu {
-                  Button("Rename Profile…") { rename(profile) }
-                  Button("Delete Profile…") { confirmDelete(profile) }.disabled(!store.state.canDeleteProfile(profile.id))
-                  Divider()
-                  Button("Delete unused Profiles") { store.send(.deleteUnusedProfiles) }.disabled(store.state.unusedProfiles.isEmpty)
-                }
-                Divider().padding(.horizontal, 8)
+    HStack(alignment: .top, spacing: 10) {
+      VStack(alignment: .leading, spacing: 0) {
+        Text("Your Profiles").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+          .padding(.horizontal, 16).frame(height: 28)
+        Divider()
+        // The rows: 40 pt with separators and a subtle highlight for the selected one.
+        ScrollView {
+          VStack(spacing: 0) {
+            ForEach(profiles) { profile in
+              let count = store.state.spaceCount(profile.id)
+              HStack {
+                Text(profile.name).font(.system(size: 13)).lineLimit(1)
+                Spacer()
+                Text(count == 0 ? "Not used" : count == 1 ? "1 Space" : "\(count) Spaces")
+                  .font(.system(size: 11)).foregroundStyle(.secondary)
               }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-          }
-          Divider()
-          HStack(spacing: 0) {
-            footerButton("plus", help: "New Profile") {
-              // Shown over the browser window.
-              let window = NSApp.orderedWindows.first { $0.windowController is WindowController } ?? NSApp.keyWindow!
-              window.makeKeyAndOrderFront(nil)
-              let spaces = store.windows.filter { !$0.isIncognito }.flatMap(\.spaces.spaces)
-              presentModal(over: window) { dismiss in
-                CreateProfileDialog(spaces: spaces, create: { store.send(.createProfile(name: $0, spaces: $1)) }, dismiss: dismiss)
+              .padding(.horizontal, 8)
+              .frame(height: 40)
+              .background(selection == profile.id ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 6))
+              .contentShape(Rectangle())
+              .onTapGesture { selection = profile.id }
+              .contextMenu {
+                Button("Rename Profile…") { rename(profile) }
+                Button("Delete Profile…") { confirmDelete(profile) }.disabled(!store.state.canDeleteProfile(profile.id))
+                Divider()
+                Button("Delete unused Profiles") { store.send(.deleteUnusedProfiles) }.disabled(store.state.unusedProfiles.isEmpty)
               }
+              Divider().padding(.horizontal, 8)
             }
-            Divider().frame(height: 16)
-            footerButton("minus", help: "Delete Profile") { selection.flatMap { profiles[id: $0] }.map(confirmDelete) }
-              .disabled(!(selection.map(store.state.canDeleteProfile) ?? false))
-            Divider().frame(height: 16)
-            footerButton("pencil.line", help: "Rename Profile") { selection.flatMap { profiles[id: $0] }.map(rename) }
-              .disabled(selection == nil)
           }
-          .padding(4)
+          .padding(.horizontal, 12)
+          .padding(.top, 12)
         }
-        .frame(width: 196, height: 420)
-        .settingsCard()
-        if let selection {
-          ProfileSettings(
-            profile: selection, openPage: { openPage($0, selection) },
-            setArchiveAfter: { store.send(.setArchiveAfter(selection, $0)) }
-          )
-          .id(selection)
+        Divider()
+        HStack(spacing: 0) {
+          footerButton("plus", help: "New Profile") {
+            // Shown over the browser window.
+            let window = NSApp.orderedWindows.first { $0.windowController is WindowController } ?? NSApp.keyWindow!
+            window.makeKeyAndOrderFront(nil)
+            let spaces = store.windows.filter { !$0.isIncognito }.flatMap(\.spaces.spaces)
+            presentModal(over: window) { dismiss in
+              CreateProfileDialog(spaces: spaces, create: { store.send(.createProfile(name: $0, spaces: $1)) }, dismiss: dismiss)
+            }
+          }
+          Divider().frame(height: 16)
+          footerButton("minus", help: "Delete Profile") { selection.flatMap { profiles[id: $0] }.map(confirmDelete) }
+            .disabled(!(selection.map(store.state.canDeleteProfile) ?? false))
+          Divider().frame(height: 16)
+          footerButton("pencil.line", help: "Rename Profile") { selection.flatMap { profiles[id: $0] }.map(rename) }
+            .disabled(selection == nil)
         }
+        .padding(4)
+      }
+      .frame(width: 196, height: 420)
+      .settingsCard()
+      if let selection {
+        ProfileSettings(
+          profile: selection, openPage: { openPage($0, selection) },
+          setArchiveAfter: { store.send(.setArchiveAfter(selection, $0)) }
+        )
+        .id(selection)
       }
     }
     .padding(.vertical, 20)

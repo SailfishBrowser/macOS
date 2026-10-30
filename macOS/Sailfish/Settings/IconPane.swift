@@ -31,12 +31,7 @@ struct IconPane: View {
               .frame(width: 22, height: 22)
               .padding(.trailing, 21)
             Image(nsImage: icon.image()).resizable().frame(width: 62, height: 62).padding(.trailing, 8)
-            VStack(alignment: .leading, spacing: 3) {
-              Text(icon.name).font(.system(size: 15, weight: .semibold))
-              if current == icon {
-                Text("CURRENT ICON").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.accentColor)
-              }
-            }
+            Text(icon.name).font(.system(size: 15, weight: .semibold))
             Spacer()
           }
           .frame(height: 81)
