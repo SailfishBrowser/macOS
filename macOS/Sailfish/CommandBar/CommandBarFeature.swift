@@ -191,7 +191,8 @@ struct CommandBarFeature {
       // it with Switch to Tab. A lower match whose page is a listed tab is shown as the tab alone. A page matches a
       // tab regardless of "www.". A command comes first unless the best match is a site the text completes to.
       let verbatim = matches.dropFirst().first { $0.type == .search && $0.contents.lowercased() == query }
-      let tabs = others.filter { tab in tab.matches(query) || matches.contains { $0.url.page == tab.url.page } }.prefix(2)
+      let pages = Set(matches.map(\.url.page))
+      let tabs = others.filter { $0.matches(query) || pages.contains($0.url.page) }.prefix(2)
       let rest = matches.dropFirst().filter { match in match != verbatim && !tabs.contains { $0.url.page == match.url.page } }
       let completes = matches.first.map { $0.type != .search && !$0.inlineAutocompletion.isEmpty } == true
       let lead = completes ? nil : commands.first { !$0.isMinor }
