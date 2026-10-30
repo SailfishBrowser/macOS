@@ -29,7 +29,7 @@ struct TabSwitcher: View {
     VStack(spacing: 10) {
       thumbnail(tab, in: space)
       HStack(spacing: 6) {
-        TabIconView(tab: tab, space: space)
+        TabIcon(tab: tab, space: space)
         Text(tab.displayTitle).font(.system(size: 13, weight: .bold)).lineLimit(1).foregroundStyle(Theme.primaryText)
       }
       .frame(height: 20)
@@ -50,26 +50,12 @@ struct TabSwitcher: View {
       } else {
         // A page not seen since the window opened: its favicon on its space's theme.
         LinearGradient(theme: space.theme).opacity(0.5)
-          .overlay { TabIconView(tab: tab, space: space).scaleEffect(2) }
+          .overlay { TabIcon(tab: tab, space: space).scaleEffect(2) }
       }
     }
     .frame(width: Self.thumbnailSize.width, height: Self.thumbnailSize.height)
     .clipShape(RoundedRectangle(cornerRadius: 6))
     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.switcherRim.opacity(0.6)))
-  }
-}
-
-// A tab's icon or favicon, as the sidebar shows it.
-private struct TabIconView: View {
-  let tab: Tab
-  let space: Space
-
-  var body: some View {
-    if let icon = tab.icon {
-      SpaceIcon(icon: icon, emojiSize: 15)
-    } else {
-      TabFavicon(tab: tab, space: space)
-    }
   }
 }
 

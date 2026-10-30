@@ -21,7 +21,7 @@ command -v dmgbuild >/dev/null || fail "dmgbuild is not on PATH (see package.sh)
 gh auth status >/dev/null 2>&1 || fail "gh is missing or not signed in"
 security find-generic-password -s https://sparkle-project.org -a ed25519 >/dev/null 2>&1 ||
   fail "no Sparkle EdDSA key in the login keychain"
-[ -n "${NOTARY_PROFILE:-}${NOTARY_KEY:-}${NOTARY_APPLE_ID:-}" ] || fail "no notarytool credentials (see package.sh)"
+[ -n "${NOTARY_PROFILE:-}${NOTARY_KEY:-}" ] || fail "no notarytool credentials (see package.sh)"
 ! gh release view "v$VERSION" -R SailfishBrowser/macOS >/dev/null 2>&1 || fail "release v$VERSION exists"
 BUILD="$(sh "$SCRIPTS/next-build.sh")"
 

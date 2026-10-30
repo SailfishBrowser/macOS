@@ -173,7 +173,8 @@ private struct ReaderPage: NSViewRepresentable {
     // The shell's own load is the only navigation the page makes on its own.
     var awaitsShell = false
 
-    // A link opens in the tab; one to a place in the article stays here.
+    // A web link opens in the tab; one to a place in the article stays here. The tab loads a link as the browser's
+    // own navigation, which a page's links never get, so any other scheme, such as file: or chrome:, is dropped.
     func webView(
       _ webView: WKWebView, decidePolicyFor action: WKNavigationAction
     ) async -> WKNavigationActionPolicy {
@@ -184,7 +185,7 @@ private struct ReaderPage: NSViewRepresentable {
         return .allow
       case .linkActivated where url.fragment != nil && webView.url.map(url.isSamePage(as:)) == true:
         return .allow
-      case .linkActivated:
+      case .linkActivated where ["http", "https"].contains(url.scheme):
         open(url)
         return .cancel
       default:

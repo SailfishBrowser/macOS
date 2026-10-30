@@ -125,16 +125,9 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          if [ -n "$ASC_KEY_ID" ]; then
-            echo "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
-            export NOTARY_KEY="$RUNNER_TEMP/notary.p8" NOTARY_KEY_ID="$ASC_KEY_ID" NOTARY_ISSUER="$ASC_ISSUER_ID"
-          else
-            export NOTARY_APPLE_ID="$APPLE_ID" NOTARY_PASSWORD="$APPLE_APP_PASSWORD" NOTARY_TEAM_ID="$APPLE_TEAM_ID"
-          fi
+          echo "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          export NOTARY_KEY="$RUNNER_TEMP/notary.p8" NOTARY_KEY_ID="$ASC_KEY_ID" NOTARY_ISSUER="$ASC_ISSUER_ID"
           sh scripts/package.sh
           rm -f "$RUNNER_TEMP/notary.p8"
           xcrun stapler validate build/Sailfish.dmg

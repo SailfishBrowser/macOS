@@ -8,6 +8,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   nonisolated static let userDataDir = URL.dataDirectory.appending(path: "Engine").path
   nonisolated static let (events, continuation) = AsyncStream.makeStream(of: WebEngineEvent.self)
   private(set) var contexts: [UUID: ECBrowserContext] = [:]
+  @ObservationIgnored private var loads: [UUID: Task<ECBrowserContext, Never>] = [:]
   // Each tab's pages, oldest first, and the index of the one it shows.
   var pageRecords: [UUID: [PageRecord]] = [:]
   var shownPages: [UUID: Int] = [:]
@@ -274,9 +275,10 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     WebKitStores.dropIncognitoStore(profile: profile)
   }
 
-  // Closes the profile's context and pages, then has the engine delete its data and removes its WebKit store and
-  // folder.
+  // Closes the profile's context and pages, after a load in flight has given the context, then has the engine delete
+  // its data and removes its WebKit store and folder.
   func deleteProfile(_ profile: UUID) async {
+    if let load = loads[profile] { _ = await load.value }
     WebKitDownloads.shared.forget(profile: profile)
     if let context = contexts.removeValue(forKey: profile) {
       Autocomplete.forget(context)
@@ -296,16 +298,23 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     }
   }
 
+  // Callers asking while a profile loads await the same load, so each profile gets one context.
   func context(_ profile: UUID) async -> ECBrowserContext {
     if let context = contexts[profile] { return context }
-    let context = await withCheckedContinuation { continuation in
-      ECBrowserContext.load(withPath: Self.userDataDir + "/" + profile.uuidString) {
-        continuation.resume(returning: $0!)
+    if let load = loads[profile] { return await load.value }
+    let load = Task {
+      let context = await withCheckedContinuation { continuation in
+        ECBrowserContext.load(withPath: Self.userDataDir + "/" + profile.uuidString) {
+          continuation.resume(returning: $0!)
+        }
       }
+      contexts[profile] = context
+      loads[profile] = nil
+      applyAdBlocking(context)
+      return context
     }
-    contexts[profile] = context
-    applyAdBlocking(context)
-    return context
+    loads[profile] = load
+    return await load.value
   }
 
   func webContentsDidUpdate(_ contents: ECWebContents) {

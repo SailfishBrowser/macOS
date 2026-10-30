@@ -1817,7 +1817,7 @@ struct SidebarView: View {
       Divider()
     }
     Button("Copy Link") { copy(tab.url) }
-    ShareMenu(url: tab.url)
+    ShareLink("Share", item: tab.url)
     if app == .gmail {
       Divider()
       UnreadBadgeToggle()
@@ -2468,7 +2468,7 @@ private struct TabRow: View {
       if tab.isLoading, tab.icon == nil {
         RoundedRectangle(cornerRadius: 3).fill(Theme.fillHover).frame(width: 14, height: 14)
       } else {
-        TabIcon(tab: tab, space: space)
+        TabIcon(tab: tab, space: space).engineMark(tab)
       }
     }
     .frame(width: 16)
@@ -2477,35 +2477,17 @@ private struct TabRow: View {
   }
 }
 
-// Share ▸: the system's sharing services for the link.
-private struct ShareMenu: View {
-  let url: URL
-
-  var body: some View {
-    Menu("Share") {
-      ForEach(NSSharingService.sharingServices(forItems: [url]), id: \.title) { service in
-        Button { service.perform(withItems: [url]) } label: {
-          Label { Text(service.menuItemTitle) } icon: { Image(nsImage: service.image) }
-        }
-      }
-    }
-  }
-}
-
-// The tab's own icon if it was given one, else its favicon, with the WebKit mark.
-private struct TabIcon: View {
+// The tab's own icon if it was given one, else its favicon.
+struct TabIcon: View {
   let tab: Tab
   let space: Space
 
   var body: some View {
-    Group {
-      if let icon = tab.icon {
-        SpaceIcon(icon: icon, emojiSize: 15)
-      } else {
-        TabFavicon(tab: tab, space: space)
-      }
+    if let icon = tab.icon {
+      SpaceIcon(icon: icon, emojiSize: 15)
+    } else {
+      TabFavicon(tab: tab, space: space)
     }
-    .engineMark(tab)
   }
 }
 
@@ -3057,7 +3039,7 @@ private struct FavoriteTile: View {
   @State private var isHovering = false
 
   var body: some View {
-    TabIcon(tab: tab, space: space)
+    TabIcon(tab: tab, space: space).engineMark(tab)
       .frame(maxWidth: .infinity)
       // The tile is 47 pt tall.
       .frame(height: 47)
