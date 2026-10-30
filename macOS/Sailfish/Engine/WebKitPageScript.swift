@@ -279,17 +279,17 @@ enum WebKitPageScript {
   }
 
   // Find in page, marked as Chromium marks it: every match yellow and the active one orange, through the CSS Custom
-  // Highlight API and a style sheet that stays out of the page's DOM. Matches follow the rendered text of the main
-  // frame: case ignored, accents ignored unless the string has some, whitespace collapsed, and text joined across
-  // inline elements but not across blocks. As in Chromium, a search runs in slices, one per frame of at most 5 ms and
-  // 300 new marks, so it never holds the page past a frame: each slice walks more of the text, then checks and marks
-  // the matches found, the first shown one (or the last, going back) becoming the active one, and the count
-  // is reported as it grows. `scan` walks the text, `cands` are the matches found so far in page order, `next` how far
-  // the marking has come, `ranges` the shown ones among those, `place` each shown one's index in `ranges`, `boxes` each
-  // checked one's visibility and place down the page, `active` the active match's index in `cands`, `seek` the way a
-  // new search looks for its active match, `pending` a step that waits for the walk, `id` the app's latest call, and
-  // `search` counts searches so a slice of an ended one stops.
-  const marks = { text: "", scan: null, cands: [], next: 0, ranges: [], place: [], boxes: [], active: -1, seek: 1, pending: 0, id: 0, search: 0, reported: 0 };
+  // Highlight API and a style sheet that stays out of the page's DOM. Matches follow the rendered text of the main frame:
+  // case ignored, accents ignored unless the string has some, whitespace collapsed, and text joined across inline
+  // elements but not across blocks. As in Chromium, a search runs in slices, one per frame, so it never holds the page
+  // past a frame: each slice walks more of the text, then checks and marks the matches found, the first shown one (or the
+  // last, going back) becoming the active one, and the count is reported as it grows. `scan` walks the text, `cands` are
+  // the matches found so far in page order, `next` how far the marking has come, `ranges` the shown ones among those,
+  // `place` each shown one's index in `ranges`, `boxes` each checked one's visibility and place down the page, `active`
+  // the active match's index in `cands`, `seek` the way a new search looks for its active match, `pending` a step that
+  // waits for the walk, `id` the app's latest call, and `search` counts searches so a slice of an ended one stops.
+  // `unshown` counts the checked matches that do not show.
+  const marks = { text: "", scan: null, cands: [], next: 0, ranges: [], place: [], boxes: [], unshown: 0, active: -1, seek: 1, pending: 0, id: 0, search: 0, reported: 0 };
   const markSheet = new CSSStyleSheet();
   markSheet.replaceSync(
     "::highlight(sailfish-match) { background-color: #ffff00; color: #000000 } ::highlight(sailfish-active) { background-color: #ff9632; color: #000000 }"
@@ -309,6 +309,7 @@ enum WebKitPageScript {
     marks.ranges = [];
     marks.place = [];
     marks.boxes = [];
+    marks.unshown = 0;
     marks.active = -1;
     marks.pending = 0;
     marks.search++;
@@ -430,7 +431,11 @@ enum WebKitPageScript {
     }
     return b;
   };
-  const ordinal = () => (marks.active >= 0 && marks.active < marks.next ? marks.place[marks.active] + 1 : 0);
+  // The count and the active match's number: once the walk is done, every match found less those checked and not
+  // shown, which the marking makes exact as it goes.
+  const count = () => (marks.scan.done ? marks.cands.length - marks.unshown : marks.ranges.length);
+  const ordinal = () =>
+    marks.active < 0 ? 0 : marks.active < marks.next ? marks.place[marks.active] + 1 : marks.scan.done ? marks.active + 1 - marks.unshown : 0;
   const isDone = () => marks.scan.done && marks.next === marks.cands.length;
   // Each shown match's place down the page from 0 to 1 for the scrollbar's ticks, empty when the page does not scroll.
   const ticks = () => {
@@ -466,15 +471,19 @@ enum WebKitPageScript {
       }
     }
   };
-  // One slice: the walk for up to half of `ms`, then marking for the rest, at most 300 new marks, since WebKit repaints
-  // each one in the frame after.
-  const slice = (ms) => {
+  // One slice of `ms`: until the active match shows, the walk for half and marking for the rest; then the walk for the
+  // whole slice, so the count is out early, and marking after it, at most `cap` new marks, since WebKit repaints each
+  // one in the frame after.
+  const slice = (ms, cap) => {
     const start = performance.now();
-    for (const range of marks.scan.more(start + ms / 2)) marks.cands.push(range);
+    if (!marks.scan.done) for (const range of marks.scan.more(marks.active < 0 ? start + ms / 2 : start + ms)) marks.cands.push(range);
     const all = CSS.highlights.get("sailfish-match");
-    for (let added = 0; marks.next < marks.cands.length && added < 300 && performance.now() < start + ms; ) {
+    for (let added = 0; marks.next < marks.cands.length && added < cap && performance.now() < start + ms; ) {
       const i = marks.next++;
-      if (!box(i).shows) continue;
+      if (!box(i).shows) {
+        marks.unshown++;
+        continue;
+      }
       marks.place[i] = marks.ranges.length;
       marks.ranges.push(marks.cands[i]);
       if (marks.active < 0 && marks.seek > 0) activate(i);
@@ -483,22 +492,28 @@ enum WebKitPageScript {
         added++;
       }
     }
-    if (marks.scan.done && marks.active < 0 && marks.seek < 0 && marks.ranges.length) {
-      const last = marks.ranges[marks.ranges.length - 1];
-      activate(marks.cands.indexOf(last));
+    if (marks.scan.done && marks.active < 0 && marks.seek < 0) {
+      for (let i = marks.cands.length - 1; i >= 0; i--) {
+        if (box(i).shows) {
+          activate(i);
+          break;
+        }
+      }
     }
     if (marks.pending && marks.active >= 0) move(marks.pending);
   };
-  // Runs the search's slices, one a frame, until every match is marked, reporting the count at most every 100 ms and
-  // the ticks at the end.
+  // Runs the search's slices, one a frame (5 ms and 300 marks while walking, 8 ms and 600 after), until every match is
+  // marked, reporting the count at most every 100 ms, at once when the walk ends, and with the ticks at the end.
   const runSlices = (search) => {
     requestAnimationFrame(() => {
       if (search !== marks.search) return;
-      slice(5);
+      const walking = !marks.scan.done;
+      if (walking) slice(5, 300);
+      else slice(8, 600);
       const done = isDone();
-      if (done || performance.now() - marks.reported > 100) {
+      if (done || (walking && marks.scan.done) || performance.now() - marks.reported > 100) {
         marks.reported = performance.now();
-        post("found", { id: marks.id, matches: marks.ranges.length, active: ordinal(), ticks: done ? ticks() : null });
+        post("found", { id: marks.id, matches: count(), active: ordinal(), ticks: done ? ticks() : null });
       }
       if (!done) runSlices(search);
     });
@@ -582,16 +597,16 @@ enum WebKitPageScript {
         marks.seek = step < 0 ? -1 : 1;
         if (marks.scan.done) return [0, 0, []];
         CSS.highlights.set("sailfish-match", new Highlight());
-        slice(4);
+        slice(4, 300);
         // After the slice, so the page restyles for the sheet in its next frame rather than inside the slice.
         if (!document.adoptedStyleSheets.includes(markSheet)) document.adoptedStyleSheets = [...document.adoptedStyleSheets, markSheet];
         marks.reported = performance.now();
         const done = isDone();
         if (!done) runSlices(marks.search);
-        return [marks.ranges.length, ordinal(), done ? ticks() : []];
+        return [count(), ordinal(), done ? ticks() : []];
       }
       if (step && marks.active >= 0) move(step);
-      return [marks.ranges.length, ordinal(), null];
+      return [count(), ordinal(), null];
     },
     // Clears the marks and keeps the active match selected, as Chromium does when its find bar closes.
     stopFinding() {
