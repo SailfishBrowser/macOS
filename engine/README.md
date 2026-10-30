@@ -265,6 +265,8 @@ scripts, service workers, `webNavigation` and the rest. The bridge adds:
   `WindowControllerList`, the list extension code searches for tabs and
   windows by id, so `sendMessage`, `executeScript`, `scripting`, action
   APIs with a tab id and `windows.get` find the shell's tabs (patches/0006).
+  `captureVisibleTab` takes the window's active tab the same way
+  (patches/0014).
   Its `ui::BaseWindow` is the tabs' `NSWindow`. The functions that walk tab
   strips are replaced (`ExtensionFunctionRegistry` keeps the last
   registration): `tabs.query`, `get`, `getCurrent`, `create`, `update`
