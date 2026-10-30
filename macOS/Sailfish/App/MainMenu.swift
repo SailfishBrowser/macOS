@@ -96,6 +96,7 @@ extension Shell {
       ]),
       submenu("View", [
         item("Show Sidebar", #selector(WindowController.toggleSidebarDocking(_:)), "s"),
+        item("Show Toolbar", #selector(WindowController.toggleURLToolbar(_:)), "D"),
         item("Collapse Pinned Tabs", #selector(WindowController.togglePinnedSection(_:))),
         .separator(),
         item("Stop Loading", #selector(WindowController.stopLoading(_:)), "."),

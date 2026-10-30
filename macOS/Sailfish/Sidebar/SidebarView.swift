@@ -630,6 +630,7 @@ struct SidebarView: View {
     .contextMenu {
       if let url {
         Button(showsFullURL ? "Hide Full URL" : "Show Full URL") { showsFullURL.toggle() }
+        Button(store.showsURLToolbar ? "Hide Toolbar" : "Show as Toolbar") { store.send(.toggleURLToolbar) }
         Divider()
         Button("Copy URL") {
           copyLink(url)

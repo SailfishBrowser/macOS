@@ -442,6 +442,10 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     store.send(.sidebar(.toggle))
   }
 
+  @objc func toggleURLToolbar(_ sender: Any?) {
+    store.send(.toggleURLToolbar)
+  }
+
   @objc func goBack(_ sender: Any?) {
     store.send(.tab(.goBack, in: selectedSpace))
   }

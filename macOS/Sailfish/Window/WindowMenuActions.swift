@@ -298,6 +298,9 @@ extension WindowController: NSMenuItemValidation {
     case #selector(toggleSidebarDocking(_:)):
       item.title = store.sidebar.isFloating ? "Show Sidebar" : "Hide Sidebar"
       return true
+    case #selector(toggleURLToolbar(_:)):
+      item.title = store.showsURLToolbar ? "Hide Toolbar" : "Show Toolbar"
+      return true
     case #selector(lockSidebar(_:)):
       return store.sidebar.isFloating
     case #selector(renameSpace(_:)), #selector(changeProfile(_:)), #selector(importFromArc(_:)):
