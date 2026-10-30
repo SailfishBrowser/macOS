@@ -12,20 +12,17 @@ struct ShareSailfish: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 64, height: 64).padding(.top, 95)
-      VStack(spacing: 0) {
-        Text("Share Sailfish").frame(height: 48)
-        Text("with a friend").frame(height: 48)
-      }
-      .font(.system(size: 44, weight: .black, design: .rounded))
-      .minimumScaleFactor(0.8)
-      .foregroundStyle(.white)
-      .padding(.top, 14)
-      Text("Thanks for sharing Sailfish!").font(.system(size: 18)).foregroundStyle(Color(hex: 0xDADBDE)).padding(.top, 14)
+      Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 64, height: 64)
+      Text("Share Sailfish")
+        .font(.system(size: 44, weight: .black, design: .rounded))
+        .minimumScaleFactor(0.8)
+        .foregroundStyle(.white)
+        .frame(height: 48)
+        .padding(.top, 14)
       ticket.padding(.top, 24)
-      Spacer(minLength: 0)
     }
-    .frame(width: 450, height: 600)
+    .padding(.vertical, 64)
+    .frame(width: 450)
     .background(Color(hex: 0x171C2F), in: RoundedRectangle(cornerRadius: 10))
     .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.1)))
     .overlay(alignment: .topTrailing) {
