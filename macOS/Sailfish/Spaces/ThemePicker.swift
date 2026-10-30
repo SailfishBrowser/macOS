@@ -120,6 +120,18 @@ struct ThemePicker: View {
     }
     .padding(7)
     .frame(width: 354, height: 506, alignment: .top)
+    .presentationBackground(panel)
+    .environment(\.colorScheme, .dark)
+  }
+
+  // Shots 33 to 35: the panel is #2A2838 with no color, else the colors' average at half its brightness
+  // (#7FB8D6 gives #3F5A6B; #7FB8D6 and #D69C7E give #555557).
+  private var panel: Color {
+    if theme.colors.isEmpty { return Color(hex: 0x2A2838) }
+    let channels = [16, 8, 0].map { (shift: UInt32) in
+      theme.colors.map { Double($0 >> shift & 0xFF) }.reduce(0, +) / Double(theme.colors.count) / 255 / 2
+    }
+    return Color(red: channels[0], green: channels[1], blue: channels[2])
   }
 
   // The trackpad ticks as colors change.
