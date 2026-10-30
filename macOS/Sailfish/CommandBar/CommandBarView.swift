@@ -462,6 +462,11 @@ extension URL {
   var displayString: String {
     path() == "/" ? domain : domain + path()
   }
+
+  // The page whatever its scheme or "www.". The query is part of it, since every Google search shares one path.
+  var page: String {
+    query().map { displayString + "?" + $0 } ?? displayString
+  }
 }
 
 extension NSImage {
