@@ -91,7 +91,9 @@ struct PendingLogin: Equatable, Identifiable, Sendable {
         }, 250);
       }).observe(document, { childList: true, subtree: true });
       // Called by Sailfish with the login as arguments. An automatic fill leaves a form the user has started alone.
-      globalThis.sailfishFill = (form, username, password, automatic) => {
+      // The frame may have moved on since the login was looked up, so the origin it was saved for must still be here.
+      globalThis.sailfishFill = (origin, form, username, password, automatic) => {
+        if (location.origin !== origin) return;
         const entry = forms[form];
         if (!entry || !entry.password.isConnected || !rendered(entry.password)) return;
         const name = entry.username && rendered(entry.username) ? entry.username : null;
@@ -129,7 +131,7 @@ struct PendingLogin: Equatable, Identifiable, Sendable {
       guard let form = body["form"] as? Int, frame.isMainFrame || isSameSite(origin, page.committedURL) else { return }
       Task {
         guard let login = await logins(context, origin).first(where: \.isExactMatch) else { return }
-        fill(page, frame, form: form, login, automatic: true)
+        fill(page, frame, origin, form: form, login, automatic: true)
       }
     case "focus":
       guard let form = body["form"] as? Int else { return }
@@ -138,7 +140,7 @@ struct PendingLogin: Equatable, Identifiable, Sendable {
         let saved = await logins(context, origin)
         guard !saved.isEmpty, engine.shownTab(of: page) == tab, page.webView.window?.isKeyWindow == true
         else { return }
-        showMenu(saved, page, frame, form: form, rect: rect?.count == 4 ? rect : nil)
+        showMenu(saved, page, frame, origin, form: form, rect: rect?.count == 4 ? rect : nil)
       }
     case "submit":
       guard !engine.incognitoTabs.contains(tab), let profile = engine.tabProfiles[tab],
@@ -196,21 +198,31 @@ struct PendingLogin: Equatable, Identifiable, Sendable {
   }
 
   // Fills the login into the frame's form, in the frame's password world, passing the values as arguments.
-  private static func fill(_ page: WebKitPage, _ frame: WKFrameInfo, form: Int, _ login: Login, automatic: Bool) {
+  private static func fill(
+    _ page: WebKitPage, _ frame: WKFrameInfo, _ origin: URL, form: Int, _ login: Login, automatic: Bool
+  ) {
     page.webView.callAsyncJavaScript(
-      "sailfishFill(form, username, password, automatic)",
-      arguments: ["form": form, "username": login.username, "password": login.password, "automatic": automatic],
+      "sailfishFill(origin, form, username, password, automatic)",
+      arguments: [
+        "origin": serialized(origin), "form": form, "username": login.username, "password": login.password,
+        "automatic": automatic,
+      ],
       in: frame, in: world, completionHandler: nil)
+  }
+
+  // The origin as the page's location.origin spells it: url(of:) always leaves it the path "/".
+  static func serialized(_ origin: URL) -> String {
+    String(origin.absoluteString.dropLast())
   }
 
   // Every login's username under the field, or at the mouse when the field sits in a frame that cannot be measured.
   private static func showMenu(
-    _ logins: [Login], _ page: WebKitPage, _ frame: WKFrameInfo, form: Int, rect: [Double]?
+    _ logins: [Login], _ page: WebKitPage, _ frame: WKFrameInfo, _ origin: URL, form: Int, rect: [Double]?
   ) {
     let menu = NSMenu()
     for login in logins {
       menu.addItem(ActionMenuItem(login.username.isEmpty ? "No Username" : login.username) {
-        fill(page, frame, form: form, login, automatic: false)
+        fill(page, frame, origin, form: form, login, automatic: false)
       })
     }
     let view = page.webView
