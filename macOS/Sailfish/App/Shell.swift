@@ -18,7 +18,7 @@ final class Shell: NSObject, NSMenuDelegate {
   private var extensionWindowsToken: ObserveToken?
   // What each space's extension window was last synced from, so unchanged spaces skip the sync.
   var extensionWindowKeys: [Space.ID: ExtensionWindowKey] = [:]
-  private lazy var quitWarning = QuitWarning { [weak self] in self?.store.downloads.downloads.progress != nil }
+  private lazy var quitWarning = QuitWarning(store: store) { [weak self] in self?.controllers[$0]?.showWindow(nil) }
   #if !DEBUG
     // Created at launch, as nothing may touch NSApp before ChromeMain.
     private(set) lazy var updater = Updater { [weak self] in
@@ -37,6 +37,7 @@ final class Shell: NSObject, NSMenuDelegate {
   }
 
   private var recoveryToken: ObserveToken?
+  private var warmToken: ObserveToken?
 
   override init() {
     let writer = SnapshotWriter<Snapshot>.state
@@ -54,6 +55,7 @@ final class Shell: NSObject, NSMenuDelegate {
     ECEngine.dockMenu = dockMenu()
     SoundEffect.register()
     recoveryToken = observe { [weak self] in self?.showRecoveredSpaces() }
+    warmToken = observe { [weak self] in self?.warmWebKit() }
     Engine.shared.windowDelegate = self
     // Separate observations, so a page update that reaches one sync does not run the others.
     windowsToken = observe { [weak self] in self?.syncWindows() }
@@ -220,6 +222,22 @@ final class Shell: NSObject, NSMenuDelegate {
       "The \(spaces.map { "“\($0)”" }.formatted(.list(type: .and))) \(spaces.count == 1 ? "Space uses" : "Spaces use") the Default Profile now."
     alert.runModal()
     store.send(.dismissRecoveredSpaces)
+  }
+
+  // Once the saved windows have loaded, each profile with a tab showing a WebKit page starts WebKit, on the turn after
+  // the windows' first frame, so its first WebKit page opens as fast as later ones. Any other profile starts it when a
+  // hovered link or a typed address would open in WebKit. Runs once.
+  private func warmWebKit() {
+    guard store.isLoaded else { return }
+    // NSObject keeps every observation token it returns, so only cancelling ends this one.
+    warmToken?.cancel()
+    let profiles = Set(
+      store.windows.flatMap(\.spaces.spaces).filter { $0.tabs.contains { $0.engine == .webkit } }.map(\.profileID))
+    DispatchQueue.main.async {
+      for profile in profiles {
+        WebKitStores.warm(profile: profile, incognito: false)
+      }
+    }
   }
 
   nonisolated static var isDefaultBrowser: Bool {

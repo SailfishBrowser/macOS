@@ -124,6 +124,26 @@ denied or cancelled (permissions stay pending, Chrome's context menu shows).
   Chrome's `BackForwardMenuModel`), nearest first, each with its index for
   `goToEntry:` (`GoToIndex`) and its offset for display; `loadProgress` and
   `webContents:didChangeLoadProgress:` are `WebContents::GetLoadProgress`.
+- Element full screen: the bridge implements the delegate calls Chrome's
+  `FullscreenController` answers for a tab (`CanEnterFullscreenModeForTab`,
+  `EnterFullscreenModeForTab`, `ExitFullscreenModeForTab`,
+  `IsFullscreenForTabOrPending`, `GetFullscreenState`) and keeps the state
+  per web contents. It changes inside the request, as content reads it back
+  there to grant the page full screen; the shell hears of the enter, with
+  the requesting frame's origin, and of the exit once the call returns, and
+  fills the screen with the view meanwhile. `exitFullscreenResizingView:`
+  is `WebContents::ExitFullscreen`: a shown page leaves with the resize the
+  shell makes as it restores its layout, as Chrome's windows do, so it lays
+  out once; a hidden one is told at once. Content also exits on a
+  navigation, and drops
+  full screen for security (`ForSecurityDropFullscreen`) through
+  `GetFullscreenState`. Without the delegate method requests are refused,
+  as before.
+- Shortcuts: a key press goes to the page first and to `NSApp.mainMenu` if
+  the page leaves it, unless the delegate reserves it
+  (`webContents:reservesKeyEquivalent:`, `PreHandleKeyboardEvent`), in
+  which case the menu performs it before the renderer sees it, as Chrome's
+  tab and window shortcuts, so a busy page cannot hold it.
 - Zoom: `zoomPercent` and `webContentsDidChangeZoom:` read Chrome's
   `ZoomController`, so a tab's zoom follows the site's as in Chrome.
 - Session restore: `sessionState` serializes the navigation entries with
@@ -257,6 +277,104 @@ scripts, service workers, `webNavigation` and the rest. The bridge adds:
   `tabs.onMoved`, `onAttached`, `onDetached`, `onHighlighted`, and
   `windows.create`, `remove` and `onCreated`.
 
+## WebKit tabs
+
+The shell can show some pages in a `WKWebView` instead of Chromium. These
+calls let it move a user's navigation between the engines and share the
+profile's data with WebKit pages. None needs an upstream patch, and none
+changes what an existing call does.
+
+- Handoff: a second throttle beside the other-site one (patches/0007),
+  registered after it so Peek keeps priority, asks the delegate's
+  `webContents:shouldHandOffNavigation:` in `WillStartRequest` and returns
+  `CANCEL_AND_IGNORE` on YES. It attaches only when the delegate implements
+  the method, to a primary main frame, cross-document http or https
+  navigation the user started: one without a reload type, history step or
+  restore type that is browser-initiated or carries a user gesture. It does
+  not override `WillRedirectRequest`, so redirects stay. The request carries
+  the URL, the method, a POST's bytes from `GetPostData()` (file and data
+  pipe elements dropped) with its `Content-Type`, and `GetReferrer()` as
+  `Referer`.
+- `loadRequest:` loads through `LoadURLParams` as a browser-initiated
+  `PAGE_TRANSITION_LINK`, with the `Referer` header as the referrer and, for
+  a POST, the body as `post_data` with `LOAD_TYPE_HTTP_POST` and its
+  `Content-Type` in `extra_headers`, as Chrome's own POST loads pass it.
+- `webContents:didCommitNavigationIsHistory:` is sent from
+  `DidFinishNavigation` for a committed primary main frame, cross-document
+  navigation, with `NavigationHandle::IsHistory()`.
+- `ECEngine.registrableDomainForHost:` is
+  `registry_controlled_domains::GetDomainAndRegistry` with private
+  registries, or the host when it has none.
+- Cookies use the default storage partition's
+  `network::mojom::CookieManager`. `cookiesForDomains:` filters
+  `GetAllCookies` to unpartitioned, unexpired cookies at or under the
+  domains. `deleteCookies:` deletes the stored cookies with each name,
+  domain and path through `DeleteCanonicalCookie`, which deletes only a
+  cookie whose value is unchanged, so it passes the stored cookie rather
+  than the shell's. While `observedCookieDomains` is non-empty, an
+  `AddGlobalChangeListener` listener, bound again if the network service
+  restarts, reports changes under those domains to `cookieDelegate`: the
+  three insert causes as set, the removal causes as removed, and neither the
+  `OVERWRITE` half of an overwrite nor a partitioned cookie.
+- Logins: `loginsForURL:` reads `PasswordStoreInterface::GetLogins` with
+  the `PasswordFormDigest` of an HTML form at the URL's origin and keeps the
+  exact signon-realm matches, most recently used first, then the
+  `MatchType::kPSL` matches with `exactMatch` NO; blocklisted and federated
+  entries are dropped. `addLoginForURL:username:password:` reads the same
+  logins and calls `UpdateLogin` with the new password for a login of that
+  realm and username, or `AddLogin` with a form-submission login for the
+  page's URL without query, fragment or credentials.
+- History: `addVisitToURL:title:` calls `HistoryService::AddPage` with
+  `SOURCE_BROWSED` and then `SetPageTitle`, and
+  `setFavicon:iconURL:forPageURL:` writes the image's PNG bytes with
+  `FaviconService::MergeFavicon` as `kFavicon` at its pixel size, which
+  replaces the bitmap of that size and keeps the others. An incognito
+  context does neither.
+- Site settings: `permissionsForOrigin:` and
+  `setPermission:allowed:forOrigin:` share the content-settings code of
+  `sitePermissions` and `setSitePermission:allowed:`, for an origin instead
+  of the page's URL. `zoomPercentForHost:` and `setZoomPercent:forHost:`
+  read and write the profile's `HostZoomMap` level for the host, converted
+  as `ZoomController::GetZoomPercent` converts it; the default percentage
+  clears the host's level.
+- `webContentsDidPresentFirstFrame:` lets the shell keep the page it
+  replaces on screen until a Chromium page has drawn. It is sent from
+  `DidFirstVisuallyNonEmptyPaint`, which Blink reports from the presentation
+  feedback of the primary page's first frame with content, and, when
+  `OnVisibilityChanged` turns `VISIBLE` after that paint, once a one-pixel
+  `CopyFromSurface` has completed. Showing the view gives it a new
+  compositor and a new surface id; the copy request marks the page's surface
+  damaged and is taken only when the display draws that id or a newer one,
+  so it completes on the first frame that draws the page.
+
+## Main-world scripts
+
+`addDocumentStartScript:` runs a script in the main world of every frame
+before the page's own scripts, and `addMessageObjectNamed:` adds an object
+whose `postMessage(string)` reaches the delegate's
+`webContents:didReceiveMessage:fromObject:origin:mainFrame:`. Both use
+`components/js_injection`, as Android WebView does, and apply from the next
+navigation on.
+
+- Browser side: each `ECWebContents` makes one
+  `js_injection::JsCommunicationHost` on first use and destroys it before
+  its web contents. Scripts go to `AddPersistentJavaScript` at
+  `kDocumentStart` and objects to `AddWebMessageHostFactory`, both in world
+  `ISOLATED_WORLD_ID_GLOBAL` for the origin rule `*`. The host reaches each
+  frame through its remote associated interfaces and hands the renderer the
+  message remotes itself, so no binder is registered.
+- Renderer side (patches/0013): `ChromeContentRendererClient` makes a
+  `js_injection::JsCommunication` in `RenderFrameCreated` and runs its
+  document-start scripts first in `RunScriptsAtDocumentStart`, before the
+  extension scripts, which run only if the frame outlived ours. Every
+  Chromium renderer frame carries the observer, but without a host it holds
+  no scripts or objects.
+- Messages: a frame's host is made on its first message, with the frame's
+  origin and whether it is the main frame. js_injection names opaque and
+  local origins `null`, which reaches the delegate as a nil origin. String
+  messages are posted to the main queue and dropped if the web contents
+  closed meanwhile; other payloads are dropped.
+
 ## How the host app hands control to Chromium
 
 - On macOS the browser process owns the main thread, which is Chromium's UI
@@ -276,7 +394,8 @@ scripts, service workers, `webNavigation` and the rest. The bridge adds:
   delegate, and may replace `NSApp.mainMenu` once launching has finished.
   The engine keeps Chrome's bookmark and history menu bridges unbound (they
   `CHECK` for Chrome's menu items) and sends the shortcuts a page leaves
-  unhandled to `NSApp.mainMenu`; the web view otherwise takes every ⌘ key.
+  unhandled, and those the delegate reserves, to `NSApp.mainMenu`; the web
+  view otherwise takes every ⌘ key.
 - Chrome never opens a browser window. On
   `NSApplicationWillFinishLaunchingNotification` the engine changes the
   delegate's class to `ECAppController`, an `AppController` subclass
@@ -373,7 +492,8 @@ Run from the laptop against a remote Mac build host (set `ENGINE_HOST`, e.g.
   `engine/out/` (gitignored).
 - `scripts/package-engine.sh`: on the build Mac, zip `EngineCore.framework`
   as `EngineCore-<version>-arm64.zip` and print its SHA-256. The zip is the
-  asset of release `engine-<version>` on github.com/SailfishBrowser/macOS and
+  asset of release `engine-<version>-<revision>` on github.com/SailfishBrowser/macOS,
+  where `ENGINE_REVISION` counts rebuilds of one Chromium version, and
   the checksum goes in `ENGINE_SHA256`; `macOS/scripts/fetch-engine.sh`
   downloads and checks it (or, with `ENGINE_HOST` set, copies the build
   host's framework).

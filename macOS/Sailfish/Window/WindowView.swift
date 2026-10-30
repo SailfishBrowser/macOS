@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import SwiftUI
+import WebKit
 
 struct WindowView: View {
   @Bindable var store: StoreOf<WindowFeature>
@@ -78,6 +79,19 @@ struct WindowView: View {
     .overlay {
       DownloadThrowLayer(canThrow: (!isFloating || store.sidebar.isPeeking) && !store.isLibraryOpen)
     }
+    // Over all of the window, which it dims and keeps from clicks.
+    .overlay {
+      if store.isConfirmingQuit {
+        ZStack {
+          Color.black.opacity(0.45)
+          QuitDialog { store.send(.confirmQuit(false)) }
+            .shadow(color: .black.opacity(0.4), radius: 20, y: 8)
+            .environment(\.colorScheme, .dark)
+        }
+        .transition(.opacity)
+      }
+    }
+    .animation(Motion.fade, value: store.isConfirmingQuit)
     .coordinateSpace(.named(DownloadThrows.space))
     .environment(downloadThrows)
     .ignoresSafeArea()
@@ -105,6 +119,9 @@ struct WindowView: View {
     ZStack(alignment: .topLeading) {
       browser(isFloating: isFloating, background: background, library: (shown: shown, push: push))
     }
+    // The page's frame changes at once, never with an animation that shares the update, such as the toast's: a web
+    // view resized through an animation keeps its content offset from its view.
+    .transaction(value: isPageFullScreen) { $0.animation = nil }
     .frame(width: size.width - narrow, height: size.height)
     .offset(x: push)
     // The Library is opaque over the sidebar and moves by its whole width, so its trailing edge stays the
@@ -152,7 +169,7 @@ struct WindowView: View {
   ) -> some View {
     let theme = themePreview ?? store.spaces.selected.theme
     HStack(spacing: 0) {
-      if !isFloating {
+      if !isFloating, !isPageFullScreen {
         SidebarView(store: store)
           .frame(width: store.sidebar.width)
           .overlay(alignment: .trailing) { resizeHandle }
@@ -182,11 +199,11 @@ struct WindowView: View {
             FindBar(store: find).padding(10).padding(.top, isUnderToolbar ? DeveloperBar.height : 0)
           }
         }
-        .padding([.top, .bottom, .trailing], 10)
-        .padding(.leading, isFloating ? 10 : 0)
+        .padding([.top, .bottom, .trailing], isPageFullScreen ? 0 : 10)
+        .padding(.leading, isFloating && !isPageFullScreen ? 10 : 0)
     }
 
-    if isFloating {
+    if isFloating, !isPageFullScreen {
       Color.clear
         .frame(width: 10)
         .frame(maxHeight: .infinity)
@@ -196,9 +213,10 @@ struct WindowView: View {
         .onHover { isAtEdge in
           if isAtEdge { store.send(.sidebar(.peek(true))) }
         }
-      // A permission prompt hangs off the URL pill, so it brings the sidebar out.
+      // A permission prompt or a "Play in WebKit" offer hangs off the URL pill, so it brings the sidebar out.
       if store.sidebar.isPeeking
         || store.spaces.selected.selectedTabID.flatMap({ Engine.shared.permissionRequests[$0] }) != nil
+        || store.spaces.selected.selectedTabID.flatMap({ Engine.shared.engineOffers[$0] }) != nil
       {
         SidebarView(store: store)
           .frame(width: store.sidebar.visibleWidth)
@@ -220,6 +238,11 @@ struct WindowView: View {
           .zIndex(1)
       }
     }
+  }
+
+  // A page in element full screen fills the window alone.
+  private var isPageFullScreen: Bool {
+    store.spaces.selected.selectedTabID.flatMap { Engine.shared.fullScreenPages[$0] } != nil
   }
 
   // The sidebar resizes by dragging its trailing edge.
@@ -286,33 +309,40 @@ private struct PageHost: NSViewRepresentable {
       roundsTop ? [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
       : [.layerMinXMinYCorner, .layerMaxXMinYCorner]
     container.onMouseDown = onMouseDown
-    // A page moving between places (a Peek closing, a split forming) belongs to the newest container;
-    // older ones take it back only once it is free.
-    guard container.subviews != [view], context.coordinator.isNew || view.superview == nil else { return }
-    context.coordinator.isNew = false
+    // A page moving between places (a Peek closing, a split forming) belongs to the container given it last, which a
+    // lone pane is again when its tab changes; others take it back only once it is free.
+    let isClaim = context.coordinator.claimed !== view
+    context.coordinator.claimed = view
+    guard container.page !== view, isClaim || view.superview == nil || view.superview === container else { return }
     // The page leaving the container is kept as it looked, for the tab switcher.
-    container.subviews.first.map { Engine.shared.captureThumbnail(of: $0) }
+    container.page.map { Engine.shared.captureThumbnail(of: $0) }
     view.autoresizingMask = []
-    container.subviews = [view]
-    container.fitPage()
+    Engine.shared.willShow(view)
+    container.show(view)
   }
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
   static func dismantleNSView(_ container: WebContainer, coordinator: Coordinator) {
     // A page whose container goes (a new tab's page is not made yet) is kept as it looked, for the tab switcher.
-    container.subviews.first.map { Engine.shared.captureThumbnail(of: $0) }
+    container.page.map { Engine.shared.captureThumbnail(of: $0) }
     container.subviews = []
   }
 
   final class Coordinator {
-    var isNew = true
+    // The page this container was last given.
+    weak var claimed: NSView?
   }
 }
 
 // Reports clicks in the page, which the page's own view takes.
 final class WebContainer: NSView {
   var onMouseDown: (() -> Void)?
+  // Watches a clear page (a WebKit page before its first paint) for the moment it shows.
+  private var clearPage: NSKeyValueObservation?
+  // Counts the display's frames once the clear page shows, until the page under it can leave.
+  private var framesShown: CADisplayLink?
+  private var frameCount = 0
   // Set as the layout changes, before the card's animated frame. A wider page is applied at once, so a ⌘S hide has it
   // drawn behind the card's clip before its motion starts; a narrower one waits for the card's first moving frame.
   var restingWidth: CGFloat? {
@@ -322,14 +352,52 @@ final class WebContainer: NSView {
 
   override func resizeSubviews(withOldSize oldSize: NSSize) { fitPage() }
 
+  // The page shown, on top.
+  var page: NSView? { subviews.last }
+
+  // Shows the tab's page in place of the one before it, which stays underneath, as it looks, while the new page is
+  // clear, so a switch between the tab's pages shows no empty frame; the new page takes the clicks.
+  func show(_ view: NSView) {
+    framesShown?.invalidate()
+    framesShown = nil
+    let showing = subviews.last { $0.alphaValue > 0 && $0 !== view }
+    subviews = [view.alphaValue == 0 ? showing : nil, view].compactMap { $0 }
+    fitPage()
+    clearPage = subviews.count > 1
+      ? view.observe(\.alphaValue) { [weak self] _, _ in MainActor.assumeIsolated { self?.uncover() } } : nil
+  }
+
+  // The page underneath leaves the window once the display has shown the new page over it. Out of the window, a
+  // Chromium page blanks its content in its GPU process at once, which reaches the screen before the window's own
+  // frame with the new page whenever that frame is late, as the first one of a new WebKit page is; the second frame
+  // after the new page shows has it on the screen.
+  private func uncover() {
+    guard let page, page.alphaValue > 0 else { return }
+    clearPage = nil
+    frameCount = 0
+    framesShown = displayLink(target: self, selector: #selector(frameShown(_:)))
+    framesShown?.add(to: .main, forMode: .common)
+  }
+
+  @objc private func frameShown(_ link: CADisplayLink) {
+    frameCount += 1
+    guard frameCount == 2 else { return }
+    link.invalidate()
+    framesShown = nil
+    subviews = page.map { [$0] } ?? []
+  }
+
   // The page takes the width it comes to rest at, pinned to the card's leading edge and clipped by the card, so a ⌘S
   // lays the engine out once and its new layout lands mid-slide. On a show the narrower page moves with
   // the edge and the card is wider than it until the motion ends; that strip shows the page's own background
-  // color, which the engine keeps on its view's backing layer. Before the layout has reported, the page fills the card.
+  // color, which Chromium keeps on its view's backing layer and a shown WebKit page gives as its under-page color (a
+  // clear one has drawn nothing of its own yet). Before the layout has reported, the page fills the card.
   func fitPage() {
-    guard let page = subviews.first else { return }
-    page.frame = NSRect(x: 0, y: 0, width: restingWidth ?? bounds.width, height: bounds.height)
-    layer?.backgroundColor = page.subviews.first?.layer?.backgroundColor
+    for view in subviews {
+      view.frame = NSRect(x: 0, y: 0, width: restingWidth ?? bounds.width, height: bounds.height)
+    }
+    let webKitColor = (page as? WKWebView).flatMap { $0.alphaValue > 0 ? $0.underPageBackgroundColor.cgColor : nil }
+    layer?.backgroundColor = webKitColor ?? page?.subviews.first?.layer?.backgroundColor
   }
 
   override func viewDidMoveToWindow() {

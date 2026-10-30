@@ -1,5 +1,6 @@
 import AppKit
 import ComposableArchitecture
+@preconcurrency import EngineCore
 import SwiftUI
 
 // AppKit leaves full screen on one Esc that nothing handled; the controller's monitor does a two-step instead.
@@ -13,6 +14,10 @@ final class WindowController: NSWindowController, NSWindowDelegate {
   private var token: ObserveToken?
   private var undoToken: ObserveToken?
   private var titleToken: ObserveToken?
+  private var fullScreenToken: ObserveToken?
+  // The page filling the window in element full screen, and whether the window went full screen for it.
+  private weak var fullScreenPage: ECWebContents?
+  private var isFullScreenForPage = false
   private var swipeMonitor: Any?
   private var escapeMonitor: Any?
   private var controlMonitor: Any?
@@ -74,6 +79,7 @@ final class WindowController: NSWindowController, NSWindowDelegate {
       let title = store.spaces.selected.selectedTab?.displayTitle ?? ""
       if window?.title != title { window?.title = title }
     }
+    fullScreenToken = observe { [weak self] in self?.syncPageFullScreen() }
     // The sidebar draws the traffic lights.
     for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
       window.standardWindowButton(button)?.isHidden = true
@@ -93,6 +99,11 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     // Esc closes Peek even while its page has focus, which a menu key equivalent would not reach.
     escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
       guard let self, event.window == window else { return event }
+      // One Esc leaves a page's element full screen.
+      if event.keyCode == 53, let page = shownFullScreenPage?.page {
+        page.exitFullscreen(resizingView: true)
+        return nil
+      }
       // Esc leaves the command bar wherever focus is: the bar's own Esc needs its field to have the keys. Text being
       // composed keeps its Esc, which cancels the composition.
       if event.keyCode == 53, let bar = store.commandBar, (window.firstResponder as? NSTextView)?.hasMarkedText() != true {
@@ -239,6 +250,52 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     swipeSamples = []
     guard store.sidebar.swipe != nil else { return }
     store.send(.endSwipe(surface ?? .strip, width: store.sidebar.visibleWidth, velocity: velocity))
+  }
+
+  private var shownFullScreenPage: (page: ECWebContents, origin: URL?)? {
+    store.spaces.selected.selectedTabID.flatMap { Engine.shared.fullScreenPages[$0] }
+  }
+
+  // A page in element full screen fills the screen while its tab is the one shown: the window goes full screen for
+  // it unless it already is, and leaves with it. This window's other pages leave element full screen.
+  private func syncPageFullScreen() {
+    guard let window else { return }
+    let engine = Engine.shared
+    let shown = store.spaces.selected.selectedTabID
+    for (tab, entry) in engine.fullScreenPages
+    where (tab != shown || engine.contents(tab) !== entry.page)
+      && (store.spaces.spaces.contains(where: { $0.tabs[id: tab] != nil }) || store.peek?.tab.id == tab)
+    {
+      entry.page.exitFullscreen(resizingView: false)
+    }
+    // A WebKit page's element full screen is WebKit's own window, which a page no longer shown leaves the same way.
+    for case let page as WebKitPage in engine.livePages.values {
+      guard let tab = engine.tab(of: page), tab != shown || engine.page(tab) !== page,
+        store.spaces.spaces.contains(where: { $0.tabs[id: tab] != nil })
+      else { continue }
+      page.exitFullScreen()
+    }
+    let page = shownFullScreenPage?.page
+    guard page !== fullScreenPage else { return }
+    fullScreenPage = page
+    if page == nil {
+      if isFullScreenForPage, window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
+    } else if window.styleMask.contains(.fullScreen) {
+      showFullScreenToast()
+    } else {
+      isFullScreenForPage = true
+      // A turn later, so the window's transition starts from the page alone.
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        if fullScreenPage == nil { isFullScreenForPage = false } else { window.toggleFullScreen(nil) }
+      }
+    }
+  }
+
+  // Names the site filling the screen, as Chrome's full screen bubble does.
+  private func showFullScreenToast() {
+    let host = shownFullScreenPage?.origin?.host()
+    store.send(.showToast(host.map { "\($0) is full screen. To exit, press ⎋" } ?? "To exit full screen, press ⎋"))
   }
 
   // ⌃⇧1–4 focus a split's pane and ⌃⇧] / ⌃⇧[ step through its panes. Read by key code, as Shift turns
@@ -413,8 +470,16 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     }
   }
 
+  // A page that left while the window was going full screen for it takes the window back out.
   func windowDidEnterFullScreen(_ notification: Notification) {
-    store.send(.showToast("To exit full screen, press ⎋"))
+    guard !isFullScreenForPage || fullScreenPage != nil else { return window!.toggleFullScreen(nil) }
+    showFullScreenToast()
+  }
+
+  // Leaving full screen any other way than Esc takes the page out of element full screen too.
+  func windowWillExitFullScreen(_ notification: Notification) {
+    isFullScreenForPage = false
+    shownFullScreenPage?.page.exitFullscreen(resizingView: true)
   }
 
   func windowDidResize(_ notification: Notification) {

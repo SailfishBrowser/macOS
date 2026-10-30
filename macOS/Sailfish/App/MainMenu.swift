@@ -103,6 +103,8 @@ extension Shell {
         item("Force Refresh the Page", #selector(WindowController.reloadBypassingCache(_:)), "R"),
         .separator(),
         item("Show Reader View", #selector(WindowController.toggleReader(_:)), "r", [.command, .option]),
+        // WindowController titles it Open Page in WebKit or in Chromium.
+        item("Open Page in WebKit", #selector(WindowController.openPageInOtherEngine(_:))),
         .separator(),
         item("Add Split View", #selector(WindowController.newSplit(_:)), "=", [.control, .shift]),
         item("Close this Split Pane", #selector(WindowController.closeSplitPane(_:)), "-", [.control, .shift]),

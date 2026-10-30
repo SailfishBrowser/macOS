@@ -8,11 +8,27 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   nonisolated static let userDataDir = URL.dataDirectory.appending(path: "Engine").path
   nonisolated static let (events, continuation) = AsyncStream.makeStream(of: WebEngineEvent.self)
   private(set) var contexts: [UUID: ECBrowserContext] = [:]
-  private(set) var tabs: [UUID: ECWebContents] = [:]
+  // Each tab's pages, oldest first, and the index of the one it shows.
+  var pageRecords: [UUID: [PageRecord]] = [:]
+  var shownPages: [UUID: Int] = [:]
+  // The live pages by page id; a page behind the shown one has none until Back or Forward reaches it.
+  var livePages: [UUID: any TabPage] = [:]
+  // The tab and page id of each live page.
+  @ObservationIgnored var owners: [ObjectIdentifier: (tab: UUID, page: UUID)] = [:]
+  // Each tab's shown page when Chromium renders it; extension windows see only these.
+  var tabs: [UUID: ECWebContents] {
+    pageRecords.keys.reduce(into: [:]) { tabs, tab in tabs[tab] = contents(tab) }
+  }
   // Changes with extensions and their actions, so views reading them update.
   var extensionsRevision = 0
   // Each tab's unanswered permission request, shown as a popover on the URL pill.
   var permissionRequests: [UUID: PermissionRequest] = [:]
+  // Each tab's "Play in WebKit" offer, shown as a popover on the URL pill.
+  var engineOffers: [UUID: EngineOffer] = [:]
+  // Sites whose offer was declined, or whose switch was undone, this session.
+  @ObservationIgnored var declinedSites: Set<String> = []
+  // Each tab's last switch to WebKit for protected video, with the Chromium page it left, for the toast's Undo.
+  @ObservationIgnored var offerSwitches: [UUID: (site: String, left: UUID)] = [:]
   // Each tab's open JavaScript dialog, shown over its page.
   var dialogs: [UUID: PageDialog] = [:]
   // Each tab's selected text, for the URL pill's Share Quote.
@@ -22,6 +38,8 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   // Tabs whose page has an article, and the article of each tab showing Reader View.
   var readerable: Set<UUID> = []
   var readers: [UUID: ReaderArticle] = [:]
+  // The page of each tab showing an element full screen, which fills the window, and the origin that asked.
+  var fullScreenPages: [UUID: (page: ECWebContents, origin: URL?)] = [:]
   // How far each loading tab's page has loaded, 0 to 1, shown by the load dash above the page card.
   var loadProgress: [UUID: Double] = [:]
   // Each recently shown tab's page as it last looked, for the tab switcher's cards; the newest last.
@@ -33,34 +51,42 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   @ObservationIgnored var littleSailfishTabs: Set<UUID> = []
   // Sheets shown for each tab's page, dismissed when the tab closes.
   @ObservationIgnored var sheets: [UUID: [NSWindow]] = [:]
-  // Sheets waiting for their tab to be shown, run again when it is (or closes).
+  // Sheets and requests waiting for their page to be shown, by page id, run again when it is (or closes).
   @ObservationIgnored var pendingSheets: [UUID: [@MainActor () -> Void]] = [:]
   // Contexts reporting downloads, kept so that their indexes identify their downloads.
   @ObservationIgnored var downloadContexts: [ECBrowserContext] = []
   @ObservationIgnored var downloadProfiles: [ECBrowserContext: UUID] = [:]
   // Set when quitting closes every page.
-  @ObservationIgnored private var isClosed = false
+  @ObservationIgnored var isClosed = false
   // Each space as a window to its context's extensions (chrome.windows), by space.
   @ObservationIgnored var windows: [UUID: ECWindow] = [:]
   // Each tab's last reported page; Chromium reports several times per load, mostly without change.
-  @ObservationIgnored private var lastPages: [UUID: WebPage] = [:]
+  @ObservationIgnored var lastPages: [UUID: WebPage] = [:]
   @ObservationIgnored weak var windowDelegate: (any ECWindowDelegate)?
-  // The context of each tab's web contents, released before their context closes.
-  @ObservationIgnored private var tabContexts: [UUID: ECBrowserContext] = [:]
+  // The context of each tab's web contents, released before their context closes, and the tab's profile.
+  @ObservationIgnored var tabContexts: [UUID: ECBrowserContext] = [:]
+  @ObservationIgnored var tabProfiles: [UUID: UUID] = [:]
+  // Favorites and pinned tabs whose links to other sites open in Peek, set on their Chromium pages and read by their
+  // WebKit pages.
+  @ObservationIgnored var tabsPeekingOtherSites: Set<UUID> = []
+  // The engine and site each tab was last switched to, held while its shown page stays on that site.
+  @ObservationIgnored var choices: [UUID: EngineChoice] = [:]
   // When each tab's last search was asked for: the effects that ask arrive in no fixed order.
-  @ObservationIgnored private var findRequests: [UUID: ContinuousClock.Instant] = [:]
-  // Each tab's saved history, given to its next web contents.
+  @ObservationIgnored var findRequests: [UUID: ContinuousClock.Instant] = [:]
+  // Each page's saved history by page id, given to its next page: Chromium's and WebKit's.
   nonisolated static let sessions = SessionStore(directory: URL.dataDirectory.appending(path: "Sessions"))
-  // Tabs whose web contents got their saved history and have not loaded yet.
-  @ObservationIgnored private var restoredTabs: Set<UUID> = []
+  nonisolated static let webKitSessions = SessionStore(directory: URL.dataDirectory.appending(path: "WebKitSessions"))
+  // Pages that got their saved history and have not loaded yet, and those whose load of it has not committed.
+  @ObservationIgnored var restoredPages: Set<UUID> = []
+  @ObservationIgnored var restoringPages: Set<UUID> = []
 
   // Keeps the page as it looks now, as Chrome does for a tab about to be hidden, scaled to the switcher's card.
   func captureThumbnail(_ tab: UUID) {
-    guard let contents = tabs[tab], !littleSailfishTabs.contains(tab) else { return }
-    contents.snapshot { [weak self] image in
+    guard let page = self.page(tab), !littleSailfishTabs.contains(tab) else { return }
+    page.snapshot { [weak self] image in
       guard let image else { return }
       Task { @MainActor in
-        guard let self, self.tabs[tab] != nil else { return }
+        guard let self, self.page(tab) != nil else { return }
         self.thumbnails[tab] = image.scaled(toWidth: TabSwitcher.thumbnailSize.width * 2)
         self.thumbnailOrder.removeAll { $0 == tab }
         self.thumbnailOrder.append(tab)
@@ -71,64 +97,39 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     }
   }
 
-  // The page of this view, if it is a tab's, as it looks now.
+  // The tab of this view's page, live and shown or not, as it looks now.
   func captureThumbnail(of view: NSView) {
-    tabs.first { $0.value.view === view }.map { captureThumbnail($0.key) }
+    livePages.first { $0.value.view === view }.flatMap { tab(of: $0.value) }.map { captureThumbnail($0) }
   }
 
   func view(_ tab: UUID) -> NSView? {
-    if let pending = pendingSheets.removeValue(forKey: tab) {
+    if let page = shownRecord(tab)?.id, let pending = pendingSheets.removeValue(forKey: page) {
       DispatchQueue.main.async { pending.forEach { $0() } }
     }
-    return tabs[tab]?.view
+    return page(tab)?.view
   }
 
-  func create(_ tab: UUID, _ profile: UUID, _ incognito: Bool) async {
-    _ = await context(profile)
-    // Once quitting has closed every page, none is made.
-    guard !isClosed else { return }
-    makeContents(tab, profile, incognito)
-  }
-
-  // Needs the profile's context loaded. A page the tab still has, such as a closing Peek that undo brings back,
-  // is saved and closed first, so the new one starts from its history.
-  @discardableResult
-  func makeContents(_ tab: UUID, _ profile: UUID, _ incognito: Bool) -> ECWebContents {
-    release(tab, keepingHistory: true)?.close()
-    let context = loadedContext(profile, incognito)
-    let contents = ECWebContents(browserContext: context)
-    contents.delegate = self
-    tabs[tab] = contents
-    tabContexts[tab] = context
-    if incognito {
-      incognitoTabs.insert(tab)
+  // A tab shown again at the page its saved history ends on loads that entry, keeping the history (a restored WebKit
+  // page is already loading it); any other page is a new navigation on top of it, in the engine the URL opens in.
+  func load(_ tab: UUID, _ url: URL) async {
+    guard let record = shownRecord(tab), let page = page(tab) else { return }
+    let current = (page as? WebKitPage).map(\.committedURL) ?? page.url
+    if restoredPages.remove(record.id) != nil, let current, current.isSamePage(as: url) {
+      (page as? ECWebContents)?.loadIfNeeded()
+      return
     }
-    if let state = Self.sessions.load(tab), contents.restoreSessionState(state) {
-      restoredTabs.insert(tab)
+    restoringPages.remove(record.id)
+    @Shared(.siteEngines) var siteEngines
+    let engine = pageEngine(for: url, from: record.engine, choice: choices[tab], cause: .typed, siteEngines)
+    // The user gave the URL, which keeps a switch to Chromium a typed navigation.
+    var request = URLRequest(url: url)
+    request.attribution = .user
+    guard engine == record.engine else {
+      return await switchEngine(tab, to: engine, request: request)
     }
-    return contents
-  }
-
-  // A tab shown again at the page its saved history ends on loads that entry, keeping the history; any other
-  // page is a new navigation on top of it.
-  func load(_ tab: UUID, _ url: URL) {
-    guard let contents = tabs[tab] else { return }
-    if restoredTabs.remove(tab) != nil, let current = contents.url, current.isSamePage(as: url) {
-      contents.loadIfNeeded()
-    } else {
-      contents.loadURL(url)
-    }
-  }
-
-  func saveSessions() {
-    for (tab, contents) in tabs {
-      saveSession(tab, contents)
-    }
-  }
-
-  private func saveSession(_ tab: UUID, _ contents: ECWebContents) {
-    if let state = contents.sessionState {
-      Self.sessions.save(tab, state, inMemory: incognitoTabs.contains(tab))
+    switch record.engine {
+    case .chromium: contents(tab)?.loadURL(url)
+    case .webkit: (page as? WebKitPage)?.load(request)
     }
   }
 
@@ -140,6 +141,9 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
       downloadContexts.append(context)
       downloadProfiles[context] = profile
       context.downloads.forEach { browserContext(context, downloadDidUpdate: $0) }
+      if !incognito {
+        WebKitDownloads.shared.report(profile: profile)
+      }
     }
     return context
   }
@@ -150,7 +154,17 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   }
 
   func syncWindow(_ space: Space, tabs shown: [Tab], focused: Bool, peeksLinksToOtherSites: Bool) {
-    let contents = shown.compactMap { tabs[$0.id] }
+    // Links to other sites open from favorites and pinned tabs in Peek, unless Settings > Links turns it off.
+    for tab in shown {
+      let peeks = peeksLinksToOtherSites && tab.placement != .unpinned
+      self.contents(tab.id)?.opensLinksToOtherSitesInNewWindow = peeks
+      if peeks {
+        tabsPeekingOtherSites.insert(tab.id)
+      } else {
+        tabsPeekingOtherSites.remove(tab.id)
+      }
+    }
+    let contents = shown.compactMap { self.contents($0.id) }
     if windows[space.id] == nil, !contents.isEmpty {
       let window = ECWindow(browserContext: loadedContext(space.profileID, space.isIncognito))
       window.delegate = windowDelegate
@@ -158,20 +172,20 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     }
     guard let window = windows[space.id] else { return }
     window.tabs = contents
-    // Links to other sites open from favorites and pinned tabs in Peek, unless Settings > Links turns it off.
-    for tab in shown {
-      tabs[tab.id]?.opensLinksToOtherSitesInNewWindow = peeksLinksToOtherSites && tab.placement != .unpinned
-    }
-    window.activeTab = shown.first { $0.id == space.selectedTabID }.flatMap { tabs[$0.id] }
+    window.activeTab = shown.first { $0.id == space.selectedTabID }.flatMap { self.contents($0.id) }
     if window.isFocused != focused {
       window.isFocused = focused
     }
   }
 
   // A Little Sailfish's page as a window of its own to the context's extensions, which the PDF viewer is one of:
-  // its tab had none, and the viewer left the page blank.
+  // its tab had none, and the viewer left the page blank. While it shows a WebKit page the window has no tab, as a
+  // space's window leaves such a tab out.
   func syncLittleWindow(_ id: UUID, profile: UUID, tab: UUID) {
-    guard let contents = tabs[tab] else { return }
+    guard let contents = self.contents(tab) else {
+      windows[id]?.tabs = []
+      return
+    }
     if windows[id] == nil {
       let window = ECWindow(browserContext: loadedContext(profile, false))
       window.delegate = windowDelegate
@@ -193,47 +207,62 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   }
 
   func perform(_ tab: UUID, _ operation: (ECWebContents) -> Void) {
-    tabs[tab].map(operation)
+    contents(tab).map(operation)
   }
 
   func zoom(_ tab: UUID, _ step: ZoomStep) -> Int? {
-    guard let contents = tabs[tab] else { return nil }
+    if let page = page(tab) as? WebKitPage {
+      return zoom(page, of: tab, step)
+    }
+    guard let contents = self.contents(tab) else { return nil }
     switch step {
     case .in: contents.zoomIn()
     case .out: contents.zoomOut()
     case .reset: contents.resetZoom()
     }
+    if let host = contents.url?.host(), let context = tabContexts[tab] {
+      applyZoom(contents.zoomPercent, host: host, in: context)
+    }
     return contents.zoomPercent
   }
 
   // Runs a search asked for at `requested` unless a later one already ran.
-  func find(_ tab: UUID, _ requested: ContinuousClock.Instant, _ operation: (ECWebContents) -> Void) {
+  func find(_ tab: UUID, _ requested: ContinuousClock.Instant, _ operation: FindOperation) {
     if let last = findRequests[tab], requested < last { return }
     findRequests[tab] = requested
-    perform(tab, operation)
+    if let page = page(tab) as? WebKitPage {
+      page.finder.perform(operation, in: page)
+    } else if let contents = contents(tab) {
+      operation.perform(on: contents)
+    }
   }
 
   func close(_ tab: UUID) {
     close(tab, keepingHistory: true)
   }
 
-  // Closes the tab's page and forgets its history, for a pinned tab reset to its pinned URL.
+  // Closes the tab's pages and forgets their histories, for a pinned tab reset to its pinned URL.
   func discard(_ tab: UUID) {
+    let pages = pageRecords[tab] ?? []
     close(tab, keepingHistory: false)
     Self.sessions.forget(tab)
+    for page in pages {
+      Self.store(page.engine).forget(page.id)
+    }
   }
 
   private func close(_ tab: UUID, keepingHistory: Bool) {
     thumbnails[tab] = nil
     thumbnailOrder.removeAll { $0 == tab }
-    release(tab, keepingHistory: keepingHistory)?.close()
+    release(tab, keepingHistory: keepingHistory).forEach { $0.close() }
   }
 
   // Closes every tab before the engine destroys their web contents at quit.
   func closeAll() {
     isClosed = true
-    for tab in Array(tabs.keys) {
-      release(tab, keepingHistory: true)?.close()
+    CookieSync.endAll()
+    for tab in Array(pageRecords.keys) {
+      release(tab, keepingHistory: true).forEach { $0.close() }
     }
   }
 
@@ -242,49 +271,29 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     Autocomplete.forget(context)
     closeTabs(of: context)
     context.close()
+    WebKitStores.dropIncognitoStore(profile: profile)
   }
 
-  // Closes the profile's context, then has the engine delete its data.
-  func deleteProfile(_ profile: UUID) {
+  // Closes the profile's context and pages, then has the engine delete its data and removes its WebKit store and
+  // folder.
+  func deleteProfile(_ profile: UUID) async {
+    WebKitDownloads.shared.forget(profile: profile)
     if let context = contexts.removeValue(forKey: profile) {
       Autocomplete.forget(context)
       closeTabs(of: context)
       context.close()
     }
     ECBrowserContext.deleteProfile(atPath: Self.userDataDir + "/" + profile.uuidString)
+    try? FileManager.default.removeItem(at: URL.dataDirectory.appending(path: "WebKit/\(profile.uuidString)"))
+    await WebKitStores.retireStore(profile: profile)
+    await WebKitStoreRemovals.remove(profile)
   }
 
   private func closeTabs(of context: ECBrowserContext) {
+    CookieSync.end(context)
     for (tab, owner) in tabContexts where owner === context {
-      release(tab, keepingHistory: true)?.close()
+      release(tab, keepingHistory: true).forEach { $0.close() }
     }
-  }
-
-  // Forgets the tab and detaches from its web contents: a web contents being destroyed reports
-  // navigation state changes, which must not reach the shell once it has let the tab go.
-  private func release(_ tab: UUID, keepingHistory: Bool) -> ECWebContents? {
-    if keepingHistory, let contents = tabs[tab] {
-      saveSession(tab, contents)
-    }
-    restoredTabs.remove(tab)
-    for sheet in sheets.removeValue(forKey: tab) ?? [] {
-      sheet.sheetParent?.endSheet(sheet, returnCode: .abort)
-    }
-    permissionRequests.removeValue(forKey: tab)?.answer(false)
-    dialogs.removeValue(forKey: tab)?.answer(false, "")
-    selections[tab] = nil
-    hoveredLinks[tab] = nil
-    readerable.remove(tab)
-    readers[tab] = nil
-    loadProgress[tab] = nil
-    incognitoTabs.remove(tab)
-    lastPages[tab] = nil
-    tabContexts[tab] = nil
-    findRequests[tab] = nil
-    let contents = tabs.removeValue(forKey: tab)
-    contents?.delegate = nil
-    pendingSheets.removeValue(forKey: tab)?.forEach { $0() }
-    return contents
   }
 
   func context(_ profile: UUID) async -> ECBrowserContext {
@@ -300,22 +309,27 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   }
 
   func webContentsDidUpdate(_ contents: ECWebContents) {
-    guard let tab = tab(of: contents) else { return }
-    let page = WebPage(
-      url: contents.url, title: contents.title, favicon: contents.favicon, isLoading: contents.isLoading,
-      canGoBack: contents.canGoBack, canGoForward: contents.canGoForward, isAudible: contents.isAudible,
-      isMuted: contents.isMuted, media: contents.media)
+    guard let tab = shownTab(of: contents) else { return }
     PictureInPicture.place(contents, of: tab)
-    let previous = lastPages[tab]
-    guard previous != page else { return }
-    lastPages[tab] = page
-    updateReader(tab, contents, from: previous, to: page)
-    Self.continuation.yield(.updated(tab: tab, page: page))
+    report(tab, contents)
   }
 
   func webContents(_ contents: ECWebContents, didChangeLoadProgress progress: Double) {
-    guard let tab = tab(of: contents) else { return }
+    guard let tab = shownTab(of: contents) else { return }
     loadProgress[tab] = progress
+  }
+
+  // Only the shown page of a tab in a browser window goes full screen; Little Sailfish and pages behind leave at once.
+  func webContents(_ contents: ECWebContents, didEnterFullscreenForOrigin origin: URL?) {
+    guard let tab = shownTab(of: contents), !littleSailfishTabs.contains(tab) else {
+      return contents.exitFullscreen(resizingView: false)
+    }
+    fullScreenPages[tab] = (contents, origin)
+  }
+
+  func webContentsDidExitFullscreen(_ contents: ECWebContents) {
+    guard let tab = tab(of: contents), fullScreenPages[tab]?.page === contents else { return }
+    fullScreenPages[tab] = nil
   }
 
   // Required by the protocol; the engine calls the one with modifier flags instead, so this never runs.
@@ -325,13 +339,20 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     webContents(contents, requestsNewWindowWith: url, disposition: disposition, modifierFlags: [])
   }
 
-  // ⌘-click or middle click opens a background tab, ⇧⌘-click a tab in front, ⌥⌘-click a Little Sailfish
-  // (not from an incognito page), and a ⇧-click, or a link to another site from a pinned tab, opens in Peek.
   func webContents(
     _ contents: ECWebContents, requestsNewWindowWith url: URL, disposition: ECWindowOpenDisposition,
     modifierFlags: NSEvent.ModifierFlags
   ) {
     guard let tab = tab(of: contents) else { return }
+    requestNewWindow(tab, url, disposition: disposition, modifierFlags: modifierFlags, from: contents.view)
+  }
+
+  // ⌘-click or middle click opens a background tab, ⇧⌘-click a tab in front, ⌥⌘-click a Little Sailfish
+  // (not from an incognito page), and a ⇧-click, or a link to another site from a pinned tab, opens in Peek.
+  func requestNewWindow(
+    _ tab: UUID, _ url: URL, disposition: ECWindowOpenDisposition, modifierFlags: NSEvent.ModifierFlags,
+    from view: NSView
+  ) {
     @Shared(.littleSailfishOnOptionCommandClick) var littleSailfishOnOptionCommandClick
     @Shared(.peeksOnShiftClick) var peeksOnShiftClick
     if littleSailfishOnOptionCommandClick, modifierFlags.isSuperset(of: [.option, .command]), !incognitoTabs.contains(tab) {
@@ -344,50 +365,61 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
       return
     }
     // Peek grows from the link clicked, so it starts at the pointer, from the page's top left.
-    let view = contents.view
     let point = view.window.map { view.convert($0.mouseLocationOutsideOfEventStream, from: nil) } ?? .zero
     Self.continuation.yield(
       .peekRequested(tab: tab, url: url, at: CGPoint(x: point.x, y: view.isFlipped ? point.y : view.bounds.height - point.y)))
   }
 
-  // The entry is looked up again by its index, as the menu's copy may be stale.
-  func goToEntry(_ tab: UUID, _ index: Int) {
-    guard let contents = tabs[tab],
-      let entry = (contents.backEntries + contents.forwardEntries).first(where: { $0.index == index })
-    else { return }
-    contents.go(to: entry)
+  // The permissions the user allowed or blocked for the site of the tab's page.
+  func sitePermissions(_ tab: UUID) -> [String: Bool] {
+    if let page = page(tab) as? WebKitPage {
+      return sitePermissions(tab, page)
+    }
+    return contents(tab)?.sitePermissions.mapValues(\.boolValue) ?? [:]
   }
 
-  func tab(of contents: ECWebContents) -> UUID? {
-    tabs.first { $0.value === contents }?.key
+  func setSitePermission(_ tab: UUID, _ key: String, allowed: Bool) {
+    if let page = page(tab) as? WebKitPage {
+      return setSitePermission(tab, page, key, allowed: allowed)
+    }
+    contents(tab)?.setSitePermission(key, allowed: allowed)
   }
 }
 
 extension WebEngineClient: DependencyKey {
   static let liveValue = Self(
-    create: { await Engine.shared.create($0, $1, $2) },
+    create: { await Engine.shared.create($0, $1, $2, pages: $3, shown: $4, url: $5) },
     load: { await Engine.shared.load($0, $1) },
+    switchEngine: { await Engine.shared.reopen($0, in: $1) },
+    warmWebKit: { await Engine.shared.warmWebKit(profile: $0, incognito: $1, for: $2) },
     littleWindow: { await Engine.shared.syncLittleWindow($0, profile: $1, tab: $2) },
-    goBack: { await Engine.shared.perform($0) { $0.goBack() } },
-    goForward: { await Engine.shared.perform($0) { $0.goForward() } },
-    goToEntry: { tab, index in await Engine.shared.goToEntry(tab, index) },
-    reload: { await Engine.shared.perform($0) { $0.reload() } },
-    stop: { await Engine.shared.perform($0) { $0.stop() } },
-    setMuted: { tab, muted in await Engine.shared.perform(tab) { $0.isMuted = muted } },
+    goBack: { await Engine.shared.goBack($0) },
+    goForward: { await Engine.shared.goForward($0) },
+    goToEntry: { tab, entry in await Engine.shared.goToEntry(tab, entry) },
+    reload: { await Engine.shared.reload($0) },
+    stop: { await Engine.shared.stop($0) },
+    setMuted: { tab, muted in await Engine.shared.setMuted(tab, muted) },
     media: { tab, command in await PictureInPicture.perform(command, on: tab) },
     close: { await Engine.shared.close($0) },
     discard: { await Engine.shared.discard($0) },
     closeIncognito: { await Engine.shared.closeIncognito($0) },
     deleteProfile: { await Engine.shared.deleteProfile($0) },
+    removeDeletedStores: { await WebKitStoreRemovals.removePending() },
     find: { tab, string, forward, requested in
-      await Engine.shared.find(tab, requested) { $0.find(string, forward: forward) }
+      await Engine.shared.find(tab, requested, .find(string, forward: forward))
     },
-    findAsTyped: { tab, string, requested in await Engine.shared.find(tab, requested) { $0.find(string) } },
-    stopFinding: { tab, requested in await Engine.shared.find(tab, requested) { $0.stopFinding() } },
+    findAsTyped: { tab, string, requested in await Engine.shared.find(tab, requested, .findAsTyped(string)) },
+    stopFinding: { tab, requested in await Engine.shared.find(tab, requested, .stop) },
     cancelDownload: { await Engine.shared.cancelDownload($0) },
+    saveLogin: { await PasswordFill.save($0) },
+    dropLogin: { await PasswordFill.drop($0) },
+    undoEngineSwitch: { await Engine.shared.undoEngineSwitch($0) },
     zoom: { tab, step in await Engine.shared.zoom(tab, step) },
     saveSessions: { await Engine.shared.saveSessions() },
-    keepSessions: { Engine.sessions.keep($0) },
+    keepSessions: {
+      Engine.sessions.keep($0)
+      Engine.webKitSessions.keep($0)
+    },
     copySession: { Engine.sessions.copy($0, to: $1) },
     events: { Engine.events }
   )

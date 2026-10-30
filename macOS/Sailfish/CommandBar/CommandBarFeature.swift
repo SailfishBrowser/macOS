@@ -238,6 +238,7 @@ struct CommandBarFeature {
 
   @Dependency(\.autocomplete) var autocomplete
   @Dependency(\.dismiss) var dismiss
+  @Dependency(\.webEngine) var webEngine
 
   var body: some ReducerOf<Self> {
     Reduce { state, action in
@@ -282,10 +283,10 @@ struct CommandBarFeature {
         state.matchesQuery = query
         state.refreshSuggestions()
         state.selection = min(state.selection, max(state.suggestions.count - 1, 0))
-        let favicons = loadFavicons(state)
-        guard let index = state.pendingSubmit else { return favicons }
+        let effects = Effect.merge(loadFavicons(state), warmWebKit(state))
+        guard let index = state.pendingSubmit else { return effects }
         state.pendingSubmit = nil
-        return .merge(favicons, .send(.submit(index)))
+        return .merge(effects, .send(.submit(index)))
 
       case let .moveSelection(offset):
         state.selection = min(max(state.selection + offset, 0), max(state.suggestions.count - 1, 0))
@@ -353,6 +354,16 @@ struct CommandBarFeature {
           return .send(.submit(index))
         }
       }
+    }
+  }
+
+  // The page Return would open starts WebKit when it opens there, so the first WebKit page does not start it cold.
+  private func warmWebKit(_ state: State) -> Effect<Action> {
+    guard state.suggestions.indices.contains(state.selection),
+      case let .match(match) = state.suggestions[state.selection]
+    else { return .none }
+    return .run { [profile = state.profile, incognito = state.isIncognito] _ in
+      await webEngine.warmWebKit(profile, incognito, match.url)
     }
   }
 

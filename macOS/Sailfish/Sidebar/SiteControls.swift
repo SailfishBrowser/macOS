@@ -3,18 +3,20 @@ import EngineCore
 import SwiftUI
 
 // The site controls popover on the URL pill: a dark card with share, capture and full-page capture tiles, the
-// extensions' actions, the site's settings and permissions, and its security with a "…" menu.
+// extensions' actions (none on a WebKit page), the site's settings and permissions, and its security with a "…" menu.
 struct SiteControls: View {
   let space: Space
   let tab: Tab.ID
-  let contents: ECWebContents
   let url: URL
   let open: (URL) -> Void
   @State private var revision = 0
+  @Shared(.siteEngines) private var siteEngines
 
   var body: some View {
     let _ = revision
-    let permissions = contents.sitePermissions
+    let page = Engine.shared.page(tab)
+    let permissions = Engine.shared.sitePermissions(tab)
+    let otherEngine = Engine.shared.otherEngine(tab)
     VStack(alignment: .leading, spacing: 0) {
       // Shot 57: 49 pt tiles 7 apart.
       HStack(spacing: 7) {
@@ -23,33 +25,38 @@ struct SiteControls: View {
         tile("text.viewfinder").opacity(0.4).allowsHitTesting(false).accessibilityHidden(true)
       }
       .buttonStyle(.plain)
-      header("Extensions")
-      // Four tiles a row; past three rows the grid scrolls.
-      let actions = Engine.shared.extensionActions(tab, in: space)
-      ScrollView {
-        LazyVGrid(columns: Array(repeating: GridItem(.fixed(49), spacing: 7), count: 4), alignment: .leading, spacing: 7) {
-          ForEach(actions, id: \.id) { item in
-            ActionTile(item: item) { Engine.shared.runExtensionAction(item.id, tab, in: space) }
+      if Engine.shared.shownEngine(tab) != .webkit {
+        header("Extensions")
+        // Four tiles a row; past three rows the grid scrolls.
+        let actions = Engine.shared.extensionActions(tab, in: space)
+        ScrollView {
+          LazyVGrid(columns: Array(repeating: GridItem(.fixed(49), spacing: 7), count: 4), alignment: .leading, spacing: 7) {
+            ForEach(actions, id: \.id) { item in
+              ActionTile(item: item) { Engine.shared.runExtensionAction(item.id, tab, in: space) }
+            }
+            // Shot 57: the add tile is a light one, white 5% over the popover.
+            Button { open(URL(string: "https://chromewebstore.google.com")!) } label: { tile("plus", fill: .white.opacity(0.05)) }
+              .buttonStyle(.plain)
+              .help("Add Extension")
           }
-          // Shot 57: the add tile is a light one, white 5% over the popover.
-          Button { open(URL(string: "https://chromewebstore.google.com")!) } label: { tile("plus", fill: .white.opacity(0.05)) }
-            .buttonStyle(.plain)
-            .help("Add Extension")
         }
+        .frame(height: CGFloat(min((actions.count + 1 + 3) / 4, 3)) * 37 - 7)
+        .scrollDisabled(actions.count + 1 <= 12)
       }
-      .frame(height: CGFloat(min((actions.count + 1 + 3) / 4, 3)) * 37 - 7)
-      .scrollDisabled(actions.count + 1 <= 12)
       header("Settings")
+      if url.scheme == "http" || url.scheme == "https" {
+        opensIn
+      }
       // Developer mode follows the page's URL, so its row reports and does not toggle.
       setting("hammer.fill", "Developer Mode", url.isDeveloperPage ? "On" : "Off", isOn: url.isDeveloperPage)
         .allowsHitTesting(false)
       setting("gearshape.fill", "Automatic Picture-In-Picture", nil, isOn: false).opacity(0.4).allowsHitTesting(false)
         .accessibilityHidden(true)
       ForEach(permissions.keys.sorted(), id: \.self) { key in
-        let allowed = permissions[key]!.boolValue
+        let allowed = permissions[key]!
         let permission = Engine.permissions[key]
         Button {
-          contents.setSitePermission(key, allowed: !allowed)
+          Engine.shared.setSitePermission(tab, key, allowed: !allowed)
           revision += 1
         } label: {
           setting(permission?.symbol ?? "gearshape.fill", permission?.title ?? key, allowed ? "Allowed" : "Blocked", isOn: allowed)
@@ -58,7 +65,8 @@ struct SiteControls: View {
       }
       Divider().padding(.vertical, 8)
       HStack {
-        Label(contents.isSecure ? "Secure" : "Not Secure", systemImage: contents.isSecure ? "lock.fill" : "lock.open.fill")
+        let isSecure = page?.isSecure == true
+        Label(isSecure ? "Secure" : "Not Secure", systemImage: isSecure ? "lock.fill" : "lock.open.fill")
           .font(.system(size: 13, weight: .medium))
           .padding(.horizontal, 8)
           .frame(height: 30)
@@ -66,8 +74,12 @@ struct SiteControls: View {
         Spacer()
         Menu {
           Button("Copy Link") { copyLink(url) }
-          Button("Save Page…") { contents.savePage() }
-          Button("Print…") { contents.print() }
+          Button("Save Page…") { page?.savePage() }
+          Button("Print…") { page?.printPage() }
+          if let otherEngine {
+            Divider()
+            Button("Open Page in \(otherEngine.name)") { Task { await Engine.shared.reopen(tab, in: otherEngine) } }
+          }
         } label: {
           Image(systemName: "ellipsis")
             .font(.system(size: 12, weight: .semibold))
@@ -86,6 +98,26 @@ struct SiteControls: View {
     .frame(width: 236, alignment: .leading)
     .background(DarkPopover())
     .environment(\.colorScheme, .dark)
+  }
+
+  // Opens in: the engine the site's rule names, or Automatic without one; a choice shows the page in the engine
+  // the site now opens in.
+  private var opensIn: some View {
+    let rule = siteEngines.rule(for: Engine.shared.siteOf(url))
+    return Menu {
+      Picker("Opens in", selection: Binding(get: { rule }, set: { Engine.shared.setEngine($0, forSiteOf: url, in: tab) })) {
+        Text("Automatic").tag(PageEngineKind?.none)
+        Text(PageEngineKind.chromium.name).tag(PageEngineKind?.some(.chromium))
+        Text(PageEngineKind.webkit.name).tag(PageEngineKind?.some(.webkit))
+      }
+      .pickerStyle(.inline)
+      .labelsHidden()
+    } label: {
+      setting("globe", "Opens in", rule?.name ?? "Automatic", isOn: rule != nil)
+    }
+    .menuStyle(.button)
+    .buttonStyle(.plain)
+    .menuIndicator(.hidden)
   }
 
   private func header(_ title: String) -> some View {
@@ -123,8 +155,8 @@ struct SiteControls: View {
 
   // Copies the visible page as an image and keeps it in Media.
   private func capture() {
-    guard let shown = space.tabs[id: tab] else { return }
-    contents.snapshot { image in
+    guard let shown = space.tabs[id: tab], let page = Engine.shared.page(tab) else { return }
+    page.snapshot { image in
       guard let image else { return }
       MainActor.assumeIsolated { Captures.keep(image, of: shown, in: space) }
       SoundEffect.play(.capture)
@@ -162,7 +194,7 @@ struct PillControls: View {
   @Shared(.pinnedExtensions) private var pinned
 
   var body: some View {
-    if let tab = space.selectedTabID, let contents = Engine.shared.tabs[tab] {
+    if let tab = space.selectedTabID, let page = Engine.shared.page(tab) {
       let quote = Engine.shared.selections[tab]
       // The pill icons are centered 28 pt apart.
       HStack(spacing: 12) {
@@ -182,7 +214,7 @@ struct PillControls: View {
             .help(Engine.shared.readers[tab] == nil ? "Show Reader View" : "Hide Reader View")
         }
         if let quote {
-          icon("quote.bubble") { shareQuote(quote, contents) }
+          icon("quote.bubble") { shareQuote(quote, page) }
             .help("Share Quote")
             .background(AnchorView(view: $anchor))
         } else if isSidebarHovered || isOpen {
@@ -196,7 +228,7 @@ struct PillControls: View {
           icon("slider.horizontal.2.square") { isOpen = true }
             .help("Site Controls")
             .popover(isPresented: $isOpen, arrowEdge: .bottom) {
-              SiteControls(space: space, tab: tab, contents: contents, url: url, open: open)
+              SiteControls(space: space, tab: tab, url: url, open: open)
             }
         }
       }
@@ -211,9 +243,9 @@ struct PillControls: View {
   }
 
   // Shares the quote with a link that scrolls to and highlights it.
-  private func shareQuote(_ quote: String, _ contents: ECWebContents) {
+  private func shareQuote(_ quote: String, _ page: any TabPage) {
     guard let view = anchor else { return }
-    contents.linkToHighlight { link in
+    page.linkToHighlight { link in
       guard let link else { return }
       MainActor.assumeIsolated {
         NSSharingServicePicker(items: ["“\(quote)”\n\(link.absoluteString)"])

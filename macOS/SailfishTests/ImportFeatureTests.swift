@@ -38,7 +38,7 @@ final class ImportFeatureTests: XCTestCase {
       $0.browserImport.safeStorageKey = { _ in Data("key".utf8) }
       $0.browserImport.passwords = { _, _, _, _ in 3 }
       $0.browserImport.cookies = { _, _, _, _ in 5 }
-      $0.webEngine.create = { _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
     }
     store.exhaustivity = .off
@@ -323,7 +323,7 @@ final class ImportFeatureTests: XCTestCase {
         calls.withValue { $0.append("cookies \(profile.name) \(names.keys.sorted()) \(first)") }
         return 6
       }
-      $0.webEngine.create = { _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
     }
     store.exhaustivity = .off

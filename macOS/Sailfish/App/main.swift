@@ -44,5 +44,10 @@ if isTesting {
   center.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
     MainActor.assumeIsolated { shell.terminate() }
   }
-  ECEngine.start(withArguments: CommandLine.arguments + ["--user-data-dir=" + Engine.userDataDir])
+  // Chrome's Google Wallet passes, which Sailfish has no use for, ask macOS whether device sign-in is available as
+  // each page is made: a synchronous call that held the main thread for up to 120 ms per page.
+  ECEngine.start(
+    withArguments: CommandLine.arguments + [
+      "--user-data-dir=" + Engine.userDataDir, "--disable-features=AutofillAiWalletPrivatePasses",
+    ])
 }

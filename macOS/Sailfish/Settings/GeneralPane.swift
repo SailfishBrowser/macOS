@@ -55,10 +55,12 @@ struct GeneralPane: View {
   }
 }
 
-// With "Warn before quitting" on, it asks "Quit Sailfish?" before quitting, and "Quit, and don't ask again" turns the
-// setting off. While files download it asks about those instead, as quitting cancels them. Every route to quitting,
-// the menu, the Dock, AppleScript and logout included, comes through NSApp.terminate(_:), which the engine's
-// application class owns, so the warning wraps that method rather than the app delegate.
+// With "Warn before quitting" on, quitting first asks "Quit Sailfish?" over the last focused window: Return, the
+// Quit button or a second quit quits, and Escape or Cancel closes it; other keys do nothing while it shows. Quit chosen
+// from the menu bar counts as the keys. AppleScript and the Dock quit at once, as does a quit with no window to ask in.
+// While files download it asks about those instead, as quitting cancels them. Every route to quitting, the menu, the
+// Dock, AppleScript and logout included, comes through NSApp.terminate(_:), which the engine's application class owns,
+// so the warning wraps that method rather than the app delegate.
 @MainActor
 final class QuitWarning {
   enum Prompt: Equatable { case none, downloads, confirm }
@@ -66,10 +68,12 @@ final class QuitWarning {
   @Shared(.warnBeforeQuitting) private var isEnabled
   // Set when Sparkle quits to install an update and relaunch.
   var bypass = false
-  private let isDownloading: () -> Bool
+  private let store: StoreOf<AppFeature>
+  private let showWindow: (WindowFeature.State.ID) -> Void
 
-  init(isDownloading: @escaping () -> Bool) {
-    self.isDownloading = isDownloading
+  init(store: StoreOf<AppFeature>, showWindow: @escaping (WindowFeature.State.ID) -> Void) {
+    self.store = store
+    self.showWindow = showWindow
   }
 
   // Logout, restart and shutdown send a quit event with a reason, and must not wait on a dialog.
@@ -90,42 +94,59 @@ final class QuitWarning {
       }
     }
     method_setImplementation(method, imp_implementationWithBlock(block))
+    _ = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [unowned self] event in
+      guard let window = confirmingWindow, !isQuitKey(event) else { return event }
+      switch event.keyCode {
+      case 36, 76:
+        NSApp.terminate(nil)
+      case 53:
+        store.send(.windows(.element(id: window, action: .confirmQuit(false))))
+      default:
+        break
+      }
+      return nil
+    }
   }
 
-  private var isSystemQuit: Bool {
+  private var quitItem: NSMenuItem {
+    MenuShortcuts.items(in: NSApp.mainMenu!).first { $0.action == #selector(NSApplication.terminate(_:)) }!
+  }
+
+  private func isQuitKey(_ event: NSEvent) -> Bool {
+    KeyBinding(event) == KeyBinding(quitItem).normalized
+  }
+
+  private var confirmingWindow: WindowFeature.State.ID? {
+    store.windows.first(where: \.isConfirmingQuit)?.id
+  }
+
+  private var quitEvent: NSAppleEventDescriptor? {
     guard let event = NSAppleEventManager.shared().currentAppleEvent,
       event.eventClass == kCoreEventClass, event.eventID == kAEQuitApplication
-    else { return false }
-    return event.paramDescriptor(forKeyword: kAEQuitReason) != nil
+    else { return nil }
+    return event
   }
 
   private func mayQuit() -> Bool {
+    let isSystemQuit = quitEvent?.paramDescriptor(forKeyword: kAEQuitReason) != nil
     let prompt = Self.prompt(
-      bypass: bypass, isSystemQuit: isSystemQuit, isDownloading: isDownloading(), isEnabled: isEnabled)
-    let alert = NSAlert()
+      bypass: bypass, isSystemQuit: isSystemQuit, isDownloading: store.downloads.downloads.progress != nil,
+      isEnabled: isEnabled)
     switch prompt {
     case .none:
       return true
     case .downloads:
+      let alert = NSAlert()
       alert.messageText = "Downloads in progress"
       alert.informativeText = "There are downloads in progress. Closing the application will cancel them."
       alert.addButton(withTitle: "Quit")
       alert.addButton(withTitle: "Cancel")
       return alert.runModal() == .alertFirstButtonReturn
     case .confirm:
-      alert.messageText = "Quit Sailfish?"
-      alert.addButton(withTitle: "Quit")
-      alert.addButton(withTitle: "Quit, and don’t ask again")
-      alert.addButton(withTitle: "Cancel")
-      switch alert.runModal() {
-      case .alertFirstButtonReturn:
-        return true
-      case .alertSecondButtonReturn:
-        $isEnabled.withLock { $0 = false }
-        return true
-      default:
-        return false
-      }
+      guard quitEvent == nil, confirmingWindow == nil, let window = store.state.toastWindowID else { return true }
+      showWindow(window)
+      store.send(.windows(.element(id: window, action: .confirmQuit(true))))
+      return false
     }
   }
 }
