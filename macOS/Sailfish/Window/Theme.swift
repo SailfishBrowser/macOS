@@ -120,10 +120,9 @@ enum Theme {
   static func disabledAccentText(_ theme: SpaceTheme) -> Color {
     isLight(theme) ? shade(theme, saturation: 0.15, brightness: 0.9) : shade(theme, saturation: 0.55, brightness: 0.78)
   }
-  // The selected favorite's ring: the theme's colors as soft pastels (such as #ECB3B7 to #EBB883), going round the tile.
-  static func favoriteRing(_ theme: SpaceTheme) -> AngularGradient {
-    let colors = theme.gradient.map { tint($0, saturation: 0.35, brightness: 0.95) }
-    return AngularGradient(colors: colors + colors.prefix(1), center: .center)
+  // A favorite's tint from its favicon's color, laid over the tile's fill.
+  static func favoriteTint(_ color: Color, isSelected: Bool) -> Color {
+    color.opacity(isSelected ? 0.35 : 0.2)
   }
   // A selected tab row or favorite, lit with the space's primary color: a light tint of it on light themes, a
   // translucent one on dark themes (white at 19% takes the color of the sidebar under it).
