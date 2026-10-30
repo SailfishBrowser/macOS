@@ -35,12 +35,20 @@ enum HistoryReader {
   static func read(_ source: HistorySource) throws -> [HistoryRecord] {
     // Columns: URL, title, visit count, typed count, last visit in seconds since 1970.
     let query =
-      source.browser == "Safari"
-      ? """
-      SELECT i.url, v.title, i.visit_count, 0, MAX(v.visit_time) + 978307200
-      FROM history_items i JOIN history_visits v ON v.history_item = i.id GROUP BY i.id
-      """
-      : "SELECT url, title, visit_count, typed_count, last_visit_time / 1e6 - 11644473600 FROM urls WHERE hidden = 0"
+      switch source.browser {
+      case "Safari":
+        """
+        SELECT i.url, v.title, i.visit_count, 0, MAX(v.visit_time) + 978307200
+        FROM history_items i JOIN history_visits v ON v.history_item = i.id GROUP BY i.id
+        """
+      // Firefox's places, which bookmarks never visited are too; typed is whether it ever was.
+      case "Zen":
+        """
+        SELECT url, title, visit_count, typed, last_visit_date / 1e6 FROM moz_places
+        WHERE hidden = 0 AND last_visit_date IS NOT NULL
+        """
+      default: "SELECT url, title, visit_count, typed_count, last_visit_time / 1e6 - 11644473600 FROM urls WHERE hidden = 0"
+      }
     return try ImportDatabase.rows(source.file, query) { row in
       HistoryRecord(
         url: row.text(0), title: row.text(1), visitCount: row.int(2), typedCount: row.int(3),

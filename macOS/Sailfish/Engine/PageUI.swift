@@ -165,6 +165,28 @@ extension Engine {
     }
   }
 
+  // A link to another app (an OAuth sign-in handing back to a desktop app), asked as Chrome asks, with Cancel as the default.
+  @objc(webContents:requestsOpeningURL:inApplicationNamed:fromOrigin:completionHandler:)
+  func webContents(
+    _ contents: ECWebContents, requestsOpeningURL url: URL, inApplicationNamed appName: String, fromOrigin origin: URL?,
+    completionHandler: @escaping (Bool) -> Void
+  ) {
+    if defers(contents, {
+      self.webContents(
+        contents, requestsOpeningURL: url, inApplicationNamed: appName, fromOrigin: origin,
+        completionHandler: completionHandler)
+    }) { return }
+    guard let tab = tab(of: contents) else { return completionHandler(false) }
+    let alert = NSAlert()
+    alert.messageText = "Open “\(appName)”?"
+    alert.informativeText = "\(origin?.host() ?? "A website") wants to open this application."
+    alert.addButton(withTitle: "Open \(appName)").keyEquivalent = ""
+    alert.addButton(withTitle: "Cancel").keyEquivalent = "\r"
+    present(alert.window, for: tab, { alert.beginSheetModal(for: $0, completionHandler: $1) }) {
+      completionHandler($0 == .alertFirstButtonReturn)
+    }
+  }
+
   func webContents(_ contents: ECWebContents, didUpdateTargetURL url: URL?) {
     guard let tab = shownTab(of: contents) else { return }
     // Written only on change, so repeated events do not invalidate the views reading it.

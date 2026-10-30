@@ -7,6 +7,7 @@ enum SourceBrowser: String, CaseIterable, Equatable, Sendable {
   case chrome = "Google Chrome"
   case safari = "Safari"
   case edge = "Microsoft Edge"
+  case zen = "Zen"
 
   var bundleID: String {
     switch self {
@@ -15,28 +16,29 @@ enum SourceBrowser: String, CaseIterable, Equatable, Sendable {
     case .chrome: "com.google.Chrome"
     case .safari: "com.apple.Safari"
     case .edge: "com.microsoft.edgemac"
+    case .zen: "app.zen-browser.zen"
     }
   }
 
-  // The Chromium user data directory under Application Support; nil for Safari.
+  // The Chromium user data directory under Application Support; nil for Safari and Zen.
   var userData: String? {
     switch self {
     case .arc: "Arc/User Data"
     case .dia: "Dia/User Data"
     case .chrome: "Google/Chrome"
     case .edge: "Microsoft Edge"
-    case .safari: nil
+    case .safari, .zen: nil
     }
   }
 
-  // The keychain item whose password Chromium derives its key for passwords and cookies from; nil for Safari.
+  // The keychain item whose password Chromium derives its key for passwords and cookies from; nil for Safari and Zen.
   var safeStorage: String? {
     switch self {
     case .arc: "Arc Safe Storage"
     case .dia: "Dia Safe Storage"
     case .chrome: "Chrome Safe Storage"
     case .edge: "Microsoft Edge Safe Storage"
-    case .safari: nil
+    case .safari, .zen: nil
     }
   }
 
@@ -57,11 +59,11 @@ enum SourceBrowser: String, CaseIterable, Equatable, Sendable {
   func historySource(_ profile: BrowserProfile) -> HistorySource {
     HistorySource(
       browser: rawValue, profile: profile.name,
-      file: profile.folder.appending(path: self == .safari ? "History.db" : "History"))
+      file: profile.folder.appending(path: self == .safari ? "History.db" : self == .zen ? "places.sqlite" : "History"))
   }
 }
 
-// A Chromium profile's folder, or Safari's, which has one.
+// A Chromium or Zen profile's folder, or Safari's, which has one.
 struct BrowserProfile: Equatable, Hashable, Identifiable, Sendable {
   var name: String
   var folder: URL
@@ -92,6 +94,9 @@ enum BrowserSources {
         let safari = BrowserProfile(name: "", folder: home.appending(path: "Library/Safari"))
         let has = exists(browser.bookmarksFile(safari)) || exists(browser.historySource(safari).file)
         return has ? BrowserSource(browser: browser, profiles: [safari]) : nil
+      case .zen:
+        let profiles = zenProfiles(support.appending(path: "zen"))
+        return profiles.isEmpty ? nil : BrowserSource(browser: browser, profiles: profiles)
       case .dia, .chrome, .edge:
         let profiles = chromiumProfiles(support.appending(path: browser.userData!), browser)
         return profiles.isEmpty ? nil : BrowserSource(browser: browser, profiles: profiles)
@@ -116,5 +121,36 @@ enum BrowserSources {
         FileManager.default.fileExists(atPath: browser.bookmarksFile($0).path)
           || FileManager.default.fileExists(atPath: browser.historySource($0).file.path)
       }
+  }
+
+  // Zen's profiles that have history, the one its install opens first: installs.ini names it, else profiles.ini.
+  static func zenProfiles(_ root: URL) -> [BrowserProfile] {
+    let profiles = ini(root.appending(path: "profiles.ini"))
+    var listed = profiles.filter { $0.name.hasPrefix("Profile") }.compactMap { section -> (path: String, profile: BrowserProfile)? in
+      guard let name = section.keys["Name"], let path = section.keys["Path"] else { return nil }
+      let folder = section.keys["IsRelative"] == "0" ? URL(filePath: path) : root.appending(path: path)
+      return (path, BrowserProfile(name: name, folder: folder))
+    }
+    .filter { FileManager.default.fileExists(atPath: $0.profile.folder.appending(path: "places.sqlite").path) }
+    let defaults = (ini(root.appending(path: "installs.ini")) + profiles.filter { $0.name.hasPrefix("Install") })
+      .compactMap { $0.keys["Default"] } + profiles.filter { $0.keys["Default"] == "1" }.compactMap { $0.keys["Path"] }
+    if let index = defaults.lazy.compactMap({ path in listed.firstIndex { $0.path == path } }).first {
+      listed.insert(listed.remove(at: index), at: 0)
+    }
+    return listed.map(\.profile)
+  }
+
+  // An INI file's sections in order, each with its keys.
+  private static func ini(_ file: URL) -> [(name: String, keys: [String: String])] {
+    guard let text = try? String(contentsOf: file, encoding: .utf8) else { return [] }
+    var sections: [(name: String, keys: [String: String])] = []
+    for line in text.split(whereSeparator: \.isNewline) {
+      if line.hasPrefix("["), line.hasSuffix("]") {
+        sections.append((String(line.dropFirst().dropLast()), [:]))
+      } else if let equals = line.firstIndex(of: "="), !sections.isEmpty {
+        sections[sections.count - 1].keys[String(line[..<equals])] = String(line[line.index(after: equals)...])
+      }
+    }
+    return sections
   }
 }

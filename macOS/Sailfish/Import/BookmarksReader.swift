@@ -74,6 +74,42 @@ enum BookmarksReader {
     }
   }
 
+  // Firefox's places database: the toolbar's own rows first, then the menu, other and mobile bookmarks that hold any,
+  // as folders.
+  static func firefox(_ file: URL) throws -> [ArcData.Row] {
+    struct Node {
+      let id, type, parent: Int
+      let title, url, guid: String
+      let added: Date
+    }
+    // Types: 1 a bookmark, 2 a folder; dateAdded is in microseconds since 1970.
+    let nodes = try ImportDatabase.rows(file, """
+      SELECT b.id, b.type, b.parent, b.title, p.url, b.guid, b.dateAdded FROM moz_bookmarks b
+      LEFT JOIN moz_places p ON p.id = b.fk ORDER BY b.parent, b.position
+      """) { row in
+      Node(
+        id: row.int(0), type: row.int(1), parent: row.int(2), title: row.text(3), url: row.text(4), guid: row.text(5),
+        added: Date(timeIntervalSince1970: row.double(6) / 1e6))
+    }
+    let children = Dictionary(grouping: nodes, by: \.parent)
+    func rows(_ parent: Int) -> [ArcData.Row] {
+      (children[parent] ?? []).compactMap { node in
+        switch node.type {
+        case 1: tab(node.url, node.title, node.added)
+        case 2: .folder(name: node.title, rows: rows(node.id))
+        default: nil
+        }
+      }
+    }
+    let roots = Dictionary(nodes.map { ($0.guid, $0.id) }) { first, _ in first }
+    let others = [("menu________", "Bookmarks Menu"), ("unfiled_____", "Other Bookmarks"), ("mobile______", "Mobile Bookmarks")]
+      .compactMap { guid, name -> ArcData.Row? in
+        guard let id = roots[guid], case let folder = rows(id), !folder.isEmpty else { return nil }
+        return .folder(name: name, rows: folder)
+      }
+    return (roots["toolbar_____"].map(rows) ?? []) + others
+  }
+
   private static func tab(_ string: String?, _ title: String, _ added: Date) -> ArcData.Row? {
     guard let url = string.flatMap(URL.init(string:)), let scheme = url.scheme, scheme != "javascript" else { return nil }
     return .tab(ArcData.Tab(url: url, title: title.isEmpty ? url.absoluteString : title, createdAt: added))

@@ -514,6 +514,15 @@ EC_EXPORT
                                icon:(nullable NSImage*)icon
                         permissions:(NSArray<NSString*>*)permissions
                   completionHandler:(void (^)(BOOL allow))completionHandler;
+// A page asks to open another app, `appName`, with `url`, a link to the
+// app's URL scheme (e.g. an OAuth sign-in handing back to a desktop app).
+// `origin` is the site that asked, nil for none or an opaque one. Without
+// this method the app is not opened.
+- (void)webContents:(ECWebContents*)contents
+    requestsOpeningURL:(NSURL*)url
+    inApplicationNamed:(NSString*)appName
+            fromOrigin:(nullable NSURL*)origin
+     completionHandler:(void (^)(BOOL allow))completionHandler;
 @end
 
 // A page in a web contents' history, as of when it was read.

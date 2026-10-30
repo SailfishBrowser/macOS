@@ -285,6 +285,74 @@ final class ImportFeatureTests: XCTestCase {
     XCTAssertEqual(calls.value, ["cookies Safari true \(UUID(200))", "file Passwords.csv \(UUID(200))"])
   }
 
+  func testZenSpacesComeWithTheirThemesAndBookmarksAndItsCookiesFollowTheirContainers() async {
+    let zen = BrowserSource(browser: .zen, profiles: [
+      BrowserProfile(name: "Default (release)", folder: URL(filePath: "/zen/a")),
+      BrowserProfile(name: "Other", folder: URL(filePath: "/zen/b")),
+    ])
+    let theme = SpaceTheme(colors: [0xFF781E], grain: 0.25, intensity: 0.7)
+    let data = ArcData(
+      spaces: [ArcData.Space(name: "Lab", icon: "🔬", profile: "Lab", pinned: [.tab(tab("https://a.example/"))], today: [], theme: theme)],
+      bookmarks: ArcData.Space(name: "Zen Bookmarks", icon: "", pinned: [.tab(tab("https://b.example/"))], today: []))
+    let home = Space(id: UUID(100), name: "Space 1", profileID: UUID(200), createdAt: now)
+    @Shared(.profiles) var profiles
+    $profiles.withLock { $0 = [Profile(id: UUID(200), name: "Default")] }
+    let calls = LockIsolated<[String]>([])
+    let store = TestStore(
+      initialState: WindowFeature.State(id: UUID(300), sidebar: .init(), spaces: .init(spaces: [home], selectedID: home.id))
+    ) {
+      WindowFeature()
+    } withDependencies: {
+      $0.uuid = .incrementing
+      $0.date = .constant(now)
+      $0.continuousClock = ImmediateClock()
+      $0.arcImport.readZen = { folder in
+        calls.withValue { $0.append("read \(folder.path)") }
+        return data
+      }
+      $0.arcImport.shortcuts = { _ in ArcShortcuts() }
+      $0.browserImport.history = { browser, profile, into in
+        calls.withValue { $0.append("history \(browser.rawValue) \(profile.name) \(into)") }
+        return 4
+      }
+      $0.browserImport.passwordsFile = { file, into in
+        calls.withValue { $0.append("passwords \(file.lastPathComponent) \(into)") }
+        return 2
+      }
+      $0.browserImport.containerCookies = { profile, names, first in
+        calls.withValue { $0.append("cookies \(profile.name) \(names.keys.sorted()) \(first)") }
+        return 6
+      }
+      $0.webEngine.create = { _, _, _ in }
+      $0.webEngine.load = { _, _ in }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.showImport)
+    await store.send(.importer(.presented(.sourcesLoaded([zen]))))
+    await store.send(.importer(.presented(.browserTapped(.zen))))
+    XCTAssertEqual(store.state.importer?.arc?.browser, .zen)
+    XCTAssertFalse(store.state.importer!.arc!.isAvailable(.passwords))
+    await store.send(.importer(.presented(.arc(.folderChosen(URL(filePath: "/zen/b"))))))
+    await store.receive(\.importer.presented.arc.loaded)
+    await store.send(.importer(.presented(.arc(.passwordsFileChosen(URL(filePath: "/tmp/Zen.csv"))))))
+    await store.send(.importer(.presented(.arc(.importTapped))))
+    await store.receive(\.importer.presented.delegate.merge)
+    await store.receive(\.importer.presented.finished)
+    await store.skipReceivedActions()
+
+    XCTAssertEqual(store.state.importer?.summary, ImportFeature.Summary(browser: .zen, spaces: 2, tabs: 2, pages: 4, passwords: 2, cookies: 6))
+    XCTAssertEqual(store.state.spaces.spaces.map(\.name), ["Space 1", "Lab", "Zen Bookmarks"])
+    let lab = profiles.first { $0.name == "Lab" }!.id
+    XCTAssertEqual(store.state.spaces.spaces.map(\.profileID), [UUID(200), lab, UUID(200)])
+    XCTAssertEqual(store.state.spaces.spaces[1].theme, theme)
+    XCTAssertEqual(calls.value, [
+      "read /zen/b", "history Zen Other \(UUID(200))", "cookies Other [\"Default\", \"Lab\"] \(UUID(200))",
+      "passwords Zen.csv \(UUID(200))",
+    ])
+    XCTAssertEqual(store.state.undoStack.last?.name, "Import from Zen")
+  }
+
   func testBackFromTheStepItOpenedOnLeavesTheImport() async {
     let dismissed = LockIsolated(false)
     let store = TestStore(initialState: ImportFeature.State.arc(folder: URL(filePath: "/Arc"))) {
