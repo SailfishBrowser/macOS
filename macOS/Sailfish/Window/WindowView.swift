@@ -301,6 +301,7 @@ private struct PageHost: NSViewRepresentable {
     // The page leaving the container is kept as it looked, for the tab switcher.
     container.page.map { Engine.shared.captureThumbnail(of: $0) }
     view.autoresizingMask = []
+    Engine.shared.willShow(view)
     container.show(view)
   }
 

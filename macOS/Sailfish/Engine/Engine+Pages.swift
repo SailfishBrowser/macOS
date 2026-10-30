@@ -235,6 +235,14 @@ extension Engine {
     perform(show, with: contents, afterDelay: 0.3)
   }
 
+  // A Chromium page that has drawn before and comes back into a pane, as by a tab or space switch, stays clear over
+  // the page before it until it has drawn again, as a returning WebKit page does.
+  func willShow(_ view: NSView) {
+    guard view.alphaValue > 0, let contents = livePages.values.first(where: { $0.view === view }) as? ECWebContents
+    else { return }
+    showWhenDrawn(contents)
+  }
+
   func webContentsDidPresentFirstFrame(_ contents: ECWebContents) {
     NSObject.cancelPreviousPerformRequests(
       withTarget: self, selector: #selector(webContentsDidPresentFirstFrame(_:)), object: contents)
