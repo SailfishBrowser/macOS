@@ -16,15 +16,26 @@ struct PendingLogin: Equatable, Identifiable, Sendable {
   static let handlerName = "passwords"
 
   // Runs at document end in every frame. It numbers each sign-in form (a rendered password field, the only one of its
-  // form, and the nearest rendered text or email input before it) and reports it, reports a username field focused by
-  // the user with its rectangle in the top frame where it can be measured, and reports the username and password of a
-  // submitted form, or of a typed password when the page goes away.
+  // form, and the nearest rendered text or email input before it) and reports it once the user has acted on the page,
+  // reports a username field focused by the user with its rectangle in the top frame where it can be measured, and
+  // reports the username and password of a submitted form, or of a typed password when the page goes away. The wait is
+  // Chrome's: a page's scripts can read a filled password, so a page the user has not touched gets none.
   static let script = """
     (() => {
       const post = (body) => webkit.messageHandlers.\(handlerName).postMessage(body);
       const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
       const forms = [];
       const fieldForms = new WeakMap();
+      let held = [];
+      const offer = (form) => held ? held.push(form) : post({ type: "form", form });
+      const acted = (event) => {
+        if (!event.isTrusted || !held) return;
+        const waiting = held;
+        held = null;
+        waiting.forEach(offer);
+      };
+      addEventListener("pointerdown", acted, true);
+      addEventListener("keydown", acted, true);
       const rendered = (input) => {
         const rect = input.getBoundingClientRect();
         return input.offsetParent !== null && rect.width > 0 && rect.height > 0;
@@ -46,7 +57,7 @@ struct PendingLogin: Equatable, Identifiable, Sendable {
           const form = forms.push({ username, password }) - 1;
           fieldForms.set(password, form);
           if (username) fieldForms.set(username, form);
-          post({ type: "form", form });
+          offer(form);
         }
       };
       const rectOf = (input) => {
