@@ -132,6 +132,12 @@ import WebKit
     webView.reload()
   }
 
+  // Leaves element full screen, as a Chromium page does once its tab is no longer shown.
+  func exitFullScreen() {
+    guard webView.fullscreenState != .notInFullscreen else { return }
+    webView.evaluateJavaScript("void document.exitFullscreen()", in: nil, in: WebKitPageScript.world)
+  }
+
   func close() {
     nextFrame?.invalidate()
     observations = []
@@ -573,6 +579,8 @@ final class WebKitWebView: WKWebView {
   private var waiting: [Int: NSEvent] = [:]
   private var waitCount = 0
   private let offered = NSHashTable<NSEvent>.weakObjects()
+  // Waits for element full screen to end before a browser window's command runs.
+  private var fullScreenExit: NSKeyValueObservation?
 
   // Moved straight into another window, as into Little Sailfish: drawn there before it shows.
   override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -596,6 +604,25 @@ final class WebKitWebView: WKWebView {
   }
 
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    // In WebKit's own window for element full screen the browser window is not in the responder chain, so its commands,
+    // such as ⌃Tab, go to the window with the page's tab once the page has left full screen, as a Chromium page leaves
+    // it for them, with the browser window back on screen.
+    if fullscreenState == .inFullscreen, let page, let tab = Engine.shared.tab(of: page), let menu = NSApp.mainMenu,
+      let item = MenuShortcuts.item(for: event, in: menu), let action = item.action,
+      let controller = NSApp.windows.lazy.compactMap({ $0.windowController as? WindowController })
+        .first(where: { $0.store.spaces.spaces.contains { $0.tabs[id: tab] != nil } }),
+      controller.responds(to: action)
+    {
+      fullScreenExit = observe(\.fullscreenState) { [weak self] view, _ in
+        MainActor.assumeIsolated {
+          guard view.fullscreenState == .notInFullscreen else { return }
+          self?.fullScreenExit = nil
+          NSApp.sendAction(action, to: controller, from: nil)
+        }
+      }
+      page.exitFullScreen()
+      return true
+    }
     // WebKit passes back a shortcut the page left as the current event, with AppKit's variants of it such as ⌘+ for ⌘=.
     guard NSApp.currentEvent.map(offered.contains) != true, window?.firstResponder === self,
       let menu = NSApp.mainMenu, MenuShortcuts.binds(event, in: menu)

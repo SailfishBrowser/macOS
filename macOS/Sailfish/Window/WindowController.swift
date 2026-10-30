@@ -262,6 +262,13 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     {
       entry.page.exitFullscreen(resizingView: false)
     }
+    // A WebKit page's element full screen is WebKit's own window, which a page no longer shown leaves the same way.
+    for case let page as WebKitPage in engine.livePages.values {
+      guard let tab = engine.tab(of: page), tab != shown || engine.page(tab) !== page,
+        store.spaces.spaces.contains(where: { $0.tabs[id: tab] != nil })
+      else { continue }
+      page.exitFullScreen()
+    }
     let page = shownFullScreenPage?.page
     guard page !== fullScreenPage else { return }
     fullScreenPage = page

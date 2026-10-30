@@ -68,6 +68,10 @@ extension WindowController: NSMenuItemValidation {
       Engine.shared.captureThumbnail(tab)
     }
     store.send(.cycleRecentTab(older: older))
+    // A cycle that starts with ⌃ already released, as after leaving a WebKit page's full screen, ends on its tab.
+    if !NSEvent.modifierFlags.contains(.control) {
+      store.send(.endRecentCycle)
+    }
   }
 
   // ⌥⌘V: the clipboard's link, or a search for its text, in a new tab.

@@ -112,9 +112,14 @@ enum MenuShortcuts {
 
   // Whether a press is one of the menu's key equivalents, in either form an item may write it.
   static func binds(_ event: NSEvent, in menu: NSMenu) -> Bool {
-    guard let binding = KeyBinding(event) else { return false }
+    item(for: event, in: menu) != nil
+  }
+
+  // The menu's item whose key equivalent a press is, in either form an item may write it.
+  static func item(for event: NSEvent, in menu: NSMenu) -> NSMenuItem? {
+    guard let binding = KeyBinding(event) else { return nil }
     let forms = [binding] + (KeyBinding.shifted(event).map { [$0] } ?? [])
-    return items(in: menu).contains { !$0.keyEquivalent.isEmpty && forms.contains(KeyBinding($0).normalized) }
+    return items(in: menu).first { !$0.keyEquivalent.isEmpty && forms.contains(KeyBinding($0).normalized) }
   }
 
   // The item of another row, if any, whose keys a press would take; forms are the press's normalized bindings.
