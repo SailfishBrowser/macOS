@@ -11,7 +11,6 @@ struct WindowView: View {
 
   var body: some View {
     let isFloating = store.sidebar.isFloating
-    let theme = themePreview ?? store.spaces.selected.theme
     let background = store.isIncognito ? Theme.incognitoWindow : LinearGradient(theme: theme)
     ZStack(alignment: .topLeading) {
       // The Library slides in from the left over the sidebar, which stays put, and pushes the page right; a swipe
@@ -97,6 +96,15 @@ struct WindowView: View {
     .ignoresSafeArea()
     .animation(store.sidebar.isPeeking ? Motion.peek : Motion.peekOut, value: store.sidebar.isPeeking)
     .animation(store.sidebar.isFloating ? Motion.sidebarHide : Motion.sidebarShow, value: store.sidebar.isFloating)
+    .overlay {
+      if store.importer?.intro != nil {
+        FirstLaunchIntro {
+          store.send(.importer(.presented(.introLanded)))
+        } end: {
+          store.send(.importer(.presented(.introEnded)))
+        }
+      }
+    }
     .sheet(item: $store.scope(state: \.importer, action: \.importer)) { ImportView(store: $0) }
     // Loads the profile, which reports its downloads, before any of its pages open.
     .task(id: store.spaces.selected.profileID) { _ = await Engine.shared.context(for: store.spaces.selected) }
@@ -145,9 +153,11 @@ struct WindowView: View {
     return store.spaces.selectedID == store.spaces.spaces.first?.id ? min(max(slide, 0), 1) : 0
   }
 
+  // A theme being picked, in the space editor or the onboarding, shows before it is kept.
+  private var theme: SpaceTheme { themePreview ?? store.themePreview ?? store.spaces.selected.theme }
+
   private func backdrop(_ background: LinearGradient) -> some View {
-    let theme = themePreview ?? store.spaces.selected.theme
-    return background.opacity(store.isIncognito ? 1 : theme.opacity)
+    background.opacity(store.isIncognito ? 1 : theme.opacity)
       .background(WindowBlur())
       .overlay { Grain(amount: store.isIncognito ? 0 : theme.grain) }
   }
@@ -167,7 +177,6 @@ struct WindowView: View {
   @ViewBuilder private func browser(
     isFloating: Bool, background: LinearGradient, library: (shown: CGFloat, push: CGFloat)
   ) -> some View {
-    let theme = themePreview ?? store.spaces.selected.theme
     HStack(spacing: 0) {
       if !isFloating, !isPageFullScreen {
         SidebarView(store: store)

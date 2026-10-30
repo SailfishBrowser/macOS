@@ -67,7 +67,7 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     super.init(window: window)
     window.delegate = self
     token = observe { [weak window] in
-      let isLight = !store.isIncognito && Theme.isLight(store.spaces.selected.theme)
+      let isLight = !store.isIncognito && Theme.isLight(store.themePreview ?? store.spaces.selected.theme)
       let name: NSAppearance.Name = isLight ? .aqua : .darkAqua
       if window?.appearance?.name != name {
         window?.appearance = NSAppearance(named: name)

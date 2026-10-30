@@ -23,6 +23,8 @@ struct WindowFeature {
     // The last query, which the find bar opens with again, as in Chrome.
     var findQuery = ""
     @Presents var importer: ImportFeature.State?
+    // The theme the onboarding's picker has, which the window shows over the selected space's.
+    var themePreview: SpaceTheme?
     // The Library keeps its pane while closed, so it opens again where it was left. It exists from the
     // start, so even its first opening slides in.
     @Presents var library: LibraryFeature.State? = LibraryFeature.State(pane: .media)
@@ -732,7 +734,12 @@ struct WindowFeature {
           .send(.showToast("Imported from \(browser.rawValue)", .undo))
         )
 
+      case let .importer(.presented(.delegate(.previewTheme(theme)))):
+        state.themePreview = theme
+        return .none
+
       case let .importer(.presented(.delegate(.theme(theme, name)))):
+        state.themePreview = nil
         let space = state.spaces.selected
         return .send(.spaces(.update(space.id, name: name ?? space.name, icon: space.icon, theme: theme)))
 
