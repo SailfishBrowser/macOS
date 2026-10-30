@@ -126,7 +126,9 @@ struct SpaceEditor: View {
         }
       }
       .buttonStyle(.plain)
-      .popover(isPresented: $isPickingTheme, arrowEdge: .trailing) { ThemePicker(theme: $theme, original: original) }
+      .popover(isPresented: $isPickingTheme, arrowEdge: .trailing) {
+        ThemePicker(theme: $theme, original: original, isEditing: profiles == nil)
+      }
       Spacer()
       // Not `.disabled`, which would dim the fill: the button only stops responding.
       Button { if isValid { done(name, icon, theme, profile) } } label: {

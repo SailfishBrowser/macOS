@@ -3,7 +3,7 @@ import SwiftUI
 
 // The theme picker (354x506): up to three color handles on a dotted canvas, where the angle around the center
 // is hue and the distance from it saturation, with light and dark modes, pages of swatches, an intensity slider,
-// a grain dial, Reset to original colors and the Advanced color controls.
+// a grain dial, and for an existing space Reset to original colors and the Advanced color controls.
 struct ThemePicker: View {
   @Binding var theme: SpaceTheme
   @State private var handles: [Handle]
@@ -12,6 +12,8 @@ struct ThemePicker: View {
   @State private var grab: Grab?
   // The theme as the editor opened, for Reset to original colors and Original Saturation.
   private let original: SpaceTheme
+  // An existing space's theme, which has original colors to go back to.
+  private let isEditing: Bool
 
   enum Mode: String, CaseIterable {
     case free = "sparkles", light = "sun.max", dark = "moon"
@@ -48,9 +50,10 @@ struct ThemePicker: View {
     [0xFDFBFA, 0xFBEAF3, 0xECD2EA, 0xF7CDD2, 0xFAE1D5, 0xFEF9E7, 0xE4FCEC, 0xE0F2FB, 0xC5C6E2],
   ]
 
-  init(theme: Binding<SpaceTheme>, original: SpaceTheme) {
+  init(theme: Binding<SpaceTheme>, original: SpaceTheme, isEditing: Bool) {
     _theme = theme
     self.original = original
+    self.isEditing = isEditing
     _handles = State(initialValue: theme.wrappedValue.colors.map(Self.handle))
   }
 
@@ -77,46 +80,48 @@ struct ThemePicker: View {
         GrainDial(value: $theme.grain, isEnabled: !handles.isEmpty)
       }
       .padding(.leading, 10)
-      HStack {
-        Button("Reset to original colors") {
-          theme = original
-          withAnimation(Motion.layout) {
-            handles = original.colors.map(Self.handle)
-            mode = .free
-          }
-          tick()
-        }
-        .disabled(theme == original)
-        Spacer()
-        Menu("Advanced color controls") {
-          Button("Invert Lightness") {
+      if isEditing {
+        HStack {
+          Button("Reset to original colors") {
+            theme = original
             withAnimation(Motion.layout) {
-              for index in handles.indices { handles[index].lightness = 1 - handles[index].lightness }
+              handles = original.colors.map(Self.handle)
               mode = .free
             }
             tick()
-            update()
           }
-          Button("Original Saturation") {
-            let originals = original.colors.map(Self.handle)
-            withAnimation(Motion.layout) {
-              for index in handles.indices where originals.indices.contains(index) {
-                let angle = atan2(handles[index].offset.y, handles[index].offset.x)
-                let saturation = hypot(originals[index].offset.x, originals[index].offset.y)
-                handles[index].offset = CGPoint(x: cos(angle) * saturation, y: sin(angle) * saturation)
+          .disabled(theme == original)
+          Spacer()
+          Menu("Advanced color controls") {
+            Button("Invert Lightness") {
+              withAnimation(Motion.layout) {
+                for index in handles.indices { handles[index].lightness = 1 - handles[index].lightness }
+                mode = .free
               }
+              tick()
+              update()
             }
-            tick()
-            update()
+            Button("Original Saturation") {
+              let originals = original.colors.map(Self.handle)
+              withAnimation(Motion.layout) {
+                for index in handles.indices where originals.indices.contains(index) {
+                  let angle = atan2(handles[index].offset.y, handles[index].offset.x)
+                  let saturation = hypot(originals[index].offset.x, originals[index].offset.y)
+                  handles[index].offset = CGPoint(x: cos(angle) * saturation, y: sin(angle) * saturation)
+                }
+              }
+              tick()
+              update()
+            }
+            .disabled(original.colors.isEmpty)
           }
-          .disabled(original.colors.isEmpty)
+          .fixedSize()
+          .disabled(handles.isEmpty)
         }
-        .fixedSize()
-        .disabled(handles.isEmpty)
+        .font(.system(size: 12))
+        .controlSize(.small)
+        .padding(.horizontal, 10)
       }
-      .font(.system(size: 12))
-      .controlSize(.small)
-      .padding(.horizontal, 10)
     }
     .padding(7)
     .frame(width: 354, height: 506, alignment: .top)
