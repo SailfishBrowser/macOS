@@ -1810,7 +1810,7 @@ struct SidebarView: View {
       Divider()
     }
     Button("Copy Link") { copy(tab.url) }
-    ShareMenu(url: tab.url)
+    ShareLink("Share", item: tab.url)
     if app == .gmail {
       Divider()
       UnreadBadgeToggle()
@@ -2464,21 +2464,6 @@ private struct TabRow: View {
     .frame(width: 16)
     // Dims an unloaded pinned tab's favicon.
     .opacity(tab.pinnedURL != nil && !tab.isLive ? 0.5 : 1)
-  }
-}
-
-// Share ▸: the system's sharing services for the link.
-private struct ShareMenu: View {
-  let url: URL
-
-  var body: some View {
-    Menu("Share") {
-      ForEach(NSSharingService.sharingServices(forItems: [url]), id: \.title) { service in
-        Button { service.perform(withItems: [url]) } label: {
-          Label { Text(service.menuItemTitle) } icon: { Image(nsImage: service.image) }
-        }
-      }
-    }
   }
 }
 
