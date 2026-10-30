@@ -6,8 +6,8 @@ import WebKit
 
 // The scripts every WebKit page runs at document start in all frames: `isolated` in Sailfish's own content world,
 // posting to the `sailfish` message handler, and `pageWorld` in the page's world, where it captures the page's
-// Media Session handlers and hands them to the isolated script through DOM events. `sourceBufferOffset` also runs in
-// the page's world.
+// Media Session handlers and hands them to the isolated script through DOM events. `sourceBufferOffset` and
+// `subtitleTracks` also run in the page's world.
 enum WebKitPageScript {
   @MainActor static let world = WKContentWorld.world(name: "Sailfish")
 
@@ -808,6 +808,114 @@ enum WebKitPageScript {
     } catch (e) {}
     return apply(appendBuffer, this, [bytes]);
   };
+})();
+"""#
+
+  // WebKit on macOS 15 sorts its caption menu with slow language matching each time a text track is added to a video
+  // (rdar://147072548, fixed upstream), and Apple TV+'s player adds hundreds before play, which holds the page for
+  // seconds. On tv.apple.com, and on the hosts of the SailfishExperimentHosts default that replays point at a local
+  // page, a subtitles or captions track the page adds is registered as a metadata track, which the menu leaves out, and
+  // reports the kind the page asked for. WebKit draws no metadata cues, so a track the page shows stays hidden inside
+  // WebKit and its active cues are drawn in a layer over the video. The layer goes in the full screen element or the
+  // video's modal dialog when there is one, since both paint in the top layer above everything in the body.
+  static var subtitleTracks: String {
+    let hosts = ["tv.apple.com"] + (UserDefaults.standard.stringArray(forKey: "SailfishExperimentHosts") ?? [])
+    let list = String(decoding: try! JSONEncoder().encode(hosts), as: UTF8.self)
+    return subtitleTracksSource.replacing("__HOSTS__", with: list)
+  }
+
+  private static let subtitleTracksSource = #"""
+(() => {
+  if (!__HOSTS__.some((h) => location.hostname === h || location.hostname.endsWith("." + h))) return;
+  const apply = Reflect.apply;
+  const listen = EventTarget.prototype.addEventListener;
+  const createElement = Document.prototype.createElement;
+  const mediaProto = HTMLMediaElement.prototype;
+  const trackProto = TextTrack.prototype;
+  const addTextTrack = mediaProto.addTextTrack;
+  const textTracks = Object.getOwnPropertyDescriptor(mediaProto, "textTracks").get;
+  const activeCues = Object.getOwnPropertyDescriptor(trackProto, "activeCues").get;
+  const kind = Object.getOwnPropertyDescriptor(trackProto, "kind");
+  const mode = Object.getOwnPropertyDescriptor(trackProto, "mode");
+  const owners = new WeakMap();
+  const showing = new WeakSet();
+  const views = new WeakMap();
+  const layerStyle = "all:initial;position:fixed;pointer-events:none;z-index:2147483647;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;box-sizing:border-box;padding-bottom:1.5em;";
+  const sheet = new CSSStyleSheet();
+  sheet.replaceSync("div { max-width: 90%; margin-top: 0.15em; padding: 0.1em 0.45em; border-radius: 0.25em; background: rgba(0, 0, 0, 0.8); color: #fff; font: 1em/1.3 -apple-system, sans-serif; text-align: center; white-space: pre-line; unicode-bidi: plaintext; }");
+
+  // Keeps the layer on the video's frame while it holds cues, at a font size scaled to the video's height.
+  const follow = (media, view) => {
+    if (!view.root.childElementCount) {
+      view.layer.remove();
+      view.following = false;
+      return;
+    }
+    const host = document.fullscreenElement || media.closest("dialog:modal") || document.body;
+    if (view.layer.parentNode !== host) host.append(view.layer);
+    const box = media.getBoundingClientRect();
+    const frame = `left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px;font-size:${box.height * 0.05}px;`;
+    if (frame !== view.frame) {
+      view.frame = frame;
+      view.layer.style.cssText = layerStyle + frame;
+    }
+    requestAnimationFrame(() => follow(media, view));
+  };
+  const draw = (media) => {
+    let view = views.get(media);
+    if (!view) {
+      const layer = apply(createElement, document, ["div"]);
+      const root = layer.attachShadow({ mode: "closed" });
+      root.adoptedStyleSheets = [sheet];
+      view = { layer, root, frame: "", following: false };
+      views.set(media, view);
+    }
+    const lines = [];
+    for (const track of apply(textTracks, media, [])) {
+      if (!showing.has(track)) continue;
+      for (const cue of apply(activeCues, track, [])) {
+        const line = apply(createElement, document, ["div"]);
+        line.append(cue.getCueAsHTML());
+        lines.push(line);
+      }
+    }
+    view.root.replaceChildren(...lines);
+    if (!view.following) {
+      view.following = true;
+      follow(media, view);
+    }
+  };
+
+  mediaProto.addTextTrack = function (asked, ...rest) {
+    if (asked !== "subtitles" && asked !== "captions") return apply(addTextTrack, this, arguments);
+    const track = apply(addTextTrack, this, ["metadata", ...rest]);
+    owners.set(track, { media: this, kind: asked });
+    apply(listen, track, ["cuechange", () => {
+      if (showing.has(track)) draw(this);
+    }]);
+    return track;
+  };
+  Object.defineProperty(trackProto, "kind", {
+    ...kind,
+    get() {
+      return owners.has(this) ? owners.get(this).kind : apply(kind.get, this, []);
+    },
+  });
+  Object.defineProperty(trackProto, "mode", {
+    ...mode,
+    get() {
+      return showing.has(this) ? "showing" : apply(mode.get, this, []);
+    },
+    set(value) {
+      const owner = owners.get(this);
+      if (!owner) return apply(mode.set, this, [value]);
+      const show = `${value}` === "showing";
+      apply(mode.set, this, [show ? "hidden" : value]);
+      if (show) showing.add(this);
+      else if (apply(mode.get, this, []) === `${value}`) showing.delete(this);
+      draw(owner.media);
+    },
+  });
 })();
 """#
 }
