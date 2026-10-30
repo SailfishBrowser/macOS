@@ -35,6 +35,14 @@ final class Shell: NSObject, NSMenuDelegate {
     self?.importData()
   }
 
+  #if DEBUG
+    private lazy var about = makeAboutWindow(checkForUpdates: nil)
+  #else
+    private lazy var about = makeAboutWindow { [weak self] in
+      self?.updater.controller.checkForUpdates(nil)
+    }
+  #endif
+
   private var recoveryToken: ObserveToken?
 
   override init() {
@@ -242,6 +250,10 @@ final class Shell: NSObject, NSMenuDelegate {
     store.send(.windows(.element(id: id, action: .showImport)))
     syncWindows()
     controllers[id]?.showWindow(nil)
+  }
+
+  @objc func showAbout(_ sender: Any?) {
+    about.makeKeyAndOrderFront(nil)
   }
 
   // Opens the pane the sender's tag picks, as the command bar's Edit Keyboard Shortcuts does.
