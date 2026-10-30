@@ -707,6 +707,8 @@ struct WindowFeature {
 
       case .showFind:
         guard state.find == nil, let tab = state.spaces.selected.selectedTab, tab.isLive else { return .none }
+        // Find takes the keys, so the bar does not stay open over the page behind it.
+        state.commandBar = nil
         state.find = FindFeature.State(tab: tab.id, query: state.findQuery)
         return state.findQuery.isEmpty ? .none : .send(.find(.presented(.next)))
 
