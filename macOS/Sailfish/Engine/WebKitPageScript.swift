@@ -6,7 +6,8 @@ import WebKit
 
 // The scripts every WebKit page runs at document start in all frames: `isolated` in Sailfish's own content world,
 // posting to the `sailfish` message handler, and `pageWorld` in the page's world, where it captures the page's
-// Media Session handlers and hands them to the isolated script through DOM events.
+// Media Session handlers and hands them to the isolated script through DOM events. `sourceBufferOffset` also runs in
+// the page's world.
 enum WebKitPageScript {
   @MainActor static let world = WKContentWorld.world(name: "Sailfish")
 
@@ -708,6 +709,105 @@ enum WebKitPageScript {
     },
     true,
   ]);
+})();
+"""#
+
+  // WebKit on macOS 15 loops in its GPU process when a sample with an invalid timestamp reaches a source buffer whose
+  // timestampOffset is not zero (WebKit bug 294067, fixed upstream in June 2025), which Apple TV+'s streams cause. A
+  // buffer in segments mode keeps a zero offset inside WebKit and each appended fragment's decode time moves by the
+  // offset the site set instead; a buffer in sequence mode places its segments from the offset itself and keeps it.
+  static let sourceBufferOffset = #"""
+(() => {
+  const apply = Reflect.apply;
+  const proto = SourceBuffer.prototype;
+  const offset = Object.getOwnPropertyDescriptor(proto, "timestampOffset");
+  const mode = Object.getOwnPropertyDescriptor(proto, "mode").get;
+  const addSourceBuffer = MediaSource.prototype.addSourceBuffer;
+  const appendBuffer = proto.appendBuffer;
+  const offsets = new WeakMap();
+  const timescales = new WeakMap();
+  const sequence = (buffer) => apply(mode, buffer, []) === "sequence";
+
+  // The complete boxes between start and end as [type, content start, end].
+  const boxes = function* (d, start, end) {
+    for (let at = start; at + 8 <= end; ) {
+      let size = d.getUint32(at);
+      let head = 8;
+      if (size === 1) {
+        size = Number(d.getBigUint64(at + 8));
+        head = 16;
+      } else if (size === 0) size = end - at;
+      if (size < head || at + size > end) return;
+      yield [String.fromCharCode(d.getUint8(at + 4), d.getUint8(at + 5), d.getUint8(at + 6), d.getUint8(at + 7)), at + head, at + size];
+      at += size;
+    }
+  };
+  const find = (d, start, end, type) => {
+    for (const box of boxes(d, start, end)) if (box[0] === type) return box;
+  };
+  // The appended bytes with each fragment's decode time moved by the buffer's offset, in a copy so a buffer the site
+  // appends again is not moved twice. A moov's track timescales are kept for the buffer's later fragments.
+  const shifted = (buffer, data) => {
+    const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data);
+    const d = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const scales = timescales.get(buffer);
+    const seconds = sequence(buffer) ? 0 : offsets.get(buffer) || 0;
+    const long = (box) => d.getUint8(box[1]) === 1;
+    const edits = [];
+    for (const [type, start, end] of boxes(d, 0, d.byteLength)) {
+      if (type === "moov") {
+        for (const [t, a, b] of boxes(d, start, end)) {
+          if (t !== "trak") continue;
+          const tkhd = find(d, a, b, "tkhd");
+          const mdia = find(d, a, b, "mdia");
+          const mdhd = find(d, mdia[1], mdia[2], "mdhd");
+          scales.set(d.getUint32(tkhd[1] + (long(tkhd) ? 20 : 12)), d.getUint32(mdhd[1] + (long(mdhd) ? 20 : 12)));
+        }
+      }
+      if (type !== "moof" || !seconds) continue;
+      for (const [t, a, b] of boxes(d, start, end)) {
+        if (t !== "traf") continue;
+        const tfhd = find(d, a, b, "tfhd");
+        const tfdt = find(d, a, b, "tfdt");
+        const wide = long(tfdt);
+        const at = tfdt[1] + 4;
+        const was = wide ? d.getBigUint64(at) : BigInt(d.getUint32(at));
+        let now = was + BigInt(Math.round(seconds * scales.get(d.getUint32(tfhd[1] + 4))));
+        if (now < 0n) now = 0n;
+        if (!wide && now > 0xffffffffn) throw new RangeError("tfdt");
+        edits.push([at, wide, now]);
+      }
+    }
+    if (!edits.length) return data;
+    const copy = bytes.slice();
+    const c = new DataView(copy.buffer);
+    for (const [at, wide, now] of edits) wide ? c.setBigUint64(at, now) : c.setUint32(at, Number(now));
+    return copy;
+  };
+
+  Object.defineProperty(proto, "timestampOffset", {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return sequence(this) ? apply(offset.get, this, []) : offsets.get(this) || 0;
+    },
+    set(value) {
+      apply(offset.set, this, [sequence(this) ? value : 0]);
+      offsets.set(this, +value);
+    },
+  });
+  MediaSource.prototype.addSourceBuffer = function () {
+    const buffer = apply(addSourceBuffer, this, arguments);
+    timescales.set(buffer, new Map());
+    return buffer;
+  };
+  proto.appendBuffer = function (data) {
+    let bytes = data;
+    try {
+      bytes = shifted(this, data);
+    } catch (e) {}
+    return apply(appendBuffer, this, [bytes]);
+  };
 })();
 """#
 }
