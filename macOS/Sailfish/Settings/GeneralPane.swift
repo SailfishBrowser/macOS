@@ -55,12 +55,12 @@ struct GeneralPane: View {
   }
 }
 
-// With "Warn before quitting" on, the first ⌘Q shows "⌘Q again to quit" for two seconds, and a second ⌘Q while it
-// shows quits; any other key closes it. Quit chosen from the menu bar counts as the keys. AppleScript and the Dock quit
-// at once, as does a quit with no window to show the toast in. While files download it asks about those instead, as
-// quitting cancels them. Every route to quitting, the menu, the Dock, AppleScript and logout included, comes through
-// NSApp.terminate(_:), which the engine's application class owns, so the warning wraps that method rather than the
-// app delegate.
+// With "Warn before quitting" on, quitting first asks "Quit Sailfish?" over the last focused window: Return, the
+// Quit button or a second quit quits, and Escape or Cancel closes it; other keys do nothing while it shows. Quit chosen
+// from the menu bar counts as the keys. AppleScript and the Dock quit at once, as does a quit with no window to ask in.
+// While files download it asks about those instead, as quitting cancels them. Every route to quitting, the menu, the
+// Dock, AppleScript and logout included, comes through NSApp.terminate(_:), which the engine's application class owns,
+// so the warning wraps that method rather than the app delegate.
 @MainActor
 final class QuitWarning {
   enum Prompt: Equatable { case none, downloads, confirm }
@@ -69,11 +69,11 @@ final class QuitWarning {
   // Set when Sparkle quits to install an update and relaunch.
   var bypass = false
   private let store: StoreOf<AppFeature>
-  // The first press's toast and its window; a second press quits while that toast shows.
-  private var pending: (window: WindowFeature.State.ID, toast: Toast.ID)?
+  private let showWindow: (WindowFeature.State.ID) -> Void
 
-  init(store: StoreOf<AppFeature>) {
+  init(store: StoreOf<AppFeature>, showWindow: @escaping (WindowFeature.State.ID) -> Void) {
     self.store = store
+    self.showWindow = showWindow
   }
 
   // Logout, restart and shutdown send a quit event with a reason, and must not wait on a dialog.
@@ -95,11 +95,16 @@ final class QuitWarning {
     }
     method_setImplementation(method, imp_implementationWithBlock(block))
     _ = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [unowned self] event in
-      if let pending, !isQuitKey(event) {
-        store.send(.windows(.element(id: pending.window, action: .dismissToast(pending.toast))), animation: Motion.layout)
-        self.pending = nil
+      guard let window = confirmingWindow, !isQuitKey(event) else { return event }
+      switch event.keyCode {
+      case 36, 76:
+        NSApp.terminate(nil)
+      case 53:
+        store.send(.windows(.element(id: window, action: .confirmQuit(false))))
+      default:
+        break
       }
-      return event
+      return nil
     }
   }
 
@@ -111,8 +116,8 @@ final class QuitWarning {
     KeyBinding(event) == KeyBinding(quitItem).normalized
   }
 
-  private var isShowingToast: Bool {
-    pending.map { store.windows[id: $0.window]?.toast?.id == $0.toast } ?? false
+  private var confirmingWindow: WindowFeature.State.ID? {
+    store.windows.first(where: \.isConfirmingQuit)?.id
   }
 
   private var quitEvent: NSAppleEventDescriptor? {
@@ -138,10 +143,9 @@ final class QuitWarning {
       alert.addButton(withTitle: "Cancel")
       return alert.runModal() == .alertFirstButtonReturn
     case .confirm:
-      guard quitEvent == nil, !isShowingToast, let window = store.state.toastWindowID else { return true }
-      let keys = quitItem.keyEquivalent.isEmpty ? "Quit" : ShortcutsPane.keys(quitItem)
-      store.send(.windows(.element(id: window, action: .showToast("\(keys) again to quit", duration: .seconds(2)))))
-      pending = store.windows[id: window]?.toast.map { (window, $0.id) }
+      guard quitEvent == nil, confirmingWindow == nil, let window = store.state.toastWindowID else { return true }
+      showWindow(window)
+      store.send(.windows(.element(id: window, action: .confirmQuit(true))))
       return false
     }
   }
