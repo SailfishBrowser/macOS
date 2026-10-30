@@ -19,7 +19,7 @@ final class MediaFirstLaunchTests: XCTestCase {
       $0.webEngine.saveSessions = {}
       $0.webEngine.keepSessions = { _ in }
       $0.webEngine.events = { .finished }
-      $0.webEngine.create = { _, _, _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
       $0.browserImport.isDefaultBrowser = { false }
     }

@@ -822,7 +822,7 @@ struct TabsFeature {
         tab.groupID = state.tabs[id: opener]?.groupID
         state.tabs.insert(tab, at: index)
         return .merge(.send(.delegate(.openedInBackground(tab.id))), .run { [tab, profile = state.profileID, incognito = state.isIncognito] _ in
-          await engine.create(tab.id, profile, incognito, tab.pages, tab.shownPage)
+          await engine.create(tab.id, profile, incognito, tab.pages, tab.shownPage, url)
           await engine.load(tab.id, url)
         })
 
@@ -830,7 +830,7 @@ struct TabsFeature {
         guard let tab = state.tabs[id: id], !tab.isLive else { return .none }
         state.tabs[id: id]?.isLive = true
         return .run { [profile = state.profileID, incognito = state.isIncognito] _ in
-          await engine.create(id, profile, incognito, tab.pages, tab.shownPage)
+          await engine.create(id, profile, incognito, tab.pages, tab.shownPage, tab.url)
           await engine.load(id, tab.url)
         }
 
@@ -1322,7 +1322,7 @@ struct TabsFeature {
     }
     return .merge(tabs.map { tab in
       .run { [profile = state.profileID, incognito = state.isIncognito] _ in
-        await engine.create(tab.id, profile, incognito, tab.pages, tab.shownPage)
+        await engine.create(tab.id, profile, incognito, tab.pages, tab.shownPage, tab.url)
         if tab.isMuted {
           await engine.setMuted(tab.id, true)
         }

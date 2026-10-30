@@ -5,7 +5,8 @@ enum PageEngineKind: String, Codable, Sendable {
   case chromium, webkit
 }
 
-// What started a navigation. Only the user's own (typed, link, form, newTab) can change a tab's engine.
+// What started a navigation. Only the user's own (typed, link, form, newTab) can change a tab's engine, and a reload
+// or restore of a Chromium page, which opens where the table puts its site.
 enum NavigationCause: Sendable {
   case typed, link, form, newTab, popup, redirect, script, history, reload, restore
 }
@@ -75,8 +76,10 @@ func pageEngine(
     let host = url.host()?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
   else { return .chromium }
   switch cause {
-  case .redirect, .script, .history, .reload, .restore, .popup:
+  case .redirect, .script, .history, .popup:
     return current ?? .chromium
+  case .reload, .restore:
+    if current == .webkit { return .webkit }
   case .typed, .link, .form, .newTab:
     break
   }

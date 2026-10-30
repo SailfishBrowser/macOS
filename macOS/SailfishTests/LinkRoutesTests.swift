@@ -70,7 +70,7 @@ final class LinkRoutesTests: XCTestCase {
       $0.date = .constant(now)
       $0.continuousClock = ImmediateClock()
       $0.persistence.save = { _ in }
-      $0.webEngine.create = { _, _, _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
       $0.webEngine.littleWindow = { _, _, _ in }
       $0.webEngine.saveSessions = {}

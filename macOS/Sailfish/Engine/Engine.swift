@@ -388,7 +388,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
 
 extension WebEngineClient: DependencyKey {
   static let liveValue = Self(
-    create: { await Engine.shared.create($0, $1, $2, pages: $3, shown: $4) },
+    create: { await Engine.shared.create($0, $1, $2, pages: $3, shown: $4, url: $5) },
     load: { await Engine.shared.load($0, $1) },
     switchEngine: { await Engine.shared.reopen($0, in: $1) },
     warmWebKit: { await Engine.shared.warmWebKit(profile: $0, incognito: $1, for: $2) },

@@ -49,7 +49,7 @@ final class PersistenceTests: XCTestCase {
       $0.webEngine.saveSessions = {}
       $0.webEngine.keepSessions = { _ in }
       $0.webEngine.events = { .finished }
-      $0.webEngine.create = { _, _, _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
     }
     let space = Space(
@@ -105,7 +105,7 @@ final class PersistenceTests: XCTestCase {
       $0.persistence.backups = { backups }
       $0.persistence.loadBackup = { $0 == backups[0] ? Data(today.utf8) : Data() }
       $0.webEngine.events = { .finished }
-      $0.webEngine.create = { _, _, _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
     }
     store.exhaustivity = .off
