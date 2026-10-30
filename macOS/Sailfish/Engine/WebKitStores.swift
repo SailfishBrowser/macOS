@@ -73,6 +73,12 @@ import WebKit
       WKUserScript(source: WebKitPageScript.pageWorld, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
     controller.addUserScript(
       WKUserScript(
+        source: WebKitPageScript.sourceBufferOffset, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+    controller.addUserScript(
+      WKUserScript(
+        source: WebKitPageScript.subtitleTracks, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+    controller.addUserScript(
+      WKUserScript(
         source: PasswordFill.script, injectionTime: .atDocumentEnd, forMainFrameOnly: false, in: PasswordFill.world))
     if WebKitPasskeys.isEntitled {
       WebKitPasskeys.requestAccess()

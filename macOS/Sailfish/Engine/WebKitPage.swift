@@ -258,7 +258,7 @@ import WebKit
 
   // The clauses keep this order, each its task's: downloads; a modified link or form opening elsewhere; the
   // other-site Peek; the engine choice. Every other action is allowed, which keeps redirects and script navigations
-  // in WebKit.
+  // in WebKit, and a main-frame one is never offered to the app that owns the site's universal links.
   func webView(
     _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
     decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
@@ -266,9 +266,12 @@ import WebKit
     if WebKitDownloads.isDownload(action) {
       return decisionHandler(.download)
     }
-    let engine = Engine.shared
-    guard action.targetFrame?.isMainFrame == true, let tab = engine.tab(of: self), let url = action.request.url else {
+    guard action.targetFrame?.isMainFrame == true else {
       return decisionHandler(.allow)
+    }
+    let engine = Engine.shared
+    guard let tab = engine.tab(of: self), let url = action.request.url else {
+      return decisionHandler(.allowWithoutTryingAppLink)
     }
     let cause: NavigationCause? =
       switch (isProvisional, action.navigationType) {
@@ -299,7 +302,7 @@ import WebKit
       }
     }
     navigationType = action.navigationType
-    decisionHandler(.allow)
+    decisionHandler(.allowWithoutTryingAppLink)
   }
 
   func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -669,4 +672,10 @@ final class WebKitWebView: WKWebView {
     menu.items = Engine.shared.pageMenuItems(
       WebKitContextMenu(hit: hit ?? .empty, page: page, event: event), for: tab, page: page)
   }
+}
+
+// WebKit's private _WKNavigationActionPolicyAllowWithoutTryingAppLink (WKNavigationDelegatePrivate.h): allow, without
+// first offering a user navigation on a universal-link domain to the app that owns it.
+extension WKNavigationActionPolicy {
+  fileprivate static let allowWithoutTryingAppLink = WKNavigationActionPolicy(rawValue: allow.rawValue + 2)!
 }
