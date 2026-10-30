@@ -18,15 +18,12 @@ struct ImportView: View {
       case .arc: store.scope(state: \.arc, action: \.arc).map { ArcImportView(store: $0) }
       case .options: options
       case .importing:
-        ImportDialog(title: "Importing…", message: "Bringing everything over.") {
-          ProgressView()
+        ImportDialog(title: "Import") {
+          ProgressView().progressViewStyle(.linear).frame(width: 240)
         } buttons: {}
       case .finished: finished
       case .defaultBrowser:
-        ImportDialog(
-          title: "Go steady with Sailfish?",
-          message: "Make Sailfish your default browser so links open here. We'll treat your links nicely – you won't regret it, we promise!"
-        ) {
+        ImportDialog(title: "Default Browser") {
           Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 128, height: 128)
         } buttons: {
           ImportDialogButton(title: "Not Now") { store.send(.nextTapped) }.keyboardShortcut(.cancelAction)
@@ -34,10 +31,7 @@ struct ImportView: View {
             .keyboardShortcut(.defaultAction)
         }
       case .theme:
-        ImportDialog(
-          title: "Add some flair with a theme.",
-          message: "Pick a color, any color – add your favorite shade to your new home on the internet."
-        ) {
+        ImportDialog(title: "Theme") {
           VStack(alignment: .leading, spacing: 12) {
             if let name = Binding($store.spaceName) {
               TextField("Space name", text: name)
@@ -50,10 +44,7 @@ struct ImportView: View {
             .keyboardShortcut(.defaultAction)
         }
       case .adBlocker:
-        ImportDialog(
-          title: "No more ads or trackers.",
-          message: "We include an ad blocker so you don't need to worry about invasive trackers or intrusive pop-ups."
-        ) {
+        ImportDialog(title: "Ad Blocker") {
           Toggle("Block ads and trackers with uBlock Origin", isOn: Binding($blocksAds))
             .toggleStyle(.switch)
             .onChange(of: blocksAds) { Engine.shared.adBlockingDidChange() }
@@ -61,19 +52,15 @@ struct ImportView: View {
           ImportDialogButton(title: "Continue", isPrimary: true) { store.send(.nextTapped) }.keyboardShortcut(.defaultAction)
         }
       case .mediaFolders:
-        ImportDialog(
-          title: "Your media, all in one place.",
-          message: "The Library shows the images and videos in your Documents, Desktop, Downloads and screenshots folders. macOS will ask you to allow each one."
-        ) {
-          Image(systemName: "photo.on.rectangle").font(.system(size: 96, weight: .light))
+        ImportDialog(title: "Media Folders", message: "macOS asks to allow each folder.") {
+          MediaFolderList()
         } buttons: {
           ImportDialogButton(title: "Continue", isPrimary: true) { store.send(.mediaFoldersTapped) }
             .keyboardShortcut(.defaultAction)
         }
       case .welcome:
         ImportDialog(
-          title: "Welcome to Sailfish, \(NSFullUserName().split(separator: " ").first.map(String.init) ?? NSUserName())",
-          message: "And with that, you're now ready to experience your upgraded internet."
+          title: "Welcome to Sailfish, \(NSFullUserName().split(separator: " ").first.map(String.init) ?? NSUserName())"
         ) {
           Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 128, height: 128)
         } buttons: {
@@ -87,13 +74,7 @@ struct ImportView: View {
   }
 
   private var browsers: some View {
-    ImportDialog(
-      title: store.isOnboarding ? "Get us up to speed." : "Import from your old browser",
-      message: store.isOnboarding
-        ? "It's a bold new internet. Hit the ground running and bring your spaces, bookmarks and history with you."
-        : "Import everything you need from your old browser to hit the ground running with Sailfish.",
-      close: store.isOnboarding ? nil : { store.send(.backTapped) }
-    ) {
+    ImportDialog(title: "Import from Another Browser", close: store.isOnboarding ? nil : { store.send(.backTapped) }) {
       VStack(spacing: 10) {
         if store.sources.isEmpty {
           Text("No other browser with data was found.").foregroundStyle(.secondary)
@@ -173,7 +154,7 @@ struct ImportView: View {
 
   @ViewBuilder private var finished: some View {
     if let summary = store.summary {
-      ImportDialog(title: "Imported from \(summary.browser.rawValue)", message: "Everything's in its place.") {
+      ImportDialog(title: "Imported from \(summary.browser.rawValue)") {
         VStack(alignment: .leading, spacing: 8) {
           if summary.spaces > 0 {
             Text("\(summary.spaces) \(summary.spaces == 1 ? "space" : "spaces") with \(summary.tabs) tabs")
@@ -199,7 +180,7 @@ struct ImportView: View {
 
 private struct ImportDialog<Content: View, Buttons: View>: View {
   let title: String
-  let message: String
+  var message: String?
   var close: (() -> Void)? = nil
   @ViewBuilder let content: Content
   @ViewBuilder let buttons: Buttons
@@ -210,7 +191,9 @@ private struct ImportDialog<Content: View, Buttons: View>: View {
         VStack(alignment: .leading, spacing: 14) {
           Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 48, height: 48).padding(.bottom, 26)
           Text(title).font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
-          Text(message).font(.system(size: 14)).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
+          if let message {
+            Text(message).font(.system(size: 14)).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
+          }
         }
         .frame(width: 250, alignment: .leading)
         content.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -283,6 +266,23 @@ private struct BrowserChoice: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+  }
+}
+
+// The folders the media folders step asks macOS for, as Finder shows them; the screenshots folder is often one of the
+// others.
+private struct MediaFolderList: View {
+  var body: some View {
+    let folders = MediaSources.allCases.compactMap(\.folder).map(\.standardizedFileURL)
+      .reduce(into: [URL]()) { if !$0.contains($1) { $0.append($1) } }
+    VStack(alignment: .leading, spacing: 10) {
+      ForEach(folders, id: \.self) { folder in
+        HStack(spacing: 10) {
+          Image(nsImage: NSWorkspace.shared.icon(forFile: folder.path)).resizable().frame(width: 24, height: 24)
+          Text(FileManager.default.displayName(atPath: folder.path)).foregroundStyle(.white)
+        }
+      }
+    }
   }
 }
 
