@@ -11,6 +11,10 @@ struct Toast: Equatable, Identifiable {
     case editShortcut
     // Tidy Downloads' Undo: the download takes back its original name.
     case revertDownloadName(Download.ID)
+    // "Save password for {site}?": saves the login typed into a WebKit page.
+    case saveLogin(PendingLogin.ID)
+    // "{site} opened in WebKit": the tab shows its Chromium page again.
+    case undoEngineSwitch(Tab.ID)
   }
 
   // The dark pill at the bottom, or the accent pill at the page's top right.
@@ -126,7 +130,7 @@ struct ToastView: View {
         Button(action: { perform(action) }) {
           Text(title(action)).font(.system(size: 12, weight: .bold))
             .padding(.horizontal, 8).frame(height: 24)
-            .background(action == .undo ? .white.opacity(0.14) : Theme.accent, in: RoundedRectangle(cornerRadius: 6))
+            .background(isUndo(action) ? .white.opacity(0.14) : Theme.accent, in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
       }
@@ -142,10 +146,19 @@ struct ToastView: View {
     .padding(.leading, 14)
     .padding(.trailing, 8)
     .frame(height: 40)
+    // The border lies under the buttons: as an overlay its stroked shape took clicks on the pill's middle row.
+    .background(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(isHovering ? 0.14 : 0.08)))
     .background(Theme.menu.opacity(isHovering ? 1 : 0.92), in: RoundedRectangle(cornerRadius: 10))
-    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(isHovering ? 0.14 : 0.08)))
     .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
     .onHover { isHovering = $0 }
+  }
+
+  // An Undo is a faint button; any other action is the accent.
+  private func isUndo(_ action: Toast.Action) -> Bool {
+    switch action {
+    case .undo, .undoEngineSwitch: true
+    case .goToTab, .editShortcut, .revertDownloadName, .saveLogin: false
+    }
   }
 
   private func title(_ action: Toast.Action) -> String {
@@ -154,6 +167,8 @@ struct ToastView: View {
     case .goToTab: "Go there"
     case .editShortcut: "Edit the shortcut ↗"
     case .revertDownloadName: "Undo"
+    case .saveLogin: "Save"
+    case .undoEngineSwitch: "Undo"
     }
   }
 }

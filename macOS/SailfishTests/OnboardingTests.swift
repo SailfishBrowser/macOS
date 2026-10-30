@@ -18,8 +18,9 @@ final class OnboardingTests: XCTestCase {
       $0.persistence.save = { _ in }
       $0.webEngine.saveSessions = {}
       $0.webEngine.keepSessions = { _ in }
+      $0.webEngine.removeDeletedStores = {}
       $0.webEngine.events = { .finished }
-      $0.webEngine.create = { _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
       $0.webEngine.littleWindow = { _, _, _ in }
       $0.browserImport.isDefaultBrowser = { false }
@@ -116,7 +117,7 @@ final class OnboardingTests: XCTestCase {
       $0.browserImport.bookmarks = { _, _ in
         [.tab(ArcData.Tab(url: URL(string: "https://a.example/")!, title: "A", createdAt: Date(timeIntervalSince1970: 0)))]
       }
-      $0.webEngine.create = { _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
       $0.browserImport.isDefaultBrowser = { false }
     }

@@ -97,7 +97,7 @@ struct ImportView: View {
     case .defaultBrowser, .welcome:
       Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 128, height: 128)
     case .theme:
-      ThemePicker(theme: $theme, original: SpaceTheme())
+      ThemePicker(theme: $theme, original: SpaceTheme(), isEditing: false)
         .onChange(of: theme) { store.send(.themeChanged(theme)) }
     case .adBlocker:
       Toggle("Block ads and trackers with uBlock Origin", isOn: Binding($blocksAds))

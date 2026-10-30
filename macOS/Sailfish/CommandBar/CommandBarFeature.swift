@@ -186,22 +186,22 @@ struct CommandBarFeature {
       if keyword == nil, let result = Calculator.evaluate(self.query) {
         return [.calculation(self.query.trimmingCharacters(in: .whitespaces), result)]
       }
-      // The best match (as its open tab if there is one), the search for the typed text, matching
-      // commands and open tabs, then sites before search suggestions. A page matches a tab regardless of "www.".
-      // A command comes first unless the best match is a site the text completes to.
-      let bestTab = matches.first.flatMap { best in others.first { $0.url.displayString == best.url.displayString } }
-      let tabs = others.filter { $0.matches(query) && $0 != bestTab }
-      let rest = matches.dropFirst().filter { match in !tabs.contains { $0.url.displayString == match.url.displayString } }
-      let verbatim = rest.first { $0.type == .search && $0.contents.lowercased() == query }
-      let best = bestTab.map(Suggestion.tab) ?? matches.first.map(Suggestion.match)
-      let completes = bestTab != nil || matches.first.map { $0.type != .search && !$0.inlineAutocompletion.isEmpty } == true
+      // The best match, the search for the typed text, matching commands and open tabs, then sites before search
+      // suggestions. The best match stays first even when its page is open, as in Arc: the open tab is listed below
+      // it with Switch to Tab. A lower match whose page is a listed tab is shown as the tab alone. A page matches a
+      // tab regardless of "www.". A command comes first unless the best match is a site the text completes to.
+      let verbatim = matches.dropFirst().first { $0.type == .search && $0.contents.lowercased() == query }
+      let pages = Set(matches.map(\.url.page))
+      let tabs = others.filter { $0.matches(query) || pages.contains($0.url.page) }.prefix(2)
+      let rest = matches.dropFirst().filter { match in match != verbatim && !tabs.contains { $0.url.page == match.url.page } }
+      let completes = matches.first.map { $0.type != .search && !$0.inlineAutocompletion.isEmpty } == true
       let lead = completes ? nil : commands.first { !$0.isMinor }
       let rows: [Suggestion] =
-        [lead.map(Suggestion.command), best, verbatim.map(Suggestion.match)].compactMap { $0 }
+        [lead.map(Suggestion.command), matches.first.map(Suggestion.match), verbatim.map(Suggestion.match)].compactMap { $0 }
         + commands.filter { $0 != lead }.map(Suggestion.command)
-        + tabs.prefix(2).map(Suggestion.tab)
+        + tabs.map(Suggestion.tab)
         + rest.filter { $0.type != .search }.map(Suggestion.match)
-        + rest.filter { $0.type == .search && $0 != verbatim }.map(Suggestion.match)
+        + rest.filter { $0.type == .search }.map(Suggestion.match)
       return Array(rows.prefix(5))
     }
   }
@@ -238,6 +238,7 @@ struct CommandBarFeature {
 
   @Dependency(\.autocomplete) var autocomplete
   @Dependency(\.dismiss) var dismiss
+  @Dependency(\.webEngine) var webEngine
 
   var body: some ReducerOf<Self> {
     Reduce { state, action in
@@ -282,10 +283,10 @@ struct CommandBarFeature {
         state.matchesQuery = query
         state.refreshSuggestions()
         state.selection = min(state.selection, max(state.suggestions.count - 1, 0))
-        let favicons = loadFavicons(state)
-        guard let index = state.pendingSubmit else { return favicons }
+        let effects = Effect.merge(loadFavicons(state), warmWebKit(state))
+        guard let index = state.pendingSubmit else { return effects }
         state.pendingSubmit = nil
-        return .merge(favicons, .send(.submit(index)))
+        return .merge(effects, .send(.submit(index)))
 
       case let .moveSelection(offset):
         state.selection = min(max(state.selection + offset, 0), max(state.suggestions.count - 1, 0))
@@ -353,6 +354,16 @@ struct CommandBarFeature {
           return .send(.submit(index))
         }
       }
+    }
+  }
+
+  // The page Return would open starts WebKit when it opens there, so the first WebKit page does not start it cold.
+  private func warmWebKit(_ state: State) -> Effect<Action> {
+    guard state.suggestions.indices.contains(state.selection),
+      case let .match(match) = state.suggestions[state.selection]
+    else { return .none }
+    return .run { [profile = state.profile, incognito = state.isIncognito] _ in
+      await webEngine.warmWebKit(profile, incognito, match.url)
     }
   }
 

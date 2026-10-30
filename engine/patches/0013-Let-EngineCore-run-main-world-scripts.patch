@@ -1,0 +1,86 @@
+From: jt914 <josephtso914@gmail.com>
+Subject: [PATCH] Let EngineCore run main-world scripts
+
+EngineCore runs scripts in a page's main world at document start and receives
+messages from objects it adds to the page, through components/js_injection as
+Android WebView does. The browser side, js_injection::JsCommunicationHost, is
+owned by EngineCore and reaches each frame through its remote associated
+interfaces, so only the renderer changes: every frame gets a JsCommunication,
+whose document-start scripts run before the extension scripts. A script can
+detach its own frame, so the extension scripts run only if the frame is alive.
+---
+diff --git a/chrome/renderer/BUILD.gn b/chrome/renderer/BUILD.gn
+--- a/chrome/renderer/BUILD.gn
++++ b/chrome/renderer/BUILD.gn
+@@ -158,6 +158,7 @@ static_library("renderer") {
+     "//components/google/core/common",
+     "//components/guest_view/buildflags",
+     "//components/heap_profiling/in_process",
++    "//components/js_injection/renderer",
+     "//components/history_clusters/core",
+     "//components/language/core/common",
+     "//components/lens",
+diff --git a/chrome/renderer/DEPS b/chrome/renderer/DEPS
+--- a/chrome/renderer/DEPS
++++ b/chrome/renderer/DEPS
+@@ -36,6 +36,7 @@ include_rules = [
+   "+components/guest_view/renderer",
+   "+components/history_clusters/core/config.h",
+   "+components/heap_profiling/in_process/heap_profiler_controller.h",
++  "+components/js_injection/renderer",
+   "+components/language/core/common",
+   "+components/language_detection/core",
+   "+components/lens/lens_metadata.mojom.h",
+diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
+--- a/chrome/renderer/chrome_content_renderer_client.cc
++++ b/chrome/renderer/chrome_content_renderer_client.cc
+@@ -100,6 +100,7 @@
+ #include "components/guest_view/buildflags/buildflags.h"
+ #include "components/heap_profiling/in_process/heap_profiler_controller.h"
+ #include "components/history_clusters/core/config.h"
++#include "components/js_injection/renderer/js_communication.h"
+ #include "components/metrics/call_stacks/call_stack_profile_builder.h"
+ #include "components/network_hints/renderer/web_prescient_networking_impl.h"
+ #include "components/no_state_prefetch/renderer/no_state_prefetch_client.h"
+@@ -313,6 +314,17 @@ using UsesKeyboardAccessoryForSuggestions =
+ 
+ namespace {
+ 
++// Tells whether a frame outlived the scripts run in it.
++class FrameLifetime : public content::RenderFrameObserver {
++ public:
++  explicit FrameLifetime(content::RenderFrame* render_frame)
++      : content::RenderFrameObserver(render_frame) {}
++  bool alive() const { return render_frame() != nullptr; }
++
++ private:
++  void OnDestruct() override {}
++};
++
+ #if BUILDFLAG(ENABLE_PDF)
+ std::vector<url::Origin> GetAdditionalPdfInternalPluginAllowedOrigins() {
+   return {url::Origin::Create(GURL(chrome::kChromeUIPrintURL))};
+@@ -657,6 +669,10 @@ void ChromeContentRendererClient::RenderFrameCreated(
+ 
+   new prerender::NoStatePrefetchRenderFrameObserver(render_frame);
+ 
++  // EngineCore's main-world scripts and message objects. It deletes itself
++  // with the frame.
++  new js_injection::JsCommunication(render_frame);
++
+   auto content_settings_delegate =
+       std::make_unique<ChromeContentSettingsAgentDelegate>(render_frame);
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+@@ -1487,6 +1503,12 @@ ChromeContentRendererClient::CreateSpeechRecognitionClient(
+ 
+ void ChromeContentRendererClient::RunScriptsAtDocumentStart(
+     content::RenderFrame* render_frame) {
++  FrameLifetime lifetime(render_frame);
++  js_injection::JsCommunication::Get(render_frame)
++      ->RunScripts(js_injection::mojom::DocumentInjectionTime::kDocumentStart);
++  if (!lifetime.alive()) {
++    return;
++  }
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+   extensions::ExtensionsRendererClient::Get()->RunScriptsAtDocumentStart(
+       render_frame);

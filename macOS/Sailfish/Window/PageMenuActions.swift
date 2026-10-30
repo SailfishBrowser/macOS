@@ -3,8 +3,8 @@ import AppKit
 
 // The menu bar's items for the selected tab's page.
 extension WindowController {
-  private func page(_ operation: (ECWebContents) -> Void) {
-    store.spaces.selected.selectedTabID.map { Engine.shared.perform($0, operation) }
+  private func page(_ operation: (any TabPage) -> Void) {
+    store.spaces.selected.selectedTabID.flatMap { Engine.shared.page($0) }.map(operation)
   }
 
   @objc func zoomIn(_ sender: Any?) {
@@ -33,7 +33,7 @@ extension WindowController {
   }
 
   @objc func printPage(_ sender: Any?) {
-    page { $0.print() }
+    page { $0.printPage() }
   }
 
   @objc func copyURLAsMarkdown(_ sender: Any?) {

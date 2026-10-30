@@ -1,0 +1,942 @@
+import ComposableArchitecture
+import CryptoKit
+import Foundation
+import OSLog
+import WebKit
+
+// Ad blocking in WebKit pages: uBlock Origin's default filter lists, converted into WebKit content rule lists and
+// given to every WebKit page while "Block ads and trackers with uBlock Origin" is on. The lists start as the bundled
+// uBlock Origin's copies and are fetched again on uBlock's schedule. Compiled lists stay in WebKit's content rule list
+// store, with a record of the filter list files they were compiled from. A launch whose files match the record does
+// nothing more until the session's first WebKit view, warm or for a page, which looks the lists up from the store in
+// milliseconds; only the first launch after an install or a list change compiles, in the background at launch. The
+// first WebKit view also starts the fetching.
+@MainActor enum ContentBlocker {
+  // Part of every compiled list's identifier; raising it when the converter's output changes compiles the lists again.
+  nonisolated fileprivate static let converterVersion = 1
+  private static let identifierPrefix = "ContentBlocker"
+  // The lists compiled so far, on every live WebKit page while the setting is on.
+  private(set) static var ruleLists: [WKContentRuleList] = [] {
+    didSet { applyToLivePages() }
+  }
+  // The launch's check of the store, or its compile, and the fetching that starts with the first WebKit view.
+  private static var preparing: Task<Void, Never>?
+  private static var fetching: Task<Void, Never>?
+  // The identifier prefix of the stored lists the check found for the current filter lists.
+  private static var storedPrefix: String?
+  private static var isWebKitInUse = false
+
+  // The setting is on: at launch, or switched on.
+  static func start() {
+    guard preparing == nil else { return }
+    let root = URL(filePath: Engine.adBlocker)
+    preparing = Task {
+      if let prefix = await compiledPrefix(root: root) {
+        storedPrefix = prefix
+      } else {
+        do {
+          await compile(try await Task.detached(priority: .utility) { try FilterLists(root: root) }.value)
+        } catch {
+          Logger().error("Filter lists not read: \(error)")
+        }
+      }
+    }
+    fetch()
+  }
+
+  // A WebKit view is made, warm or for a page.
+  static func webKitDidStart() {
+    isWebKitInUse = true
+    fetch()
+  }
+
+  // Once the setting is on and a WebKit view exists: the stored lists for pages, then each filter list fetched on
+  // uBlock Origin's schedule, checked 37 seconds in and every hour after that, each list fetched once its copy has
+  // expired.
+  private static func fetch() {
+    guard let preparing, isWebKitInUse, fetching == nil else { return }
+    let root = URL(filePath: Engine.adBlocker)
+    fetching = Task {
+      await preparing.value
+      let store = WKContentRuleListStore.default()!
+      if ruleLists.isEmpty, let prefix = storedPrefix,
+        let lists = await lookUp(await stored(in: store)[prefix, default: []], prefix: prefix, in: store)
+      {
+        ruleLists = lists
+      }
+      guard (try? await Task.sleep(for: .seconds(37))) != nil else { return }
+      var lists: FilterLists
+      do {
+        lists = try await Task.detached(priority: .utility) { try FilterLists(root: root) }.value
+      } catch {
+        return Logger().error("Filter lists not read: \(error)")
+      }
+      repeat {
+        let fetched = await lists.fetchingDue()
+        if fetched.digests != lists.digests {
+          await compile(fetched)
+        }
+        lists = fetched
+      } while (try? await Task.sleep(for: .seconds(3600))) != nil
+    }
+  }
+
+  static func stop() {
+    preparing?.cancel()
+    fetching?.cancel()
+    preparing = nil
+    fetching = nil
+  }
+
+  // Gives the controller the compiled lists while the setting is on and takes them away while it is off; its page
+  // follows from its next load.
+  static func apply(to controller: WKUserContentController) {
+    @Shared(.blocksAds) var blocksAds
+    controller.removeAllContentRuleLists()
+    guard blocksAds else { return }
+    ruleLists.forEach(controller.add)
+  }
+
+  static func applyToLivePages() {
+    for case let page as WebKitPage in Engine.shared.livePages.values {
+      apply(to: page.webView.configuration.userContentController)
+    }
+  }
+
+  // The stored lists by the identifier prefix of the compile that made them.
+  private static func stored(in store: WKContentRuleListStore) async -> [String: [String]] {
+    Dictionary(
+      grouping: (await store.availableIdentifiers() ?? []).filter { $0.hasPrefix(identifierPrefix + ".") }
+    ) { $0.split(separator: ".").prefix(2).joined(separator: ".") + "." }
+  }
+
+  // The prefix of the stored lists compiled from the current filter list files, when the record names it and all of
+  // its lists are in the store.
+  private static func compiledPrefix(root: URL) async -> String? {
+    let stamp = try? await Task.detached(priority: .utility) { try FilterLists.stamp(root: root) }.value
+    guard let stamp, let prefix = FilterLists.compiled(for: stamp) else { return nil }
+    let identifiers = await stored(in: WKContentRuleListStore.default()!)[prefix, default: []]
+    return isComplete(identifiers, prefix: prefix) ? prefix : nil
+  }
+
+  // Looks up the lists compiled from these filter lists, or compiles them, and removes every other stored list.
+  private static func compile(_ lists: FilterLists) async {
+    let store = WKContentRuleListStore.default()!
+    let prefix = "\(identifierPrefix).\(digest(lists.digests))."
+    let stored = await stored(in: store)
+    // The lists this compile keeps.
+    let current: Set<String>
+    if let lists = await lookUp(stored[prefix, default: []], prefix: prefix, in: store) {
+      if lists.map(\.identifier) != ruleLists.map(\.identifier) {
+        ruleLists = lists
+      }
+      current = Set(stored[prefix, default: []])
+    } else {
+      // While these compile, pages keep the lists they have.
+      let chunks: [String]
+      do {
+        chunks = try await Task.detached(priority: .utility) { encoded(rules(from: try lists.texts())) }.value
+      } catch {
+        return Logger().error("Filter lists not read: \(error)")
+      }
+      // A first compile gives pages each list as it is ready; a recompile replaces the old lists at once.
+      let replacing = !ruleLists.isEmpty
+      current = Set(chunks.indices.map { "\(prefix)\($0).\(chunks.count)" })
+      var compiled: [WKContentRuleList] = []
+      do {
+        for (index, chunk) in chunks.enumerated() {
+          let id = "\(prefix)\(index).\(chunks.count)"
+          if let list = try await store.compileContentRuleList(forIdentifier: id, encodedContentRuleList: chunk) {
+            compiled.append(list)
+          }
+          if !replacing {
+            ruleLists = compiled
+          }
+        }
+      } catch {
+        return Logger().error("Content rules not compiled: \(error)")
+      }
+      ruleLists = compiled
+    }
+    for identifier in stored.values.joined() where !current.contains(identifier) {
+      try? await store.removeContentRuleList(forIdentifier: identifier)
+    }
+    lists.record(prefix: prefix)
+  }
+
+  // The stored lists of one compile, in order, when all of them are there and this WebKit can read them.
+  private static func lookUp(
+    _ identifiers: [String], prefix: String, in store: WKContentRuleListStore
+  ) async -> [WKContentRuleList]? {
+    guard isComplete(identifiers, prefix: prefix) else { return nil }
+    let ordered = identifiers.indices.map { "\(prefix)\($0).\(identifiers.count)" }
+    var lists: [WKContentRuleList] = []
+    for identifier in ordered {
+      guard let list = try? await store.contentRuleList(forIdentifier: identifier) else { return nil }
+      lists.append(list)
+    }
+    return lists
+  }
+
+  // Whether these identifiers are every list of one compile.
+  private static func isComplete(_ identifiers: [String], prefix: String) -> Bool {
+    !identifiers.isEmpty && Set(identifiers.indices.map { "\(prefix)\($0).\(identifiers.count)" }) == Set(identifiers)
+  }
+
+  nonisolated private static func digest(_ digests: [Data]) -> String {
+    var hash = SHA256()
+    hash.update(data: Data("\(converterVersion)".utf8))
+    digests.forEach { hash.update(data: $0) }
+    return hash.finalize().prefix(8).map { String(format: "%02x", $0) }.joined()
+  }
+
+  nonisolated private static func encoded(_ rules: (network: [[ContentRule]], cosmetic: [[ContentRule]])) -> [String] {
+    (rules.network + rules.cosmetic).map { "[" + $0.map(\.json).joined(separator: ",") + "]" }
+  }
+
+  // Converts filter lists in uBlock Origin's syntax into chunks of content rules, network chunks and cosmetic chunks,
+  // each within WebKit's limit. A filter outside the subset WebKit can express is skipped whole.
+  nonisolated static func rules(from lists: [String]) -> (network: [[ContentRule]], cosmetic: [[ContentRule]]) {
+    let lines = lists.flatMap(FilterSet.activeLines)
+    let cancelled = Set(lines.compactMap(FilterSet.badfilterTarget))
+    var filters = FilterSet()
+    for line in lines where !cancelled.contains(line) {
+      filters.add(line)
+    }
+    return (filters.networkChunks, filters.cosmeticChunks)
+  }
+}
+
+// One rule of a WebKit content rule list.
+struct ContentRule: Hashable, Sendable {
+  struct Trigger: Hashable, Sendable {
+    var urlFilter = ".*"
+    var isCaseSensitive: Bool?
+    var ifDomain: [String]?
+    var unlessDomain: [String]?
+    var resourceType: [String]?
+    var loadType: [String]?
+    var loadContext: [String]?
+  }
+
+  struct Action: Hashable, Sendable {
+    var type: String
+    var selector: String?
+  }
+
+  var trigger: Trigger
+  var action: Action
+
+  // The rule in WebKit's JSON format, written directly: an encoder's intermediate values would more than double the
+  // memory a compile takes.
+  var json: String {
+    let trigger = Self.object([
+      ("url-filter", Self.string(self.trigger.urlFilter)),
+      ("url-filter-is-case-sensitive", self.trigger.isCaseSensitive.map(String.init)),
+      ("if-domain", self.trigger.ifDomain.map(Self.array)),
+      ("unless-domain", self.trigger.unlessDomain.map(Self.array)),
+      ("resource-type", self.trigger.resourceType.map(Self.array)),
+      ("load-type", self.trigger.loadType.map(Self.array)),
+      ("load-context", self.trigger.loadContext.map(Self.array)),
+    ])
+    let action = Self.object([
+      ("type", Self.string(self.action.type)), ("selector", self.action.selector.map(Self.string)),
+    ])
+    return #"{"trigger":\#(trigger),"action":\#(action)}"#
+  }
+
+  private static func object(_ members: [(name: String, value: String?)]) -> String {
+    "{" + members.compactMap { member in member.value.map { "\"\(member.name)\":\($0)" } }.joined(separator: ",") + "}"
+  }
+
+  private static func array(_ strings: [String]) -> String {
+    "[" + strings.map(string).joined(separator: ",") + "]"
+  }
+
+  private static func string(_ string: String) -> String {
+    var json = "\""
+    for scalar in string.unicodeScalars {
+      switch scalar {
+      case "\"": json += "\\\""
+      case "\\": json += "\\\\"
+      case _ where scalar.value < 0x20: json += String(format: "\\u%04x", scalar.value)
+      default: json.unicodeScalars.append(scalar)
+      }
+    }
+    return json + "\""
+  }
+}
+
+// The default filter lists: each list's last fetched copy in URL.dataDirectory/ContentBlocker, or else the bundled
+// uBlock Origin's, with where and how often uBlock Origin fetches it. Only the files keep the texts, which are read
+// again to compile, so a session does not hold them.
+private struct FilterLists: Sendable {
+  // The lists uBlock Origin enables by default, by their key in its assets.json.
+  private static let keys = [
+    "ublock-filters", "ublock-badware", "ublock-privacy", "ublock-quick-fixes", "ublock-unbreak", "easylist",
+    "easyprivacy", "urlhaus-1", "plowe-0",
+  ]
+  private static let directory = URL.dataDirectory.appending(path: "ContentBlocker")
+  private static let session = URLSession(configuration: .ephemeral)
+
+  struct List: Sendable {
+    let key: String
+    // The copy's file, and its text's SHA-256.
+    let file: URL
+    let digest: Data
+    // Where uBlock Origin fetches the list, in its order.
+    let urls: [URL]
+    // The days a copy stays current when its text names no expiry.
+    let updateAfter: Double
+    // The days this copy stays current.
+    let expiry: Double
+    // When the saved copy was fetched; nil for the bundled copy, which is due at the first check.
+    let fetched: Date?
+
+    init(key: String, text: String, file: URL, urls: [URL], updateAfter: Double, fetched: Date?) {
+      self.key = key
+      self.file = file
+      digest = Data(SHA256.hash(data: Data(text.utf8)))
+      self.urls = urls
+      self.updateAfter = updateAfter
+      expiry = Self.expiry(of: text) ?? updateAfter
+      self.fetched = fetched
+    }
+
+    var isDue: Bool {
+      fetched.map { Date.now.timeIntervalSince($0) >= expiry * 86400 } ?? true
+    }
+
+    // The days a copy stays current by its own Expires header, read as uBlock Origin reads it.
+    private static func expiry(of text: String) -> Double? {
+      let header = text.prefix(1024).split(whereSeparator: \.isNewline).lazy
+        .map { $0.drop { "!# ".contains($0) }.lowercased() }
+        .first { $0.hasPrefix("expires:") }
+      guard let match = header?.firstMatch(of: /(\d+)\s*([wdhm]?)/), let count = Double(match.1), count > 0 else {
+        return nil
+      }
+      switch match.2 {
+      case "w": return count * 7
+      case "h": return max(count, 4) / 24
+      case "m": return max(count, 240) / 1440
+      default: return count
+      }
+    }
+  }
+
+  // An entry of uBlock Origin's assets.json, whose contentURL is one URL or several.
+  private struct Asset: Decodable {
+    let contentURL: [String]
+    let cdnURLs: [String]
+    let updateAfter: Double?
+
+    enum CodingKeys: String, CodingKey { case contentURL, cdnURLs, updateAfter }
+
+    init(from decoder: any Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      let urls = try? container.decode([String].self, forKey: .contentURL)
+      contentURL = try urls ?? [container.decode(String.self, forKey: .contentURL)]
+      cdnURLs = try container.decodeIfPresent([String].self, forKey: .cdnURLs) ?? []
+      updateAfter = try container.decodeIfPresent(Double.self, forKey: .updateAfter)
+    }
+  }
+
+  private(set) var lists: [List]
+
+  var digests: [Data] { lists.map(\.digest) }
+
+  func texts() throws -> [String] {
+    try lists.map { try String(contentsOf: $0.file, encoding: .utf8) }
+  }
+
+  // `root` is the bundled uBlock Origin, whose contentURL paths are relative to it.
+  init(root: URL) throws {
+    lists = try Self.files(root: root).map { file in
+      let fetched = file.isSaved
+        ? try file.url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate : nil
+      return List(
+        key: file.key, text: try String(contentsOf: file.url, encoding: .utf8), file: file.url, urls: file.urls,
+        updateAfter: file.updateAfter, fetched: fetched)
+    }
+  }
+
+  // Each list's copy: its last fetched one, or else the bundled one, with where and how often it is fetched.
+  private static func files(
+    root: URL
+  ) throws -> [(key: String, url: URL, isSaved: Bool, urls: [URL], updateAfter: Double)] {
+    let assets = try JSONDecoder().decode(
+      [String: Asset].self, from: Data(contentsOf: root.appending(path: "assets/assets.json")))
+    return keys.compactMap { key in
+      guard let asset = assets[key] else { return nil }
+      let remote = (asset.cdnURLs.isEmpty ? asset.contentURL : asset.cdnURLs).compactMap(URL.init(string:))
+        .filter { $0.scheme == "https" || $0.scheme == "http" }
+      let saved = directory.appending(path: "\(key).txt")
+      let bundled = asset.contentURL.filter { !$0.hasPrefix("http") }.map { root.appending(path: $0) }
+      guard let url = ([saved] + bundled).first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+        return nil
+      }
+      return (key, url, url == saved, remote, asset.updateAfter ?? 7)
+    }
+  }
+
+  // The converter's version and each list copy's path, size and modification date: what the record of a compile
+  // names, read without reading the lists.
+  static func stamp(root: URL) throws -> String {
+    try stamp(of: files(root: root).map(\.url))
+  }
+
+  private static func stamp(of files: [URL]) throws -> String {
+    try (["\(ContentBlocker.converterVersion)"]
+      + files.map { file in
+        let values = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        return "\(file.path) \(values.fileSize ?? 0) \(values.contentModificationDate?.timeIntervalSince1970 ?? 0)"
+      }).joined(separator: "\n")
+  }
+
+  private static let record = directory.appending(path: "Compiled.json")
+
+  private struct Record: Codable {
+    let stamp: String
+    let prefix: String
+  }
+
+  // The identifier prefix of the stored lists compiled from the copies with this stamp.
+  static func compiled(for stamp: String) -> String? {
+    (try? JSONDecoder().decode(Record.self, from: Data(contentsOf: record))).flatMap { $0.stamp == stamp ? $0.prefix : nil }
+  }
+
+  // Records that the stored lists with this prefix are compiled from these copies.
+  func record(prefix: String) {
+    do {
+      try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
+      try JSONEncoder().encode(Record(stamp: Self.stamp(of: lists.map(\.file)), prefix: prefix)).write(to: Self.record)
+    } catch {
+      Logger().error("Compiled lists not recorded: \(error)")
+    }
+  }
+
+  // The lists with each due one fetched again and saved; a list whose fetch or save fails keeps its copy until a later
+  // check.
+  func fetchingDue() async -> FilterLists {
+    var result = self
+    for (index, list) in lists.enumerated() where list.isDue {
+      guard let text = await Self.fetch(list.urls) else { continue }
+      let file = Self.directory.appending(path: "\(list.key).txt")
+      do {
+        try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
+        try text.write(to: file, atomically: true, encoding: .utf8)
+      } catch {
+        Logger().error("Filter list not saved: \(error)")
+        continue
+      }
+      result.lists[index] = List(
+        key: list.key, text: text, file: file, urls: list.urls, updateAfter: list.updateAfter, fetched: .now)
+    }
+    return result
+  }
+
+  // The list's text from the first of its URLs that answers with one.
+  private static func fetch(_ urls: [URL]) async -> String? {
+    for url in urls {
+      if let (data, response) = try? await session.data(from: url),
+        (response as? HTTPURLResponse)?.statusCode == 200, let text = String(data: data, encoding: .utf8),
+        text.contains("\n"), !text.hasPrefix("<")
+      {
+        return text
+      }
+    }
+    return nil
+  }
+}
+
+// The domains a filter applies on: every one, only some, or all but some. A list mixing the two ways cannot be
+// expressed and gives nil, as does a negated domain WebKit cannot match (a regex or a wildcard TLD); a positive one
+// is left out.
+private enum DomainScope: Equatable {
+  case all, only([String]), except([String])
+
+  init?(_ list: Substring, separator: Character) {
+    var only: [String] = []
+    var except: [String] = []
+    var leftOut = false
+    for entry in list.split(separator: separator) {
+      let negated = entry.hasPrefix("~")
+      let domain = (negated ? entry.dropFirst() : entry).lowercased()
+      if FilterSet.isDomain(domain) {
+        negated ? except.append(domain) : only.append(domain)
+      } else if negated {
+        return nil
+      } else {
+        leftOut = true
+      }
+    }
+    switch (only.isEmpty, except.isEmpty) {
+    case (true, true) where !leftOut: self = .all
+    case (false, true): self = .only(only)
+    case (true, false) where !leftOut: self = .except(except)
+    default: return nil
+    }
+  }
+}
+
+// The filters of a set of lists, sorted into the parts WebKit's chunks are built from.
+private struct FilterSet {
+  // The rules of one chunk, under WebKit's limit of 150,000: smaller lists compile with half the memory at the peak,
+  // and the first one is ready sooner.
+  static let maxRules = 50_000
+  // A host-anchored pattern's start: any scheme, then the host or a subdomain of it.
+  static let hostAnchor = "^[^:]+://+([^:/]+\\.)?"
+  // uBlock Origin's separator: any character but a letter, a digit or one of _ - . %.
+  static let separator = "[^a-zA-Z0-9_.%-]"
+  // The resource types of a filter that names none: everything but the page itself, and child frames.
+  static let subresources = [
+    "image", "style-sheet", "script", "font", "svg-document", "media", "ping", "fetch", "websocket", "other",
+  ]
+  static let resourceTypes: [Substring: String] = [
+    "script": "script", "image": "image", "stylesheet": "style-sheet", "css": "style-sheet", "xmlhttprequest": "fetch",
+    "xhr": "fetch", "font": "font", "media": "media", "websocket": "websocket", "ping": "ping", "other": "other",
+  ]
+  // Whether each party option names third-party requests.
+  static let parties: [Substring: Bool] = ["third-party": true, "3p": true, "first-party": false, "1p": false]
+  static let cosmeticMarkers = ["#@?#", "#@$#", "#@%#", "#?#", "#$#", "#%#", "#@#", "##"]
+  // uBlock Origin's procedural operators, which no stylesheet can express.
+  static let proceduralOperators = [
+    ":has-text(", ":upward(", ":xpath(", ":matches-css", ":style(", ":remove(", ":remove-attr(", ":remove-class(",
+    ":watch-attr(", ":min-text-length(", ":others(", ":-abp-", ":matches-path(", ":matches-attr(", ":matches-prop",
+    ":matches-media(", ":if(", ":if-not(", ":shadow(", ":contains(", ":nth-ancestor(", ":spath(",
+  ]
+
+  // Network blocks, the exceptions to them, and the important blocks no exception lifts, in their chunks' order.
+  private var blocks = RuleList()
+  private var exceptions = RuleList()
+  private var important = RuleList()
+  // Hosts whose pages are excepted from every filter.
+  private var exceptedPages: [String] = []
+  // Element hiding filters, the domains each selector is unhidden on, and the selectors unhidden everywhere.
+  private var hides: [(selector: String, scope: DomainScope)] = []
+  private var unhidden: [String: Set<String>] = [:]
+  private var unhiddenEverywhere: Set<String> = []
+  // Hosts excepted from generic hiding, and from all hiding.
+  private var genericHidingOff: [String] = []
+  private var hidingOff: [String] = []
+
+  // Rules in order without repeats.
+  private struct RuleList {
+    private(set) var rules: [ContentRule] = []
+    private var seen: Set<ContentRule> = []
+
+    mutating func append(_ rule: ContentRule) {
+      if seen.insert(rule).inserted {
+        rules.append(rule)
+      }
+    }
+  }
+
+  // A network filter's options in the subset WebKit can express.
+  private struct Options {
+    enum Hiding { case generic, all }
+
+    var scope = DomainScope.all
+    var loadType: String?
+    var isCaseSensitive = false
+    var isImportant = false
+    var types: [String] = []
+    var top = false
+    var child = false
+    var all = false
+    var hiding: Hiding?
+
+    // Whether anything beyond the domains limits which requests the filter matches.
+    var limitsRequests: Bool {
+      loadType != nil || isCaseSensitive || isImportant || !types.isEmpty || child || all
+    }
+
+    // Adds one option; false for an option outside the subset, which skips the filter.
+    mutating func add(_ option: Substring) -> Bool {
+      let negated = option.hasPrefix("~")
+      let name = negated ? option.dropFirst() : option
+      if let thirdParty = FilterSet.parties[name] {
+        let value = thirdParty != negated ? "third-party" : "first-party"
+        guard loadType == nil || loadType == value else { return false }
+        loadType = value
+        return true
+      }
+      guard !negated else { return false }
+      if name.hasPrefix("domain=") || name.hasPrefix("from=") {
+        guard let scope = DomainScope(name.drop { $0 != "=" }.dropFirst(), separator: "|") else { return false }
+        self.scope = scope
+        return true
+      }
+      switch name {
+      case "match-case": isCaseSensitive = true
+      case "important": isImportant = true
+      case "document", "doc": top = true
+      case "subdocument", "frame": child = true
+      case "all": all = true
+      case "elemhide", "ehide": hiding = .all
+      case "generichide", "ghide": hiding = .generic
+      default:
+        guard let type = FilterSet.resourceTypes[name] else { return false }
+        if !types.contains(type) {
+          types.append(type)
+        }
+      }
+      return true
+    }
+  }
+
+  // The list's filter lines, trimmed, without blanks and comments, and with uBlock Origin's !#if directives applied as
+  // they are for Safari.
+  static func activeLines(_ list: String) -> [String] {
+    // For each open !#if, whether its lines are left out, or nil when uBlock Origin cannot tell and keeps them.
+    var conditions: [Bool?] = []
+    var lines: [String] = []
+    for raw in list.split(whereSeparator: \.isNewline) {
+      let line = raw.trimmingCharacters(in: .whitespaces)
+      switch line.hasPrefix("!#") ? line.dropFirst(2).prefix(while: \.isLetter) : "" {
+      case "if": conditions.append(evaluate(line.dropFirst(4)).map { !$0 })
+      case "else":
+        if let last = conditions.popLast() {
+          conditions.append(last.map { !$0 })
+        }
+      case "endif": _ = conditions.popLast()
+      default:
+        if !line.isEmpty, !line.hasPrefix("!"), !line.hasPrefix("["), !conditions.contains(true),
+          !line.hasPrefix("#") || cosmeticMarker(line)?.range.lowerBound == line.startIndex
+        {
+          lines.append(line)
+        }
+      }
+    }
+    return lines
+  }
+
+  // An !#if condition as uBlock Origin evaluates it for Safari: tokens joined left to right by && and ||, true for
+  // env_safari and ext_ublock and false for the other tokens it knows, and nil when it holds an unknown token.
+  private static func evaluate(_ condition: Substring) -> Bool? {
+    var condition = condition.trimmingCharacters(in: .whitespaces)[...]
+    if condition.hasPrefix("("), condition.hasSuffix(")") {
+      condition = condition.dropFirst().dropLast()
+    }
+    let words = condition.split(whereSeparator: \.isWhitespace)
+    guard words.count % 2 == 1, var result = words.first.flatMap(evaluateToken) else { return nil }
+    for index in stride(from: 1, to: words.count, by: 2) {
+      guard let value = evaluateToken(words[index + 1]) else { return nil }
+      switch words[index] {
+      case "||": result = result || value
+      case "&&": result = result && value
+      default: return nil
+      }
+    }
+    return result
+  }
+
+  private static func evaluateToken(_ token: Substring) -> Bool? {
+    let negated = token.hasPrefix("!")
+    let name = negated ? token.dropFirst() : token
+    guard name == "false" || ["env_", "ext_", "cap_", "adguard"].contains(where: { name.hasPrefix($0) }) else {
+      return nil
+    }
+    return (name == "env_safari" || name == "ext_ublock") != negated
+  }
+
+  // The cosmetic marker at the line's first #, and where it is.
+  static func cosmeticMarker(_ line: String) -> (marker: String, range: Range<String.Index>)? {
+    guard let hash = line.firstIndex(of: "#") else { return nil }
+    return cosmeticMarkers.first { line[hash...].hasPrefix($0) }.map {
+      ($0, hash..<line.index(hash, offsetBy: $0.count))
+    }
+  }
+
+  // The filter a $badfilter line cancels: the same line without that option.
+  static func badfilterTarget(_ line: String) -> String? {
+    guard cosmeticMarker(line) == nil else { return nil }
+    let exception = line.hasPrefix("@@")
+    let (pattern, options) = split(exception ? line.dropFirst(2) : line[...])
+    guard options.contains("badfilter") else { return nil }
+    let kept = options.filter { $0 != "badfilter" }
+    return (exception ? "@@" : "") + pattern + (kept.isEmpty ? "" : "$" + kept.joined(separator: ","))
+  }
+
+  // A network filter's pattern and options, split at the $ that starts the options.
+  private static func split(_ filter: Substring) -> (pattern: Substring, options: [Substring]) {
+    let dollar =
+      filter.hasPrefix("/")
+      ? filter.ranges(of: "/$").last.map { filter.index(after: $0.lowerBound) } : filter.lastIndex(of: "$")
+    guard let dollar else { return (filter, []) }
+    return (filter[..<dollar], filter[filter.index(after: dollar)...].split(separator: ","))
+  }
+
+  mutating func add(_ line: String) {
+    if let (marker, range) = Self.cosmeticMarker(line) {
+      guard marker == "##" || marker == "#@#" else { return }
+      addHiding(line[range.upperBound...], on: line[..<range.lowerBound], exception: marker == "#@#")
+    } else if !line.contains("$$"), !line.contains("$@$") {
+      addNetwork(line)
+    }
+  }
+
+  private mutating func addHiding(_ selector: Substring, on domains: Substring, exception: Bool) {
+    guard !selector.isEmpty, !selector.hasPrefix("+js("), !selector.hasPrefix("^"),
+      !Self.proceduralOperators.contains(where: { selector.contains($0) }),
+      let scope = DomainScope(domains, separator: ",")
+    else { return }
+    let selector = String(selector)
+    guard exception else { return hides.append((selector, scope)) }
+    switch scope {
+    case .all: unhiddenEverywhere.insert(selector)
+    case let .only(domains): unhidden[selector, default: []].formUnion(domains)
+    case .except: break
+    }
+  }
+
+  private mutating func addNetwork(_ line: String) {
+    let exception = line.hasPrefix("@@")
+    var (pattern, options) = Self.split(exception ? line.dropFirst(2) : line[...])
+    if !exception, options.isEmpty {
+      if let host = Self.hostsEntry(pattern) {
+        pattern = Substring("||\(host)^")
+      } else if Self.isHostname(pattern.lowercased()) {
+        pattern = Substring("||\(pattern.lowercased())")
+      }
+    }
+    var parsed = Options()
+    guard options.allSatisfy({ parsed.add($0) }) else { return }
+    if let hiding = parsed.hiding {
+      guard exception, !parsed.limitsRequests, !parsed.top, let pages = Self.pages(pattern, parsed.scope) else {
+        return
+      }
+      if hiding == .all {
+        hidingOff.append(contentsOf: pages)
+      } else {
+        genericHidingOff.append(contentsOf: pages)
+      }
+      return
+    }
+    if exception, parsed.top {
+      guard !parsed.limitsRequests, let pages = Self.pages(pattern, parsed.scope) else { return }
+      exceptedPages.append(contentsOf: pages)
+      hidingOff.append(contentsOf: pages)
+      return
+    }
+    guard !(exception && parsed.isImportant), let (filters, isHost) = Self.urlFilters(pattern) else { return }
+    var trigger = ContentRule.Trigger(isCaseSensitive: parsed.isCaseSensitive ? true : nil)
+    switch parsed.scope {
+    case .all: break
+    case let .only(domains): trigger.ifDomain = domains.map { "*" + $0 }
+    case let .except(domains): trigger.unlessDomain = domains.map { "*" + $0 }
+    }
+    trigger.loadType = parsed.loadType.map { [$0] }
+    let triggers = filters.map { filter in
+      var filtered = trigger
+      filtered.urlFilter = filter
+      return filtered
+    }
+    for trigger in triggers.flatMap({ Self.typed($0, parsed, wholeHost: isHost || exception) }) {
+      let rule = ContentRule(trigger: trigger, action: .init(type: exception ? "ignore-previous-rules" : "block"))
+      if exception {
+        exceptions.append(rule)
+      } else if parsed.isImportant {
+        important.append(rule)
+      } else {
+        blocks.append(rule)
+      }
+    }
+  }
+
+  // The trigger once for each load context its resource types need. A filter naming no type matches every
+  // subresource and child frame, and also the page itself when it names a whole host, as uBlock Origin's strict
+  // blocking does.
+  private static func typed(
+    _ trigger: ContentRule.Trigger, _ options: Options, wholeHost: Bool
+  ) -> [ContentRule.Trigger] {
+    guard !options.all else { return [trigger] }
+    var types = options.types
+    var (top, child) = (options.top, options.child)
+    if types.isEmpty, !top, !child {
+      guard !wholeHost else { return [trigger] }
+      (types, child) = (subresources, true)
+    }
+    if top, child {
+      types.append("document")
+      (top, child) = (false, false)
+    }
+    var triggers: [ContentRule.Trigger] = []
+    if !types.isEmpty {
+      var typed = trigger
+      typed.resourceType = types
+      triggers.append(typed)
+    }
+    if top || child {
+      var frame = trigger
+      frame.resourceType = ["document"]
+      frame.loadContext = [top ? "top-frame" : "child-frame"]
+      triggers.append(frame)
+    }
+    return triggers
+  }
+
+  // The host of a hosts-file line, as uBlock Origin reads one: an address, then a host that is not the machine's own.
+  private static func hostsEntry(_ line: Substring) -> String? {
+    let words = line.split(whereSeparator: \.isWhitespace)
+    guard words.count >= 2, words.count == 2 || words[2].hasPrefix("#") else { return nil }
+    let host = words[1].lowercased()
+    guard isHostname(host), !host.hasPrefix("ip6-"),
+      !["0.0.0.0", "broadcasthost", "local", "localhost", "localhost.localdomain"].contains(host)
+    else { return nil }
+    return host
+  }
+
+  // The pages a whole-page exception names: its pattern's host, or the domains of a pattern matching everything.
+  private static func pages(_ pattern: Substring, _ scope: DomainScope) -> [String]? {
+    let host = pattern.hasPrefix("||") ? pattern.dropFirst(2) : pattern
+    let name = (host.hasSuffix("^") ? host.dropLast() : host).lowercased()
+    switch scope {
+    case .all where isDomain(name): return [name]
+    case let .only(domains) where pattern.isEmpty || pattern == "*": return domains
+    default: return nil
+    }
+  }
+
+  // A pattern as WebKit url-filters, and whether it names a whole host; nil for a regex WebKit cannot run or a pattern
+  // that is not ASCII. A final separator, which can also be the URL's end, gives two filters, one for each: as one
+  // filter with an optional group, a list of urlhaus's paths compiles twenty times slower.
+  static func urlFilters(_ pattern: Substring) -> (filters: [String], isHost: Bool)? {
+    guard pattern.allSatisfy({ $0.isASCII && !$0.isWhitespace }) else { return nil }
+    if pattern.count > 2, pattern.hasPrefix("/"), pattern.hasSuffix("/") {
+      let regex = pattern.dropFirst().dropLast()
+      return isWebKitRegex(regex) ? ([String(regex)], false) : nil
+    }
+    var source = pattern
+    var filter = ""
+    let hostAnchored = source.hasPrefix("||")
+    if hostAnchored {
+      filter = hostAnchor
+      source = source.dropFirst(2)
+    } else if source.hasPrefix("|") {
+      filter = "^"
+      source = source.dropFirst()
+    }
+    let endAnchored = source.hasSuffix("|")
+    if endAnchored {
+      source = source.dropLast()
+    }
+    if filter.isEmpty {
+      source = source.drop { $0 == "*" }
+    }
+    while !endAnchored, source.hasSuffix("*") {
+      source = source.dropLast()
+    }
+    let host = source.hasSuffix("^") ? source.dropLast() : source
+    let isHost = hostAnchored && !host.isEmpty && host.allSatisfy { $0.isLetter || $0.isNumber || "._-".contains($0) }
+    // After a whole host the path always follows, so its separator cannot be the end.
+    let endsInSeparator = source.hasSuffix("^") && !endAnchored && !isHost && source.count > 1
+    if endsInSeparator {
+      source = source.dropLast()
+    }
+    for index in source.indices {
+      switch source[index] {
+      case "*": filter += ".*"
+      case "^": filter += separator
+      case let character where "\\.+?$()[]{}|".contains(character): filter += "\\\(character)"
+      case let character: filter.append(character)
+      }
+    }
+    if endAnchored {
+      filter += "$"
+    }
+    guard !endsInSeparator else { return ([filter + separator, filter + "$"], isHost) }
+    return ([filter.isEmpty ? ".*" : filter], isHost)
+  }
+
+  // Whether WebKit's regex subset covers the regex: ASCII, no alternation, counted repetition, lookaround,
+  // non-capturing group, lazy quantifier, class escape or back reference, and anchors only at its ends.
+  private static func isWebKitRegex(_ regex: Substring) -> Bool {
+    var inClass = false
+    var escaped = false
+    var quantified = false
+    for index in regex.indices {
+      let character = regex[index]
+      guard character.isASCII else { return false }
+      if escaped {
+        guard !character.isLetter, !character.isNumber else { return false }
+        (escaped, quantified) = (false, false)
+        continue
+      }
+      switch character {
+      case "\\": escaped = true
+      case "[": inClass = true
+      case "]": inClass = false
+      case _ where inClass: break
+      case "|", "{", "}": return false
+      case "(" where regex[index...].hasPrefix("(?"): return false
+      case "^" where index != regex.startIndex: return false
+      case "$" where regex.index(after: index) != regex.endIndex: return false
+      case _ where quantified && "*+?".contains(character): return false
+      default: break
+      }
+      quantified = !inClass && "*+?".contains(character)
+    }
+    return !escaped && !inClass
+  }
+
+  // A hostname as uBlock Origin's pattern parser recognizes one: dot-separated labels of letters, digits, _ and -,
+  // each starting with a letter or digit.
+  static func isHostname(_ name: String) -> Bool {
+    !name.isEmpty
+      && name.split(separator: ".", omittingEmptySubsequences: false).allSatisfy { label in
+        label.first.map { $0.isASCII && ($0.isLowercase || $0.isNumber) } == true
+          && label.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "_" || $0 == "-") }
+      }
+  }
+
+  // A domain WebKit can match: lowercase ASCII letters, digits, dots, hyphens and underscores.
+  static func isDomain(_ name: String) -> Bool {
+    !name.isEmpty && name.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || "._-".contains($0)) }
+  }
+
+  // One rule lifting every earlier rule of its chunk on the pages of these hosts.
+  private static func pageException(_ hosts: [String]) -> [ContentRule] {
+    let hosts = Array(Set(hosts)).sorted()
+    guard !hosts.isEmpty else { return [] }
+    return [ContentRule(trigger: .init(ifDomain: hosts.map { "*" + $0 }), action: .init(type: "ignore-previous-rules"))]
+  }
+
+  // Splits rules into slices that leave room for the rules every chunk adds to its slice.
+  private static func slices(_ rules: [ContentRule], leaving reserved: Int) -> [ArraySlice<ContentRule>] {
+    let size = maxRules - reserved
+    return stride(from: 0, to: rules.count, by: size).map { rules[$0..<min($0 + size, rules.count)] }
+  }
+
+  // Each chunk holds a share of the blocks, then every exception, then every important block.
+  var networkChunks: [[ContentRule]] {
+    let tail = exceptions.rules + Self.pageException(exceptedPages) + important.rules
+    return Self.slices(blocks.rules, leaving: tail.count).map { Array($0) + tail }
+  }
+
+  // Each chunk holds a share of the hiding rules: its generic ones, the exceptions from generic hiding, its specific
+  // ones, then the exceptions from all hiding.
+  var cosmeticChunks: [[ContentRule]] {
+    var rules = RuleList()
+    for (selector, scope) in hides where !unhiddenEverywhere.contains(selector) {
+      let unhidden = self.unhidden[selector, default: []]
+      var trigger = ContentRule.Trigger()
+      switch scope {
+      case .all:
+        trigger.unlessDomain = unhidden.isEmpty ? nil : unhidden.sorted().map { "*" + $0 }
+      case let .except(domains):
+        trigger.unlessDomain = (domains + unhidden.sorted()).map { "*" + $0 }
+      case let .only(domains):
+        let kept = domains.filter { !unhidden.contains($0) }
+        guard !kept.isEmpty else { continue }
+        trigger.ifDomain = kept.map { "*" + $0 }
+      }
+      rules.append(ContentRule(trigger: trigger, action: .init(type: "css-display-none", selector: selector)))
+    }
+    let genericOff = Self.pageException(genericHidingOff)
+    let allOff = Self.pageException(hidingOff)
+    return Self.slices(rules.rules, leaving: genericOff.count + allOff.count).map { slice in
+      slice.filter { $0.trigger.ifDomain == nil } + genericOff + slice.filter { $0.trigger.ifDomain != nil } + allOff
+    }
+  }
+}

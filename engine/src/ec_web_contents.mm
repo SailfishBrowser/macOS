@@ -40,6 +40,11 @@
 #include "components/find_in_page/find_tab_helper.h"
 #include "components/find_in_page/find_types.h"
 #include "components/input/native_web_keyboard_event.h"
+#include "components/js_injection/browser/js_communication_host.h"
+#include "components/js_injection/browser/web_message.h"
+#include "components/js_injection/browser/web_message_host.h"
+#include "components/js_injection/browser/web_message_host_factory.h"
+#include "components/js_injection/common/enum.mojom.h"
 #include "components/permissions/permission_prompt.h"
 #include "components/permissions/permission_request.h"
 #include "components/permissions/permission_request_manager.h"
@@ -57,16 +62,19 @@
 #include "components/zoom/zoom_controller.h"
 #include "components/zoom/zoom_observer.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/context_menu_params.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/javascript_dialog_manager.h"
+#include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/media_session.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/navigation_throttle_registry.h"
+#include "content/public/browser/reload_type.h"
 #include "content/public/browser/picture_in_picture_window_controller.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host.h"
@@ -76,22 +84,29 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/isolated_world_ids.h"
 #import "engine_core/ec_browser_context_private.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/apple/url_conversions.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/http/http_request_headers.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/cpp/data_element.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/blink/public/common/context_menu_data/context_menu_data.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/page/page_zoom.h"
 #include "third_party/blink/public/mojom/choosers/file_chooser.mojom.h"
 #include "third_party/blink/public/mojom/context_menu/context_menu.mojom-shared.h"
 #include "third_party/blink/public/mojom/link_to_text/link_to_text.mojom.h"
+#include "third_party/blink/public/mojom/loader/referrer.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "url/origin.h"
+#include "url/url_constants.h"
 
 @interface ECContextMenu ()
 - (instancetype)initWithFrame:(content::RenderFrameHost&)frame
@@ -120,6 +135,58 @@ namespace {
 // session commands keep less; page state past it is cut).
 constexpr int kSessionStateVersion = 1;
 constexpr int kSessionEntryMaxSize = 1 << 20;
+
+// The content settings of permissions the user set for the URL's site.
+NSDictionary<NSString*, NSNumber*>* SitePermissions(Profile* profile,
+                                                     const GURL& url) {
+  NSMutableDictionary<NSString*, NSNumber*>* permissions =
+      [NSMutableDictionary dictionary];
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile);
+  for (const content_settings::ContentSettingsInfo* info :
+       *content_settings::ContentSettingsRegistry::GetInstance()) {
+    ContentSettingsType type = info->website_settings_info()->type();
+    std::optional<permissions::RequestType> request =
+        permissions::ContentSettingsTypeToRequestTypeIfExists(type);
+    if (!request || !permissions::PermissionUtil::IsPermission(type)) {
+      continue;
+    }
+    content_settings::SettingInfo setting_info;
+    ContentSetting setting =
+        map->GetContentSetting(url, url, type, &setting_info);
+    bool decided =
+        setting == CONTENT_SETTING_ALLOW || setting == CONTENT_SETTING_BLOCK;
+    if (setting_info.source != content_settings::SettingSource::kUser ||
+        setting_info.primary_pattern == ContentSettingsPattern::Wildcard() ||
+        !decided) {
+      continue;
+    }
+    permissions[@(permissions::PermissionKeyForRequestType(*request))] =
+        @(setting == CONTENT_SETTING_ALLOW);
+  }
+  return permissions;
+}
+
+void SetSitePermission(Profile* profile,
+                       const GURL& url,
+                       NSString* permission,
+                       BOOL allowed) {
+  for (const content_settings::ContentSettingsInfo* info :
+       *content_settings::ContentSettingsRegistry::GetInstance()) {
+    ContentSettingsType type = info->website_settings_info()->type();
+    std::optional<permissions::RequestType> request =
+        permissions::ContentSettingsTypeToRequestTypeIfExists(type);
+    if (request &&
+        std::string_view(permission.UTF8String) ==
+            permissions::PermissionKeyForRequestType(*request)) {
+      HostContentSettingsMapFactory::GetForProfile(profile)
+          ->SetContentSettingDefaultScope(
+              url, url, type,
+              allowed ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
+      return;
+    }
+  }
+}
 
 // Asks the shell instead of showing Chrome's permission bubble.
 class PermissionPromptBridge : public permissions::PermissionPrompt {
@@ -262,6 +329,54 @@ class WebContentsDelegateBridge : public content::WebContentsDelegate,
     PictureInPictureWindowManager::GetInstance()->ExitPictureInPicture();
   }
 
+  // Element full screen. Content reads the state back within the request to
+  // grant it to the page, so it changes before the shell hears of it.
+  bool CanEnterFullscreenModeForTab(
+      content::RenderFrameHost* requesting_frame) override {
+    return [owner_.delegate
+        respondsToSelector:@selector(webContents:didEnterFullscreenForOrigin:)];
+  }
+
+  void EnterFullscreenModeForTab(
+      content::RenderFrameHost* requesting_frame,
+      const blink::mojom::FullscreenOptions& options) override {
+    fullscreen_ = true;
+    NSURL* origin = net::NSURLWithGURL(
+        requesting_frame->GetLastCommittedOrigin().GetURL());
+    __weak ECWebContents* owner = owner_;
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(^{
+          if (owner.contents && owner.contents->IsFullscreen()) {
+            [owner.delegate webContents:owner
+                didEnterFullscreenForOrigin:origin];
+          }
+        }));
+  }
+
+  void ExitFullscreenModeForTab(content::WebContents* source) override {
+    fullscreen_ = false;
+    __weak ECWebContents* owner = owner_;
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(^{
+          if (owner.contents) {
+            [owner.delegate webContentsDidExitFullscreen:owner];
+          }
+        }));
+  }
+
+  bool IsFullscreenForTabOrPending(
+      const content::WebContents* web_contents) override {
+    return fullscreen_;
+  }
+
+  content::FullscreenState GetFullscreenState(
+      const content::WebContents* web_contents) const override {
+    content::FullscreenState state;
+    state.target_mode = fullscreen_ ? content::FullscreenMode::kContent
+                                    : content::FullscreenMode::kWindowed;
+    return state;
+  }
+
   void MediaStartedPlaying(const MediaPlayerInfo& video_type,
                            const content::MediaPlayerId& id) override {
     ReportMediaChange();
@@ -306,6 +421,50 @@ class WebContentsDelegateBridge : public content::WebContentsDelegate,
     }
   }
 
+  void DidFinishNavigation(content::NavigationHandle* handle) override {
+    if (handle->HasCommitted() && handle->IsInPrimaryMainFrame() &&
+        !handle->IsSameDocument() &&
+        [owner_.delegate respondsToSelector:@selector
+                         (webContents:didCommitNavigationIsHistory:)]) {
+      [owner_.delegate webContents:owner_
+          didCommitNavigationIsHistory:handle->IsHistory()];
+    }
+  }
+
+  // Blink reports the first frame with content of the primary page from the
+  // frame's presentation feedback.
+  void DidFirstVisuallyNonEmptyPaint() override { ReportFirstFrame(owner_); }
+
+  // Shown again after its document drew, the view embeds a new surface of the
+  // page in a new compositor. A copy of one pixel of that surface asks the
+  // display to draw it and completes once it has.
+  void OnVisibilityChanged(content::Visibility visibility) override {
+    content::RenderWidgetHostView* view =
+        web_contents()->GetRenderWidgetHostView();
+    if (visibility != content::Visibility::VISIBLE || !view ||
+        !web_contents()->CompletedFirstVisuallyNonEmptyPaint() ||
+        ![owner_.delegate
+            respondsToSelector:@selector(webContentsDidPresentFirstFrame:)]) {
+      return;
+    }
+    view->CopyFromSurface(
+        gfx::Rect(1, 1), gfx::Size(1, 1), base::TimeDelta(),
+        base::BindPostTaskToCurrentDefault(base::BindOnce(
+            &WebContentsDelegateBridge::DidCopyPixel,
+            weak_factory_.GetWeakPtr())));
+  }
+
+  void DidCopyPixel(const content::CopyFromSurfaceResult& result) {
+    ReportFirstFrame(owner_);
+  }
+
+  static void ReportFirstFrame(ECWebContents* owner) {
+    if ([owner.delegate
+            respondsToSelector:@selector(webContentsDidPresentFirstFrame:)]) {
+      [owner.delegate webContentsDidPresentFirstFrame:owner];
+    }
+  }
+
   // The modifier keys held at the last click or key press in the page, which
   // a link it opens follows (kRawKeyDown is the key press; kKeyDown is not
   // reported here).
@@ -339,6 +498,24 @@ class WebContentsDelegateBridge : public content::WebContentsDelegate,
     return base::TimeTicks::Now() - last_interaction_ <= base::Seconds(1)
                ? last_modifier_flags_
                : 0;
+  }
+
+  // A reserved shortcut goes to the main menu before the renderer, as Chrome's
+  // tab and window shortcuts do, so a busy page cannot hold it. The menu may
+  // close the web contents, which deletes this bridge.
+  content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      content::WebContents* source,
+      const input::NativeWebKeyboardEvent& event) override {
+    NSEvent* ns_event = event.os_event.Get();
+    if (event.GetType() != blink::WebInputEvent::Type::kRawKeyDown ||
+        !ns_event ||
+        ![owner_.delegate respondsToSelector:@selector
+                          (webContents:reservesKeyEquivalent:)] ||
+        ![owner_.delegate webContents:owner_ reservesKeyEquivalent:ns_event] ||
+        ![NSApp.mainMenu performKeyEquivalent:ns_event]) {
+      return content::KeyboardEventProcessingResult::NOT_HANDLED;
+    }
+    return content::KeyboardEventProcessingResult::HANDLED;
   }
 
   // Gives the shell's main menu the shortcuts the page did not handle.
@@ -537,7 +714,9 @@ class WebContentsDelegateBridge : public content::WebContentsDelegate,
   std::shared_ptr<DialogClosedCallback> dialog_callback_;
   NSEventModifierFlags last_modifier_flags_ = 0;
   base::TimeTicks last_interaction_;
+  bool fullscreen_ = false;
   __weak ECWebContents* owner_;
+  base::WeakPtrFactory<WebContentsDelegateBridge> weak_factory_{this};
 };
 
 // Finds the ECWebContents of a web contents.
@@ -582,6 +761,139 @@ class OtherSiteLinkThrottle : public content::NavigationThrottle {
 
   const char* GetNameForLogging() override { return "OtherSiteLinkThrottle"; }
 };
+
+// Asks the shell whether a navigation the user started should be made
+// elsewhere, before its request leaves, and cancels it if so. Redirects are
+// not asked about.
+class HandoffThrottle : public content::NavigationThrottle {
+ public:
+  using content::NavigationThrottle::NavigationThrottle;
+
+  static void MaybeCreateAndAdd(content::NavigationThrottleRegistry& registry) {
+    content::NavigationHandle& handle = registry.GetNavigationHandle();
+    ECWebContents* owner = [ECWebContents fromContents:handle.GetWebContents()];
+    bool user_started =
+        (!handle.IsRendererInitiated() || handle.HasUserGesture()) &&
+        handle.GetReloadType() == content::ReloadType::NONE &&
+        !handle.IsHistory() &&
+        handle.GetRestoreType() == content::RestoreType::kNotRestored;
+    if ([owner.delegate respondsToSelector:@selector
+                        (webContents:shouldHandOffNavigation:)] &&
+        handle.IsInPrimaryMainFrame() && !handle.IsSameDocument() &&
+        handle.GetURL().SchemeIsHTTPOrHTTPS() && user_started) {
+      registry.AddThrottle(std::make_unique<HandoffThrottle>(registry));
+    }
+  }
+
+  ThrottleCheckResult WillStartRequest() override {
+    content::NavigationHandle* handle = navigation_handle();
+    ECWebContents* owner = [ECWebContents fromContents:handle->GetWebContents()];
+    NSMutableURLRequest* request =
+        [NSMutableURLRequest requestWithURL:net::NSURLWithGURL(handle->GetURL())];
+    if (handle->IsPost()) {
+      request.HTTPMethod = @"POST";
+      NSMutableData* body = [NSMutableData data];
+      if (scoped_refptr<network::ResourceRequestBody> post =
+              handle->GetPostData()) {
+        for (const network::DataElement& element : *post->elements()) {
+          if (const auto* bytes =
+                  element.TryAs<network::DataElementBytes>()) {
+            [body appendBytes:bytes->bytes().data()
+                       length:bytes->bytes().size()];
+          }
+        }
+      }
+      request.HTTPBody = body;
+      if (std::optional<std::string> type =
+              handle->GetRequestHeaders().GetHeader(
+                  net::HttpRequestHeaders::kContentType)) {
+        [request setValue:base::SysUTF8ToNSString(*type)
+            forHTTPHeaderField:@"Content-Type"];
+      }
+    }
+    const GURL& referrer = handle->GetReferrer().url;
+    if (referrer.is_valid()) {
+      [request setValue:base::SysUTF8ToNSString(referrer.spec())
+          forHTTPHeaderField:@"Referer"];
+    }
+    return [owner.delegate webContents:owner shouldHandOffNavigation:request]
+               ? CANCEL_AND_IGNORE
+               : PROCEED;
+  }
+
+  const char* GetNameForLogging() override { return "HandoffThrottle"; }
+};
+
+// Passes a message object's string messages from one frame to the delegate,
+// on a later turn of the main thread, so the delegate may close the web
+// contents.
+class MessageHost : public js_injection::WebMessageHost {
+ public:
+  MessageHost(ECWebContents* owner, NSString* name, NSURL* origin,
+              bool main_frame)
+      : owner_(owner), name_(name), origin_(origin), main_frame_(main_frame) {}
+
+  void OnPostMessage(std::unique_ptr<js_injection::WebMessage> message) override {
+    const std::u16string* text = std::get_if<std::u16string>(&message->message);
+    if (!text) {
+      return;
+    }
+    __weak ECWebContents* weak_owner = owner_;
+    NSString* body = base::SysUTF16ToNSString(*text);
+    NSString* name = name_;
+    NSURL* origin = origin_;
+    BOOL main_frame = main_frame_;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      ECWebContents* owner = weak_owner;
+      if (owner.contents &&
+          [owner.delegate respondsToSelector:@selector
+                          (webContents:didReceiveMessage:fromObject:origin:
+                                 mainFrame:)]) {
+        [owner.delegate webContents:owner
+                  didReceiveMessage:body
+                         fromObject:name
+                             origin:origin
+                          mainFrame:main_frame];
+      }
+    });
+  }
+
+ private:
+  __weak ECWebContents* owner_;
+  NSString* name_;
+  NSURL* origin_;
+  bool main_frame_;
+};
+
+// Makes the host of a message object for each frame that uses it.
+class MessageHostFactory : public js_injection::WebMessageHostFactory {
+ public:
+  MessageHostFactory(ECWebContents* owner, NSString* name)
+      : owner_(owner), name_(name) {}
+
+  std::unique_ptr<js_injection::WebMessageHost> CreateHost(
+      const std::string& top_level_origin_string,
+      const std::string& origin_string,
+      bool is_main_frame,
+      js_injection::WebMessageReplyProxy* proxy) override {
+    // js_injection names opaque and local origins "null".
+    NSURL* origin =
+        origin_string == "null"
+            ? nil
+            : [NSURL URLWithString:base::SysUTF8ToNSString(origin_string)];
+    return std::make_unique<MessageHost>(owner_, name_, origin, is_main_frame);
+  }
+
+ private:
+  __weak ECWebContents* owner_;
+  NSString* name_;
+};
+
+// The other-site throttle comes first, so Peek keeps priority.
+void AddNavigationThrottles(content::NavigationThrottleRegistry& registry) {
+  OtherSiteLinkThrottle::MaybeCreateAndAdd(registry);
+  HandoffThrottle::MaybeCreateAndAdd(registry);
+}
 
 // Asks the shell before a page opens another app, in place of Chrome's
 // web-modal dialog, which has no host in our tabs (patches/0012). Without the
@@ -795,6 +1107,8 @@ void AskToOpenExternalApp(const GURL& url,
   ECBrowserContext* _context;
   std::unique_ptr<WebContentsDelegateBridge> _bridge;
   std::unique_ptr<content::WebContents> _contents;
+  // The main-world scripts and message objects, made on first use.
+  std::unique_ptr<js_injection::JsCommunicationHost> _scriptHost;
   // Kept past close, so the view outlives the web contents, detached and
   // empty.
   NSView* _view;
@@ -807,7 +1121,7 @@ void AskToOpenExternalApp(const GURL& url,
 
 + (void)initialize {
   if (self == [ECWebContents class]) {
-    SetEngineCoreNavigationThrottles(&OtherSiteLinkThrottle::MaybeCreateAndAdd);
+    SetEngineCoreNavigationThrottles(&AddNavigationThrottles);
     ExternalProtocolHandler::SetShowDialogCallback(
         base::BindRepeating(&AskToOpenExternalApp));
   }
@@ -1053,6 +1367,12 @@ void AskToOpenExternalApp(const GURL& url,
   return window ? window->GetNativeWindow().GetNativeNSWindow() : nil;
 }
 
+- (void)exitFullscreenResizingView:(BOOL)resizingView {
+  if (_contents && _contents->IsFullscreen()) {
+    _contents->ExitFullscreen(resizingView);
+  }
+}
+
 - (BOOL)isSecure {
   return _contents && chrome_security_state::GetSecurityLevel(
                           _contents.get()) == security_state::SECURE;
@@ -1084,59 +1404,16 @@ void AskToOpenExternalApp(const GURL& url,
       ->ShowTranslateUI(/*auto_translate=*/true, /*triggered_from_menu=*/true);
 }
 
-// The content settings of permissions the user set for the site.
 - (NSDictionary<NSString*, NSNumber*>*)sitePermissions {
-  NSMutableDictionary<NSString*, NSNumber*>* permissions =
-      [NSMutableDictionary dictionary];
-  if (!_contents) {
-    return permissions;
-  }
-  GURL url = _contents->GetLastCommittedURL();
-  HostContentSettingsMap* map =
-      HostContentSettingsMapFactory::GetForProfile(_context.profile);
-  for (const content_settings::ContentSettingsInfo* info :
-       *content_settings::ContentSettingsRegistry::GetInstance()) {
-    ContentSettingsType type = info->website_settings_info()->type();
-    std::optional<permissions::RequestType> request =
-        permissions::ContentSettingsTypeToRequestTypeIfExists(type);
-    if (!request || !permissions::PermissionUtil::IsPermission(type)) {
-      continue;
-    }
-    content_settings::SettingInfo setting_info;
-    ContentSetting setting =
-        map->GetContentSetting(url, url, type, &setting_info);
-    bool decided =
-        setting == CONTENT_SETTING_ALLOW || setting == CONTENT_SETTING_BLOCK;
-    if (setting_info.source != content_settings::SettingSource::kUser ||
-        setting_info.primary_pattern == ContentSettingsPattern::Wildcard() ||
-        !decided) {
-      continue;
-    }
-    permissions[@(permissions::PermissionKeyForRequestType(*request))] =
-        @(setting == CONTENT_SETTING_ALLOW);
-  }
-  return permissions;
+  return _contents ? SitePermissions(_context.profile,
+                                     _contents->GetLastCommittedURL())
+                   : @{};
 }
 
 - (void)setSitePermission:(NSString*)permission allowed:(BOOL)allowed {
-  if (!_contents) {
-    return;
-  }
-  GURL url = _contents->GetLastCommittedURL();
-  for (const content_settings::ContentSettingsInfo* info :
-       *content_settings::ContentSettingsRegistry::GetInstance()) {
-    ContentSettingsType type = info->website_settings_info()->type();
-    std::optional<permissions::RequestType> request =
-        permissions::ContentSettingsTypeToRequestTypeIfExists(type);
-    if (request &&
-        std::string_view(permission.UTF8String) ==
-            permissions::PermissionKeyForRequestType(*request)) {
-      HostContentSettingsMapFactory::GetForProfile(_context.profile)
-          ->SetContentSettingDefaultScope(
-              url, url, type,
-              allowed ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
-      return;
-    }
+  if (_contents) {
+    SetSitePermission(_context.profile, _contents->GetLastCommittedURL(),
+                      permission, allowed);
   }
 }
 
@@ -1177,6 +1454,34 @@ void AskToOpenExternalApp(const GURL& url,
           },
           completion),
       ISOLATED_WORLD_ID_CHROME_INTERNAL);
+}
+
+- (js_injection::JsCommunicationHost*)scriptHost {
+  if (!_scriptHost) {
+    _scriptHost =
+        std::make_unique<js_injection::JsCommunicationHost>(_contents.get());
+  }
+  return _scriptHost.get();
+}
+
+- (void)addDocumentStartScript:(NSString*)script {
+  if (!_contents) {
+    return;
+  }
+  [self scriptHost]->AddPersistentJavaScript(
+      base::SysNSStringToUTF16(script),
+      js_injection::mojom::DocumentInjectionTime::kDocumentStart, {"*"},
+      content::ISOLATED_WORLD_ID_GLOBAL);
+}
+
+- (void)addMessageObjectNamed:(NSString*)name {
+  if (!_contents) {
+    return;
+  }
+  [self scriptHost]->AddWebMessageHostFactory(
+      std::make_unique<MessageHostFactory>(self, name),
+      base::SysNSStringToUTF16(name), {"*"},
+      content::ISOLATED_WORLD_ID_GLOBAL);
 }
 
 // As Chrome's "Copy link to highlight", for the focused frame.
@@ -1316,6 +1621,32 @@ void AskToOpenExternalApp(const GURL& url,
                                      ui::PAGE_TRANSITION_TYPED, std::string());
 }
 
+// A link the user followed (a browser-initiated link transition), so the
+// handoff throttle asks about it.
+- (void)loadRequest:(NSURLRequest*)request {
+  if (!_contents) {
+    return;
+  }
+  content::NavigationController::LoadURLParams params(
+      net::GURLWithNSURL(request.URL));
+  params.transition_type = ui::PAGE_TRANSITION_LINK;
+  if (NSString* referrer = [request valueForHTTPHeaderField:@"Referer"]) {
+    params.referrer =
+        content::Referrer(GURL(base::SysNSStringToUTF8(referrer)),
+                          network::mojom::ReferrerPolicy::kDefault);
+  }
+  if ([request.HTTPMethod isEqualToString:@"POST"]) {
+    params.load_type = content::NavigationController::LOAD_TYPE_HTTP_POST;
+    params.post_data = network::ResourceRequestBody::CreateFromCopyOfBytes(
+        base::apple::NSDataToSpan(request.HTTPBody ?: [NSData data]));
+    if (NSString* type = [request valueForHTTPHeaderField:@"Content-Type"]) {
+      params.extra_headers = std::string(net::HttpRequestHeaders::kContentType) +
+                             ": " + base::SysNSStringToUTF8(type);
+    }
+  }
+  _contents->GetController().LoadURLWithParams(params);
+}
+
 - (void)goBack {
   if (self.canGoBack) {
     _contents->GetController().GoBack();
@@ -1385,6 +1716,7 @@ void AskToOpenExternalApp(const GURL& url,
   _bridge->Observe(nullptr);
   zoom::ZoomController::FromWebContents(_contents.get())
       ->RemoveObserver(_bridge.get());
+  _scriptHost.reset();
   _contents.reset();
   _bridge.reset();
 }
@@ -1527,6 +1859,37 @@ void AskToOpenExternalApp(const GURL& url,
   if (_contents) {
     _contents->PasteAndMatchStyle();
   }
+}
+
+@end
+
+@implementation ECBrowserContext (SiteSettings)
+
+- (NSDictionary<NSString*, NSNumber*>*)permissionsForOrigin:(NSURL*)origin {
+  return SitePermissions(self.profile, net::GURLWithNSURL(origin));
+}
+
+- (void)setPermission:(NSString*)permission
+              allowed:(BOOL)allowed
+            forOrigin:(NSURL*)origin {
+  SetSitePermission(self.profile, net::GURLWithNSURL(origin), permission,
+                    allowed);
+}
+
+// As ZoomController's zoomPercent reads the level the host's pages get.
+- (NSInteger)zoomPercentForHost:(NSString*)host {
+  double level = content::HostZoomMap::GetDefaultForBrowserContext(self.profile)
+                     ->GetZoomLevelForHostAndScheme(
+                         url::kHttpsScheme, base::SysNSStringToUTF8(host));
+  return static_cast<NSInteger>(blink::ZoomLevelToZoomFactor(level) * 100 +
+                                0.5);
+}
+
+// A percentage at the default zoom removes the host's own level.
+- (void)setZoomPercent:(NSInteger)percent forHost:(NSString*)host {
+  content::HostZoomMap::GetDefaultForBrowserContext(self.profile)
+      ->SetZoomLevelForHost(base::SysNSStringToUTF8(host),
+                            blink::ZoomFactorToZoomLevel(percent / 100.0));
 }
 
 @end

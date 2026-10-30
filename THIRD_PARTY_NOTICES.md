@@ -18,11 +18,39 @@ Copyright Raymond Hill and contributors. GNU General Public License v3.0. It is 
 unchanged except for an added manifest `key`; its license is `LICENSE.txt` in
 `Sailfish.app/Contents/Resources/uBlock0.chromium`. Source: https://github.com/gorhill/uBlock/tree/1.75.0
 
+## Filter lists
+
+WebKit pages block ads and trackers with the filter lists uBlock Origin enables by default, which Sailfish converts
+into WebKit content rule lists. The first copies come with the bundled uBlock Origin, and newer ones are fetched from
+the addresses in its `assets/assets.json`. Each list keeps its own license.
+
+- The uBlock filters for ads, badware risks, privacy, quick fixes and unbreak, https://github.com/uBlockOrigin/uAssets.
+  GNU General Public License v3.0.
+- EasyList and EasyPrivacy, https://easylist.to. GNU General Public License v3.0 or Creative Commons
+  Attribution-ShareAlike 3.0 Unported.
+- The Online Malicious URL Blocklist, https://gitlab.com/malware-filter/urlhaus-filter, built from URLhaus data by
+  abuse.ch. CC0 1.0.
+- Peter Lowe's Ad and tracking server list, https://pgl.yoyo.org/adservers/. Under its own terms,
+  https://pgl.yoyo.org/adservers/policy.php.
+
 ## Readability
 
 `macOS/Sailfish/Resources/Reader` contains Readability 0.6.0 by Mozilla, https://github.com/mozilla/readability.
 Copyright (c) 2010 Arc90 Inc. Apache License 2.0 (`Readability-0.6.0-LICENSE.md` beside it). The test fixtures
 in `macOS/SailfishTests/Fixtures/Reader` include a page from its test suite.
+
+## Ardia
+
+Four files in `macOS/Sailfish/Engine` are adapted from Ardia's own source files at commit a01a909,
+https://github.com/mantrakp04/ardia. Ardia, Copyright 2026 Mantra Patel. Apache License 2.0, the license of
+Sailfish ([LICENSE](LICENSE)). Sailfish changed each of them, and each keeps Ardia's copyright line at its top.
+Ardia's engine patches and its bundled uBlock Origin are GPL-3.0, and Sailfish uses neither.
+
+- `WebKitPageScript.swift`, from `packages/ardiacore/ios/WebKitPageScript.swift`
+- `WebKitDownloads.swift`, from `packages/ardiacore/ios/WebKitDownloads.swift`
+- `WebKitStoreRemovals.swift`, from `packages/ardiacore/ios/WebKitStoreRemovals.swift`
+- `ProtectedMedia.swift`, from the protected-media detector in `packages/ardiacore/ios/page_script.js`, lines 763
+  to 833
 
 ## Sparkle
 

@@ -27,6 +27,11 @@ struct AppFeature {
     // The window last made key; its space is the globally last focused one, which a relaunch brings to the front.
     var focusedWindowID: WindowFeature.State.ID?
 
+    // Toasts that belong to no window show in the last focused one.
+    var toastWindowID: WindowFeature.State.ID? {
+      focusedWindowID.flatMap { windows[id: $0]?.id } ?? windows.last?.id
+    }
+
     var focusedSpace: Space? {
       (focusedWindowID.flatMap { windows[id: $0] } ?? windows.last { !$0.isIncognito })?.spaces.selected
     }
@@ -62,23 +67,23 @@ struct AppFeature {
     // Saved histories are kept for this many archived tabs, the newest.
     static let archivedSessions = 1000
 
-    // The tabs whose saved history is kept: open ones, the newest archived ones and those undo can bring back.
+    // The pages whose saved history is kept: those of open tabs, of the newest archived ones (which keep the page
+    // under the tab's id) and of those undo can bring back.
     var sessionIDs: Set<UUID> {
-      var ids = Set(windows.flatMap { $0.spaces.spaces.flatMap(\.tabs.ids) })
-      ids.formUnion(profiles.flatMap(\.favorites.ids))
-      ids.formUnion(archive.prefix(Self.archivedSessions).map(\.id))
-      ids.formUnion(windows.compactMap { $0.peek?.tab.id })
-      ids.formUnion(littleSailfishes.compactMap { $0.tab?.id })
+      var tabs = windows.flatMap { $0.spaces.spaces.flatMap(\.tabs) }
+      tabs += profiles.flatMap(\.favorites)
+      tabs += windows.compactMap { $0.peek?.tab }
+      tabs += littleSailfishes.compactMap(\.tab)
       for undo in windows.flatMap(\.undoStack) {
         switch undo {
-        case let .archive(_, closed, _): ids.formUnion(closed.map(\.tab.id))
-        case let .deleteFolder(_, removal): ids.formUnion(removal.closed.map(\.tab.id))
-        case let .deleteSpace(space, _): ids.formUnion(space.tabs.ids)
-        case let .peek(peek, _, _): ids.insert(peek.tab.id)
+        case let .archive(_, closed, _): tabs += closed.map(\.tab)
+        case let .deleteFolder(_, removal): tabs += removal.closed.map(\.tab)
+        case let .deleteSpace(space, _): tabs += space.tabs
+        case let .peek(peek, _, _): tabs.append(peek.tab)
         case .edit, .folderToSpace, .spaceToFolder, .move, .createFolder, .spaceEdit, .imported: break
         }
       }
-      return ids
+      return Set(tabs.flatMap(\.pages).map(\.id)).union(archive.prefix(Self.archivedSessions).map(\.id))
     }
 
     // Each window's shown tabs that are favorites; a favorite's page shows in one window at a time.
@@ -158,7 +163,7 @@ struct AppFeature {
     case windows(IdentifiedActionOf<WindowFeature>)
   }
 
-  enum CancelID { case save }
+  enum CancelID { case save, macTabs }
 
   // Shared with the quit save, so that every write goes through its lock. Cancelling the in-flight save is
   // only the debounce: cancellable registers inside the effect body, so a save that starts late can cancel a
@@ -170,6 +175,7 @@ struct AppFeature {
 
   @Dependency(\.continuousClock) var clock
   @Dependency(\.date.now) var now
+  @Dependency(\.macTabs) var macTabs
   @Dependency(\.persistence) var persistence
   @Dependency(\.requestMediaFolders) var requestMediaFolders
   @Dependency(\.uuid) var uuid
@@ -186,7 +192,7 @@ struct AppFeature {
 
       // Tidy Downloads' card, with its Undo, and the note once undone show in the window last focused.
       case let .downloads(.renamed(id, file)):
-        guard let original = state.downloads.downloads[id: id]?.originalName, let window = toastWindow(state)
+        guard let original = state.downloads.downloads[id: id]?.originalName, let window = state.toastWindowID
         else { return .none }
         return .send(.windows(.element(
           id: window, action: .showToast(file.lastPathComponent, .revertDownloadName(id), placement: .renamed(from: original)))))
@@ -194,8 +200,27 @@ struct AppFeature {
       case let .windows(.element(_, .toastAction(.revertDownloadName(id)))):
         return .send(.downloads(.revertName(id)))
 
+      // A login typed into a WebKit page: the window showing its tab, or the last focused one, offers to save it.
+      case let .engine(.loginSubmitted(tab, login)):
+        guard let window = state.window(showing: tab)?.id ?? state.toastWindowID else {
+          return .run { _ in await engine.dropLogin(login.id) }
+        }
+        let toast = WindowFeature.Action.showToast("Save password for \(login.site)?", .saveLogin(login.id))
+        return .send(.windows(.element(id: window, action: toast)))
+
+      case let .windows(.element(_, .toastAction(.saveLogin(id)))):
+        return .run { _ in await engine.saveLogin(id) }
+
+      // A tab switched to WebKit for protected video: the window showing it, or the last focused one, offers Undo.
+      case let .engine(.openedInWebKit(tab, site)):
+        guard let window = state.window(showing: tab)?.id ?? state.toastWindowID else { return .none }
+        return .send(.windows(.element(id: window, action: .showToast("\(site) opened in WebKit", .undoEngineSwitch(tab)))))
+
+      case let .windows(.element(_, .toastAction(.undoEngineSwitch(tab)))):
+        return .run { _ in await engine.undoEngineSwitch(tab) }
+
       case .downloads(.reverted):
-        guard let window = toastWindow(state) else { return .none }
+        guard let window = state.toastWindowID else { return .none }
         return .send(.windows(.element(id: window, action: .showToast("Download name reverted!"))))
 
       case let .engine(.updated(tab, page)):
@@ -265,6 +290,15 @@ struct AppFeature {
           return .send(.windows(.element(id: window.id, action: .closePeek)))
         }
         return send(.close(tab), toSpaceOf: tab, in: state)
+
+      // A WebKit page's script popup joins the opener's space, or, from a Peek or a Little Sailfish, the selected space
+      // of the frontmost window.
+      case let .engine(.adoptRequested(tab, opener, url)):
+        if state.windows.contains(where: { $0.spaces.spaces.contains { $0.tabs[id: opener] != nil } }) {
+          return send(.adopt(tab, url, active: true), toSpaceOf: opener, in: state)
+        }
+        guard let id = state.toastWindowID, let window = state.windows[id: id] else { return .none }
+        return .send(.windows(.element(id: id, action: .tab(.adopt(tab, url, active: true), in: window.spaces.selectedID))))
 
       case let .engine(.activateRequested(tab)):
         return send(.select(tab), toSpaceOf: tab, in: state)
@@ -337,6 +371,8 @@ struct AppFeature {
       case .launched:
         return .merge(
           .run { send in
+            // Before any tab opens a WebKit store.
+            await engine.removeDeletedStores()
             do {
               await send(.loaded(.success(try persistence.load().map { try Snapshot.decode($0) })))
             } catch let error where Self.isUnreadable(error) {
@@ -509,7 +545,12 @@ struct AppFeature {
         return .none
 
       case let .windowClosed(id):
-        guard let window = state.windows.remove(id: id), window.isIncognito else { return .none }
+        guard let window = state.windows.remove(id: id) else { return .none }
+        // Incognito tabs never offer to save a login, so only a regular window can close on one.
+        guard window.isIncognito else {
+          guard case let .saveLogin(login) = window.toast?.action else { return .none }
+          return .run { _ in await engine.dropLogin(login) }
+        }
         let profile = window.spaces.selected.profileID
         let tabs = window.spaces.spaces.flatMap(\.tabs).filter(\.isLive).map(\.id)
         let isLast = !state.windows.contains { $0.isIncognito && $0.spaces.selected.profileID == profile }
@@ -596,6 +637,14 @@ struct AppFeature {
           try sessionWriter.flush()
         }
         .cancellable(id: CancelID.save, cancelInFlight: true)
+      }
+    }
+    // A newer state's update replaces one still resolving icons, so the publisher gets the states in order.
+    .onChange(of: \.macTabs) { _, value in
+      Reduce { _, _ in
+        guard let value else { return .none }
+        return .run { _ in await macTabs.update(value) }
+          .cancellable(id: CancelID.macTabs, cancelInFlight: true)
       }
     }
   }
@@ -734,10 +783,6 @@ struct AppFeature {
     let spaces = state.windows.filter { !$0.isIncognito }.flatMap(\.spaces.spaces).filter { $0.profileID == profile }
     let tabs = (state.profiles[id: profile]?.favorites.elements ?? []) + spaces.flatMap(\.ownTabs)
     return Array(tabs.sorted { $0.lastActiveAt > $1.lastActiveAt }.prefix(5))
-  }
-
-  private func toastWindow(_ state: State) -> WindowFeature.State.ID? {
-    state.focusedWindowID.flatMap { state.windows[id: $0]?.id } ?? state.windows.last?.id
   }
 
   // The profile of the last window's space: a Little Sailfish uses the last used one.

@@ -1,6 +1,8 @@
 #import "engine_core/ec_browser_context_private.h"
 
+#include "base/apple/foundation_util.h"
 #include "base/functional/bind.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/no_destructor.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
@@ -11,8 +13,10 @@
 #include "components/favicon_base/favicon_types.h"
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "net/base/apple/url_conversions.h"
+#include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
 
 @implementation ECHistoryEntry
@@ -79,6 +83,43 @@
             completion(result.image.IsEmpty() ? nil : result.image.ToNSImage());
           }),
           tracker.get());
+}
+
+- (void)addVisitToURL:(NSURL*)url title:(NSString*)title {
+  if (self.profile->IsOffTheRecord()) {
+    return;
+  }
+  GURL page = net::GURLWithNSURL(url);
+  history::HistoryService* history = HistoryServiceFactory::GetForProfile(
+      self.profile, ServiceAccessType::EXPLICIT_ACCESS);
+  history->AddPage(page, base::Time::Now(), history::SOURCE_BROWSED);
+  history->SetPageTitle(page, base::SysNSStringToUTF16(title));
+}
+
+// MergeFavicon replaces the bitmap of the image's pixel size and keeps the
+// page's others.
+- (void)setFavicon:(NSImage*)image
+           iconURL:(NSURL*)iconURL
+        forPageURL:(NSURL*)pageURL {
+  if (self.profile->IsOffTheRecord()) {
+    return;
+  }
+  CGImageRef bitmap = [image CGImageForProposedRect:nullptr
+                                            context:nil
+                                              hints:nil];
+  if (!bitmap) {
+    return;
+  }
+  NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithCGImage:bitmap];
+  NSData* png = [rep representationUsingType:NSBitmapImageFileTypePNG
+                                  properties:@{}];
+  FaviconServiceFactory::GetForProfile(self.profile,
+                                       ServiceAccessType::EXPLICIT_ACCESS)
+      ->MergeFavicon(net::GURLWithNSURL(pageURL), net::GURLWithNSURL(iconURL),
+                     favicon_base::IconType::kFavicon,
+                     base::MakeRefCounted<base::RefCountedBytes>(
+                         base::apple::NSDataToSpan(png)),
+                     gfx::Size(rep.pixelsWide, rep.pixelsHigh));
 }
 
 @end
