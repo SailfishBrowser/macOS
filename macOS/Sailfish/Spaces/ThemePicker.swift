@@ -129,8 +129,8 @@ struct ThemePicker: View {
     .environment(\.colorScheme, .dark)
   }
 
-  // Shots 33 to 35: the panel is #2A2838 with no color, else the colors' average at half its brightness
-  // (#7FB8D6 gives #3F5A6B; #7FB8D6 and #D69C7E give #555557).
+  // Shots 33 to 35: the panel is #2A2838 with no color, else the colors' average at half its brightness, which is
+  // within 2 of the shots (#7FB8D6 gives #3F5C6B, measured #3F5A6B; #7FB8D6 and #D69C7E give #555555, measured #555557).
   private var panel: Color {
     if theme.colors.isEmpty { return Color(hex: 0x2A2838) }
     let channels = [16, 8, 0].map { (shift: UInt32) in
