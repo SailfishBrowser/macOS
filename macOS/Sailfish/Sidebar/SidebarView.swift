@@ -719,12 +719,9 @@ struct SidebarView: View {
           .padding(.bottom, 2)
         Text("Drag to add Favorites").font(.system(size: 13, weight: .semibold))
           .foregroundStyle(Theme.primaryText)
-        Text("Favorites keep your most\nused sites and apps close").font(.system(size: 12))
-          .foregroundStyle(Theme.favoritesHintText)
-          .multilineTextAlignment(.center)
       }
       .frame(maxWidth: .infinity)
-      .frame(height: 94)
+      .padding(.vertical, 12)
       // The favorites tile, whose slot this holds: 12.05pt continuous.
       .background(
         drag?.shownTarget?.isFavorite == true ? Theme.fillHover : Theme.favoritesHintFill, in: RoundedRectangle(cornerRadius: 12))
