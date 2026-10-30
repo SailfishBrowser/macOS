@@ -15,6 +15,7 @@ func makeAboutWindow(checkForUpdates: (() -> Void)?, showAcknowledgements: @esca
   window.titleVisibility = .hidden
   window.title = "About \(AboutView.info("CFBundleName"))"
   window.isReleasedWhenClosed = false
+  window.isExcludedFromWindowsMenu = true
   window.center()
   return window
 }
