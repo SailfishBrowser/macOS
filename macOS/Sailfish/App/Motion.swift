@@ -12,6 +12,8 @@ enum Motion {
   // way; a held duplicate frame comes with it. The Library's 1198, 454, 214, 142, 94, 60 pt is that spring from
   // its fifth frame on. Retargeted in flight, the spring keeps its velocity.
   static var layout: Animation? { motion(.spring(duration: 0.2, bounce: 0)) }
+  // Its length, for AppKit's animations; none with Reduce Motion.
+  static var layoutDuration: TimeInterval { layout == nil ? 0 : 0.2 }
   // The spaces' strip settling once the fingers lift off a swipe. Recorded over eleven swipes:
   // the strip starts from rest whatever the fingers' speed, eases in and lands with no overshoot after 15-18 frames,
   // which is a critically damped spring of 0.2 s (2 px off the frames on average).

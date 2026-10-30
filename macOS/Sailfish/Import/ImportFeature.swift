@@ -214,8 +214,8 @@ struct ImportFeature {
     var failure: ImportError?
   }
 
-  // The first launch's intro, which the window plays before the dialog: the sheet waits while the icon shows on black,
-  // and comes down as the icon lands in its corner.
+  // The first launch's intro, which the window plays over the dialog: the sheet is invisible while the icon shows on
+  // black, and fades in once the icon lands on its corner.
   enum Intro: Equatable {
     case playing, landing
   }

@@ -10,8 +10,10 @@ struct ImportView: View {
   static let size = CGSize(width: 720, height: 622)
   static let padding: CGFloat = 28
   @Bindable var store: StoreOf<ImportFeature>
-  // After the first launch's intro all but the icon fade in, as the intro's icon lands on it.
+  // During the first launch's intro the sheet is invisible; once the intro's icon lands on its icon, the sheet and all
+  // but the icon fade in.
   @State private var isShown: Bool
+  @State private var sheet: NSWindow?
   @State private var browser: SourceBrowser?
   @State private var theme = SpaceTheme()
   @Shared(.blocksAds) private var blocksAds
@@ -35,10 +37,18 @@ struct ImportView: View {
       buttons
     }
     .environment(\.colorScheme, .dark)
-    .onAppear {
-      store.send(.appeared)
-      withAnimation(Motion.layout) { isShown = true }
+    .disabled(!isShown)
+    .background(WindowReader { window in
+      window.alphaValue = isShown ? 1 : 0
+      sheet = window
+    })
+    .onChange(of: store.intro == .playing) { _, isPlaying in
+      if !isPlaying {
+        withAnimation(Motion.layout) { isShown = true }
+        NSAnimationContext.runAnimationGroup { $0.duration = Motion.layoutDuration; sheet?.animator().alphaValue = 1 }
+      }
     }
+    .onAppear { store.send(.appeared) }
   }
 
   private var title: String {

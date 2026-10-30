@@ -91,7 +91,7 @@ struct WindowView: View {
         }
       }
     }
-    .sheet(item: importer) { ImportView(store: $0) }
+    .sheet(item: $store.scope(state: \.importer, action: \.importer)) { ImportView(store: $0) }
     // Loads the profile, which reports its downloads, before any of its pages open.
     .task(id: store.spaces.selected.profileID) { _ = await Engine.shared.context(for: store.spaces.selected) }
   }
@@ -132,11 +132,6 @@ struct WindowView: View {
     let slide = (store.sidebar.swipe ?? 0) * WindowFeature.libraryGain / span
     if store.isLibraryOpen { return max(1 + min(slide, 0), 0) }
     return store.spaces.selectedID == store.spaces.spaces.first?.id ? min(max(slide, 0), 1) : 0
-  }
-
-  // The import dialog, which the first launch's intro holds back until its icon lands.
-  private var importer: Binding<StoreOf<ImportFeature>?> {
-    store.importer?.intro == .playing ? .constant(nil) : $store.scope(state: \.importer, action: \.importer)
   }
 
   // A theme being picked, in the space editor or the onboarding, shows before it is kept.
