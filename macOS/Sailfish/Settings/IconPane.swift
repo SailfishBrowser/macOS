@@ -25,7 +25,7 @@ struct IconPane: View {
         ForEach(AppIcon.allCases, id: \.self) { icon in
           HStack(spacing: 0) {
             Circle()
-              .strokeBorder(.white.opacity(current == icon ? 0 : 0.5))
+              .strokeBorder(Color.primary.opacity(current == icon ? 0 : 0.3))
               .background(Circle().fill(current == icon ? Color.accentColor : .white.opacity(0.9)))
               .overlay(Circle().fill(.white).padding(7).opacity(current == icon ? 1 : 0))
               .frame(width: 22, height: 22)

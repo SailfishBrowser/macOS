@@ -27,7 +27,7 @@ struct ShortcutsPane: View {
         .font(.system(size: 13))
         .padding(.horizontal, 16)
         .frame(height: 40)
-        .background(.white.opacity(0.04))
+        .background(Color.primary.opacity(0.04))
         Divider()
         ScrollView {
           VStack(spacing: 0) {

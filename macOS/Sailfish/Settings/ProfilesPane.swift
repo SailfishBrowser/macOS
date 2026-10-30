@@ -32,7 +32,7 @@ struct ProfilesPane: View {
                 }
                 .padding(.horizontal, 8)
                 .frame(height: 40)
-                .background(selection == profile.id ? Color.white.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .background(selection == profile.id ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
                 .onTapGesture { selection = profile.id }
                 .contextMenu {
