@@ -499,6 +499,14 @@ EC_EXPORT
            fromObject:(NSString*)name
                origin:(nullable NSURL*)origin
             mainFrame:(BOOL)mainFrame;
+// Asked before a key press goes to the page, with the press as AppKit sent
+// it. YES reserves it for the app: the main menu performs it at once and the
+// page never sees it, as with Chrome's tab and window shortcuts, so a busy
+// page cannot hold it. NO sends it to the page first, and the main menu gets
+// it if the page leaves it. Without this method every press goes to the page
+// first. The menu may close the web contents inside the call.
+- (BOOL)webContents:(ECWebContents*)contents
+    reservesKeyEquivalent:(NSEvent*)event;
 // The Chrome Web Store asks to install an extension. `permissions` are the
 // warnings Chrome lists for it. Without this method installs are refused.
 - (void)webContents:(ECWebContents*)contents
