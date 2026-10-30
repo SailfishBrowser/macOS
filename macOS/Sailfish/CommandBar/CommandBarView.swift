@@ -174,6 +174,9 @@ struct CommandBarView: View {
       // A click anywhere else in the window closes the bar and goes on to what was clicked, as in Arc. A Little
       // Sailfish bar has its close button instead.
       if hasCloseButton { return }
+      // SwiftUI can lose that request, and a bar without the keys takes no typing and no Esc.
+      let window = NSApp.keyWindow
+      DispatchQueue.main.async { focusField(in: window) }
       clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
         guard let window = event.window, window.isKeyWindow, let content = window.contentView else { return event }
         let point = CGPoint(x: event.locationInWindow.x, y: content.bounds.height - event.locationInWindow.y)
@@ -183,6 +186,8 @@ struct CommandBarView: View {
       // The field editor takes Backspace and ⌘Return before onKeyPress. Backspace at the start leaves keyword mode,
       // with ⌘⌥ it removes the selected suggestion, and ⌘Return opens the row in a Little Sailfish.
       backspaceMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        // Typing goes to the bar whatever took the keys since it opened.
+        if event.window == window, event.modifierFlags.isDisjoint(with: [.command, .control]) { focusField(in: window) }
         if event.keyCode == 36, event.modifierFlags.contains(.command) {
           store.send(.submitInLittleSailfish(store.selection))
           return nil
@@ -210,6 +215,23 @@ struct CommandBarView: View {
       let typed = shown.lowercased().hasPrefix(store.query.lowercased()) ? store.query.utf16.count : 0
       select(in: shown, NSRange(location: typed, length: shown.utf16.count - typed))
     }
+  }
+
+  // Gives the keys to the field unless a text field has them already.
+  private func focusField(in window: NSWindow?) {
+    guard let window, !(window.firstResponder is NSText), let content = window.contentView,
+      let field = field(in: content, of: content)
+    else { return }
+    window.makeFirstResponder(field)
+  }
+
+  // The bar's own field, told from the sidebar's search field by where it sits.
+  private func field(in view: NSView, of content: NSView) -> NSTextField? {
+    if let field = view as? NSTextField, field.isEditable {
+      let frame = field.convert(field.bounds, to: nil)
+      return panelFrame.contains(CGPoint(x: frame.midX, y: content.bounds.height - frame.midY)) ? field : nil
+    }
+    return view.subviews.lazy.compactMap { field(in: $0, of: content) }.first
   }
 
   private func selectInline() {
