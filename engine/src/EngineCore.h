@@ -26,6 +26,10 @@ EC_EXPORT
 // The Dock icon's menu (Chrome's own is dropped), nil for none. The shell
 // sets it once launching has finished, as it replaces the main menu.
 @property(class, nullable) NSMenu* dockMenu;
+// The host's registrable domain (eTLD+1, private registries such as
+// github.io included), or the host itself when it has none (an IP address,
+// localhost, a public suffix).
++ (NSString*)registrableDomainForHost:(NSString*)host;
 @end
 
 // Matches download::DownloadItem::DownloadState.
@@ -101,6 +105,17 @@ EC_EXPORT
      downloadDidUpdate:(ECDownload*)download;
 @end
 
+@class ECCookie;
+
+@protocol ECCookieDelegate <NSObject>
+// A cookie under one of the context's observedCookieDomains was set
+// (`removed` NO) or was deleted, expired or evicted (`removed` YES). The
+// removal half of an overwrite and partitioned cookies are not reported.
+- (void)browserContext:(ECBrowserContext*)context
+       cookieDidChange:(ECCookie*)cookie
+               removed:(BOOL)removed;
+@end
+
 EC_EXPORT
 @interface ECBrowserContext : NSObject
 // Loads, or creates, the profile at `path`, a directory inside the user data
@@ -120,6 +135,11 @@ EC_EXPORT
 @property(copy) NSURL* downloadDirectory;
 @property BOOL searchSuggestEnabled;
 @property(weak, nullable) id<ECExtensionsDelegate> extensionsDelegate;
+// Changes to cookies under these registrable domains (the domain itself or
+// any subdomain) are reported to cookieDelegate, on the main thread. Empty,
+// the default, observes nothing.
+@property(weak, nullable) id<ECCookieDelegate> cookieDelegate;
+@property(copy) NSArray<NSString*>* observedCookieDomains;
 // Closes the context's web contents, then releases the profile. Closing an
 // incognito context discards its data.
 - (void)close;
@@ -180,6 +200,9 @@ EC_EXPORT
 @property(readonly) NSString* URLString;
 @property(readonly) NSString* username;
 @property(readonly) NSString* password;
+// NO for a login loginsForURL: found by public suffix (saved for another
+// subdomain of the site); YES otherwise.
+@property(readonly, getter=isExactMatch) BOOL exactMatch;
 @end
 
 // A cookie from another browser, as importCookies: takes it.
@@ -220,6 +243,45 @@ EC_EXPORT
 // set them. `completion` gets how many it took, on the main thread.
 - (void)importCookies:(NSArray<ECCookie*>*)cookies
            completion:(void (^)(NSInteger count))completion;
+// The saved logins Chrome would offer on the URL's page, blocklisted ones
+// left out: those saved for its origin, most recently used first, then those
+// of other subdomains of the site (exactMatch NO), in `completion` on the
+// main thread.
+- (void)loginsForURL:(NSURL*)url
+          completion:(void (^)(NSArray<ECPassword*>* logins))completion;
+// Saves a login typed on the URL's page, as Chrome's save prompt does: it
+// updates the password of the same username saved for the URL's origin, or
+// adds the login.
+- (void)addLoginForURL:(NSURL*)url
+              username:(NSString*)username
+              password:(NSString*)password;
+@end
+
+@interface ECBrowserContext (Cookies)
+// The context's unexpired, unpartitioned cookies under the registrable
+// domains (the domain itself or any subdomain), HttpOnly ones included, in
+// `completion` on the main thread.
+- (void)cookiesForDomains:(NSArray<NSString*>*)domains
+               completion:(void (^)(NSArray<ECCookie*>* cookies))completion;
+// Deletes the context's unpartitioned cookies with each cookie's name,
+// domain and path, whatever their value. `completion` gets how many it
+// deleted, on the main thread.
+- (void)deleteCookies:(NSArray<ECCookie*>*)cookies
+           completion:(void (^)(NSInteger count))completion;
+@end
+
+@interface ECBrowserContext (SiteSettings)
+// As ECWebContents's sitePermissions and setSitePermission:allowed:, for an
+// origin rather than a page.
+- (NSDictionary<NSString*, NSNumber*>*)permissionsForOrigin:(NSURL*)origin;
+- (void)setPermission:(NSString*)permission
+              allowed:(BOOL)allowed
+            forOrigin:(NSURL*)origin;
+// The host's remembered page zoom as a percentage, 100 at the default, as
+// web contents' zoomPercent shows on its pages; setting it changes the zoom
+// of the host's open pages too.
+- (NSInteger)zoomPercentForHost:(NSString*)host;
+- (void)setZoomPercent:(NSInteger)percent forHost:(NSString*)host;
 @end
 
 @interface ECBrowserContext (Downloads)
@@ -239,6 +301,16 @@ EC_EXPORT
 // destinationURL, in `completion` on the main thread (nil for none).
 - (void)faviconForPageURL:(NSURL*)URL
                completion:(void (^)(NSImage* _Nullable favicon))completion;
+// Records a visit to a page the shell showed itself, as a browsed visit
+// with its title, so history and autocomplete find it. An incognito context
+// records nothing.
+- (void)addVisitToURL:(NSURL*)url title:(NSString*)title;
+// Saves the page's favicon, loaded from `iconURL`, for faviconForPageURL:.
+// It replaces the saved image of the same pixel size. An incognito context
+// saves nothing.
+- (void)setFavicon:(NSImage*)image
+           iconURL:(NSURL*)iconURL
+        forPageURL:(NSURL*)pageURL;
 @end
 
 @protocol ECExtensionPopupDelegate <NSObject>
@@ -386,6 +458,55 @@ EC_EXPORT
 // The page asked to be shown, e.g. by its Picture in Picture window's back to
 // tab button. The shell selects its tab.
 - (void)webContentsDidRequestActivation:(ECWebContents*)contents;
+// The page showed an element full screen (Element.requestFullscreen(), a
+// video's full screen button), which it already lays out as filling its
+// view; the shell fills the screen with the view and calls
+// exitFullscreenResizingView: to leave. `origin` is the requesting frame's,
+// nil when opaque (a data: page). Reported once the request returns, as is
+// the exit. Without this method requests are refused.
+- (void)webContents:(ECWebContents*)contents
+    didEnterFullscreenForOrigin:(nullable NSURL*)origin;
+// The page left element full screen: it exited itself, navigated, or the
+// shell called exitFullscreenResizingView:.
+- (void)webContentsDidExitFullscreen:(ECWebContents*)contents;
+// Asked before the request of a navigation the user started in the page
+// leaves: a link click or form submission with a user gesture, or a
+// loadURL:, loadRequest: or new tab load that is not a reload, history step
+// or restore; only for http and https URLs in the page itself, never for a
+// redirect. YES cancels the navigation, which the shell then makes
+// elsewhere. `request` has the URL, the method, a POST's body (without its
+// files) and Content-Type, and the referrer as its Referer header. Answer at
+// once; the shell must not navigate or close the web contents inside the
+// call.
+- (BOOL)webContents:(ECWebContents*)contents
+    shouldHandOffNavigation:(NSURLRequest*)request;
+// A navigation committed a new document in the page; `isHistory` is YES for
+// a back, forward or history entry step.
+- (void)webContents:(ECWebContents*)contents
+    didCommitNavigationIsHistory:(BOOL)isHistory;
+// The view drew a frame of the page's document: the first frame with content
+// of each document a navigation commits, and the first frame drawn each time
+// the view is shown again (moved into a window, uncovered) after its document
+// drew. The frame is on screen, or reaches it on the display's next refresh.
+- (void)webContentsDidPresentFirstFrame:(ECWebContents*)contents;
+// A string a frame's script passed to the postMessage() of the object named
+// `name` (addMessageObjectNamed:). `origin` is the frame's origin, nil when
+// it is opaque, as a data: page's, or local, as a file: page's. Messages
+// that are not strings are dropped. Delivered on a later turn of the main
+// thread, so the shell may navigate or close the web contents inside it.
+- (void)webContents:(ECWebContents*)contents
+    didReceiveMessage:(NSString*)message
+           fromObject:(NSString*)name
+               origin:(nullable NSURL*)origin
+            mainFrame:(BOOL)mainFrame;
+// Asked before a key press goes to the page, with the press as AppKit sent
+// it. YES reserves it for the app: the main menu performs it at once and the
+// page never sees it, as with Chrome's tab and window shortcuts, so a busy
+// page cannot hold it. NO sends it to the page first, and the main menu gets
+// it if the page leaves it. Without this method every press goes to the page
+// first. The menu may close the web contents inside the call.
+- (BOOL)webContents:(ECWebContents*)contents
+    reservesKeyEquivalent:(NSEvent*)event;
 // The Chrome Web Store asks to install an extension. `permissions` are the
 // warnings Chrome lists for it. Without this method installs are refused.
 - (void)webContents:(ECWebContents*)contents
@@ -468,6 +589,12 @@ EC_EXPORT
 - (void)enterPictureInPicture;
 - (void)exitPictureInPicture;
 @property(readonly, nullable) NSWindow* pictureInPictureWindow;
+// Leaves the page's element full screen, which the delegate then hears of;
+// nothing while the page shows none. With `resizingView`, the shell is about
+// to resize the view (restoring its layout) and the page leaves with that
+// resize, in one step; otherwise (a hidden page) it is told at once.
+- (void)exitFullscreenResizingView:(BOOL)resizingView
+    NS_SWIFT_NAME(exitFullscreen(resizingView:));
 // Whether the page has Chrome's secure (lock) security level.
 @property(readonly, getter=isSecure) BOOL secure;
 // The name of the language "Translate to" would translate the page into,
@@ -482,6 +609,9 @@ EC_EXPORT
 @property(weak, nullable) id<ECWebContentsDelegate> delegate;
 
 - (void)loadURL:(NSURL*)url;
+// Loads the request as a link the user followed: its URL, its Referer header
+// as the referrer and, for a POST, its body with its Content-Type.
+- (void)loadRequest:(NSURLRequest*)request;
 - (void)goBack;
 - (void)goForward;
 // Goes to the entry at `offset` from the current page, as ⌘[ and ⌘] with a
@@ -536,6 +666,14 @@ EC_EXPORT
 - (void)evaluateJavaScript:(NSString*)script
                 completion:(void (^)(NSString* _Nullable result))completion
     NS_SWIFT_NAME(evaluateJavaScript(_:completion:));
+// Runs `script` in the main world of every frame at document start, before
+// the page's own scripts, from the next navigation on.
+- (void)addDocumentStartScript:(NSString*)script;
+// Adds a main-world object named `name` to every frame, from the next
+// navigation on. A string passed to its postMessage() reaches the delegate's
+// webContents:didReceiveMessage:fromObject:origin:mainFrame:. A name added
+// before is ignored.
+- (void)addMessageObjectNamed:(NSString*)name;
 
 // Finds `string` (case-insensitively), or the next match if it is unchanged.
 - (void)findString:(NSString*)string forward:(BOOL)forward;

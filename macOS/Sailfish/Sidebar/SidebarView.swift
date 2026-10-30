@@ -643,12 +643,22 @@ struct SidebarView: View {
       Color.clear.frame(width: 16, height: 16).padding(.trailing, 11)
         .popover(item: permissionRequest, arrowEdge: .bottom) { PermissionPrompt(request: $0) }
     }
+    .overlay(alignment: .trailing) {
+      Color.clear.frame(width: 16, height: 16).padding(.trailing, 11)
+        .popover(item: engineOffer, arrowEdge: .bottom) { EngineOfferPrompt(offer: $0) }
+    }
   }
 
   // The selected tab's permission request; closing the popover answers it "Not Now".
   private var permissionRequest: Binding<PermissionRequest?> {
     let request = space.selectedTabID.flatMap { Engine.shared.permissionRequests[$0] }
     return Binding(get: { request }, set: { if $0 == nil { request?.answer(false) } })
+  }
+
+  // The selected tab's "Play in WebKit" offer; closing the popover answers it Stay in Chromium.
+  private var engineOffer: Binding<EngineOffer?> {
+    let offer = space.selectedTabID.flatMap { Engine.shared.engineOffers[$0] }
+    return Binding(get: { offer }, set: { if $0 == nil { offer?.answer(false, false) } })
   }
 
   private func copy(_ url: URL) {
@@ -1801,8 +1811,8 @@ struct SidebarView: View {
       .disabled(below.isEmpty)
   }
 
-  // Order: Copy Link, Share | Change Icon, Rename, Mute, Edit Pinned Page | Open in Split View, Duplicate, Move to |
-  // Archive Tab and Archive Tabs Below, or Remove Favorite.
+  // Order: Copy Link, Share | Change Icon, Rename, Mute, Edit Pinned Page | Open in Split View, Duplicate, Open Page
+  // in WebKit or Chromium, Move to | Archive Tab and Archive Tabs Below, or Remove Favorite.
   @ViewBuilder private func tabMenu(_ tab: Tab) -> some View {
     let app = tab.placement == .favorite ? PreviewApp(tab.pinnedURL ?? tab.url) : nil
     if app == .calendar {
@@ -1849,6 +1859,9 @@ struct SidebarView: View {
     Button("Open in Split View") { splitBeside.map { send(.split(tab.id, beside: $0)) } }
       .disabled(splitBeside == nil)
     Button("Duplicate") { send(.duplicate(tab.id)) }
+    if let engine = Engine.shared.otherEngine(tab.id) {
+      Button("Open Page in \(engine.name)") { send(.switchEngine(tab.id, engine)) }
+    }
     // An incognito window has no favorites.
     if tab.placement != .favorite, !store.isIncognito {
       Button("Favorite Tab") { send(.move(tab.id, .favorite, before: nil)) }
@@ -2458,7 +2471,7 @@ private struct TabRow: View {
       if tab.isLoading, tab.icon == nil {
         RoundedRectangle(cornerRadius: 3).fill(Theme.fillHover).frame(width: 14, height: 14)
       } else {
-        TabIcon(tab: tab, space: space)
+        TabIcon(tab: tab, space: space).engineMark(tab)
       }
     }
     .frame(width: 16)
@@ -2477,6 +2490,23 @@ struct TabIcon: View {
       SpaceIcon(icon: icon, emojiSize: 15)
     } else {
       TabFavicon(tab: tab, space: space)
+    }
+  }
+}
+
+extension View {
+  // A tab showing a WebKit page: Safari's compass on a small dark plate at the bottom right of its icon.
+  func engineMark(_ tab: Tab) -> some View {
+    overlay(alignment: .bottomTrailing) {
+      if tab.engine == .webkit {
+        Image(systemName: "safari")
+          .font(.system(size: 7, weight: .semibold))
+          .foregroundStyle(.white)
+          .frame(width: 10, height: 10)
+          .background(Color(white: 0.12), in: Circle())
+          .offset(x: 3, y: 3)
+          .accessibilityLabel("WebKit")
+      }
     }
   }
 }
@@ -2535,8 +2565,8 @@ private struct PermissionPrompt: View {
         Text(request.message).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
       }
       HStack(spacing: 8) {
-        button("Not Now", fill: 0.06) { request.answer(false) }
-        button("Allow", fill: 0.36) { request.answer(true) }
+        PromptButton(title: "Not Now", fill: 0.06) { request.answer(false) }
+        PromptButton(title: "Allow", fill: 0.36) { request.answer(true) }
       }
     }
     .padding(.horizontal, 9)
@@ -2544,9 +2574,45 @@ private struct PermissionPrompt: View {
     .padding(.bottom, 10)
     .frame(width: 236)
   }
+}
 
-  // Shot 53: Not Now a faint fill, Allow a light one, both with 14 pt semibold titles.
-  private func button(_ title: String, fill: Double, action: @escaping () -> Void) -> some View {
+// The offer on the URL pill, laid out as the permission popover; outside incognito, Remember for this site makes
+// either answer the site's rule.
+private struct EngineOfferPrompt: View {
+  let offer: EngineOffer
+  @State private var remember = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 15) {
+      HStack(alignment: .top, spacing: 8) {
+        Image(systemName: "play.rectangle.fill")
+          .font(.system(size: 13))
+          .frame(width: 32, height: 32)
+          .background(.quaternary, in: Circle())
+        Text("Play \(offer.site) in WebKit?").font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
+      }
+      if !Engine.shared.incognitoTabs.contains(offer.tab) {
+        Toggle("Remember for this site", isOn: $remember).toggleStyle(.checkbox).font(.system(size: 13))
+      }
+      HStack(spacing: 8) {
+        PromptButton(title: "Stay in Chromium", fill: 0.06) { offer.answer(false, remember) }
+        PromptButton(title: "Open in WebKit", fill: 0.36) { offer.answer(true, remember) }
+      }
+    }
+    .padding(.horizontal, 9)
+    .padding(.top, 11)
+    .padding(.bottom, 10)
+    .frame(width: 300)
+  }
+}
+
+// Shot 53: Not Now a faint fill, Allow a light one, both with 14 pt semibold titles.
+private struct PromptButton: View {
+  let title: String
+  let fill: Double
+  let action: () -> Void
+
+  var body: some View {
     Button(action: action) {
       Text(title).font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 32)
         .background(.white.opacity(fill), in: RoundedRectangle(cornerRadius: 8))
@@ -2979,7 +3045,7 @@ private struct FavoriteTile: View {
   @State private var isHovering = false
 
   var body: some View {
-    TabIcon(tab: tab, space: space)
+    TabIcon(tab: tab, space: space).engineMark(tab)
       .frame(maxWidth: .infinity)
       // The tile is 47 pt tall.
       .frame(height: 47)

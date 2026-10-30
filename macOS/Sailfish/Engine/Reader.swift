@@ -33,7 +33,7 @@ enum ReaderScript {
 extension Engine {
   // A page that finished loading, or moved to another URL without a load, is checked for an article; a new page
   // closes the reader.
-  func updateReader(_ tab: UUID, _ contents: ECWebContents, from previous: WebPage?, to page: WebPage) {
+  func updateReader(_ tab: UUID, _ shown: any TabPage, from previous: WebPage?, to page: WebPage) {
     let moved = previous?.url.flatMap { old in page.url.map { !old.isSamePage(as: $0) } } ?? true
     if moved {
       readers[tab] = nil
@@ -42,9 +42,9 @@ extension Engine {
     guard !page.isLoading, moved || previous?.isLoading == true, ["http", "https"].contains(page.url?.scheme) else {
       return
     }
-    contents.evaluateJavaScript(ReaderScript.readerable) { result in
+    shown.evaluateJavaScript(ReaderScript.readerable) { result in
       MainActor.assumeIsolated {
-        guard self.tabs[tab] === contents, contents.url == page.url else { return }
+        guard self.page(tab) === shown, shown.url == page.url else { return }
         if result == "true" {
           self.readerable.insert(tab)
         } else {
@@ -59,11 +59,11 @@ extension Engine {
       readers[tab] = nil
       return
     }
-    guard let contents = tabs[tab] else { return }
-    let url = contents.url
-    contents.evaluateJavaScript(ReaderScript.article) { json in
+    guard let shown = page(tab) else { return }
+    let url = shown.url
+    shown.evaluateJavaScript(ReaderScript.article) { json in
       MainActor.assumeIsolated {
-        guard self.tabs[tab] === contents, contents.url == url, let json else { return }
+        guard self.page(tab) === shown, shown.url == url, let json else { return }
         self.readers[tab] = ReaderScript.article(fromJSON: json)
       }
     }

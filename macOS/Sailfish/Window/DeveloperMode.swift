@@ -36,10 +36,12 @@ struct DeveloperBar: View {
       }
       .help("Copy URL")
       Rectangle().fill(.white.opacity(0.25)).frame(width: 1, height: 20).padding(.horizontal, 8)
-      BarButton(systemName: "apple.terminal") { Engine.shared.perform(tab.id) { $0.showConsole() } }
-        .help("Console")
-      BarButton(systemName: "scope") { Engine.shared.perform(tab.id) { $0.inspectElement() } }
-        .help("Inspect Element")
+      if let page = Engine.shared.page(tab.id), page.hasDeveloperTools {
+        BarButton(systemName: "apple.terminal") { page.showConsole() }
+          .help("Console")
+        BarButton(systemName: "scope") { page.inspectElement() }
+          .help("Inspect Element")
+      }
       if let close {
         BarButton(systemName: "xmark", action: close)
       }

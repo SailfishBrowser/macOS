@@ -45,20 +45,26 @@ extension Engine {
     _ contents: ECWebContents, requestsPermissions permissions: [String], forOrigin origin: URL,
     completionHandler: @escaping (Bool) -> Void
   ) {
+    if defers(contents, {
+      self.webContents(contents, requestsPermissions: permissions, forOrigin: origin, completionHandler: completionHandler)
+    }) { return }
     guard let tab = tab(of: contents) else { return completionHandler(false) }
-    // Asks "Allow http://… to access your location?".
+    permissionRequests[tab] = PermissionRequest(
+      message: Self.permissionMessage(permissions, origin), isLocation: permissions == ["geolocation"]
+    ) { [weak self] allowed in
+      self?.permissionRequests[tab] = nil
+      completionHandler(allowed)
+    }
+  }
+
+  // Asks "Allow http://… to access your location?".
+  static func permissionMessage(_ permissions: [String], _ origin: URL) -> String {
     let asks = permissions.map { name in
       let text = Self.permissions[name]?.ask ?? name
       return text.prefix(1).lowercased() + text.dropFirst()
     }
     let site = origin.absoluteString.hasSuffix("/") ? String(origin.absoluteString.dropLast()) : origin.absoluteString
-    permissionRequests[tab] = PermissionRequest(
-      message: "Allow \(site) to \(ListFormatter.localizedString(byJoining: asks))?",
-      isLocation: permissions == ["geolocation"]
-    ) { [weak self] allowed in
-      self?.permissionRequests[tab] = nil
-      completionHandler(allowed)
-    }
+    return "Allow \(site) to \(ListFormatter.localizedString(byJoining: asks))?"
   }
 
   // Shown as a dialog centered over the dimmed page.
@@ -67,6 +73,11 @@ extension Engine {
     _ contents: ECWebContents, runJavaScriptDialog type: ECJavaScriptDialogType, message: String,
     defaultText: String, completionHandler: @escaping (Bool, String) -> Void
   ) {
+    if defers(contents, {
+      self.webContents(
+        contents, runJavaScriptDialog: type, message: message, defaultText: defaultText,
+        completionHandler: completionHandler)
+    }) { return }
     guard let tab = tab(of: contents) else { return completionHandler(false, "") }
     let host = contents.url?.host().map { host in contents.url?.port.map { "\(host):\($0)" } ?? host }
     dialogs[tab] = PageDialog(
@@ -82,6 +93,12 @@ extension Engine {
     _ contents: ECWebContents, runFileChooserWithAcceptTypes acceptTypes: [String], allowsMultiple: Bool,
     directory: Bool, completionHandler: @escaping ([URL]?) -> Void
   ) {
+    if defers(contents, {
+      self.webContents(
+        contents, runFileChooserWithAcceptTypes: acceptTypes, allowsMultiple: allowsMultiple, directory: directory,
+        completionHandler: completionHandler)
+    }) { return }
+    guard let tab = tab(of: contents) else { return completionHandler(nil) }
     let panel = NSOpenPanel()
     panel.canChooseFiles = !directory
     panel.canChooseDirectories = directory
@@ -89,21 +106,21 @@ extension Engine {
     panel.allowedContentTypes = acceptTypes.compactMap {
       $0.hasPrefix(".") ? UTType(filenameExtension: String($0.dropFirst())) : Self.wildcardTypes[$0] ?? UTType(mimeType: $0)
     }
-    present(panel, for: contents, { panel.beginSheetModal(for: $0, completionHandler: $1) }) {
+    present(panel, for: tab, { panel.beginSheetModal(for: $0, completionHandler: $1) }) {
       completionHandler($0 == .OK ? panel.urls : nil)
     }
   }
 
   // Shows `sheet` on the tab's window once the tab is on screen; a closed tab is answered with `.abort`.
-  private func present(
-    _ sheet: NSWindow, for contents: ECWebContents,
+  func present(
+    _ sheet: NSWindow, for tab: UUID,
     _ begin: @escaping (NSWindow, @escaping (NSApplication.ModalResponse) -> Void) -> Void,
     completion: @escaping (NSApplication.ModalResponse) -> Void
   ) {
-    guard let tab = tab(of: contents) else { return completion(.abort) }
-    guard let window = contents.view.window else {
-      pendingSheets[tab, default: []].append { [weak self] in
-        self?.present(sheet, for: contents, begin, completion: completion)
+    guard let id = shownRecord(tab)?.id, let page = self.page(tab) else { return completion(.abort) }
+    guard let window = page.view.window else {
+      pendingSheets[id, default: []].append { [weak self] in
+        self?.present(sheet, for: tab, begin, completion: completion)
       }
       return
     }
@@ -115,12 +132,12 @@ extension Engine {
   }
 
   func webContents(_ contents: ECWebContents, didFindMatches matches: Int, activeMatch: Int) {
-    guard let tab = tab(of: contents) else { return }
+    guard let tab = shownTab(of: contents) else { return }
     Self.continuation.yield(.found(tab: tab, matches: matches, activeMatch: activeMatch))
   }
 
   func webContentsDidChangeZoom(_ contents: ECWebContents) {
-    guard let tab = tab(of: contents) else { return }
+    guard let tab = shownTab(of: contents) else { return }
     Self.continuation.yield(.zoomChanged(tab: tab, percent: contents.zoomPercent))
   }
 
@@ -129,6 +146,12 @@ extension Engine {
     _ contents: ECWebContents, requestsInstallOfExtensionNamed name: String, icon: NSImage?, permissions: [String],
     completionHandler: @escaping (Bool) -> Void
   ) {
+    if defers(contents, {
+      self.webContents(
+        contents, requestsInstallOfExtensionNamed: name, icon: icon, permissions: permissions,
+        completionHandler: completionHandler)
+    }) { return }
+    guard let tab = tab(of: contents) else { return completionHandler(false) }
     let alert = NSAlert()
     alert.messageText = "Add “\(name)”?"
     alert.informativeText =
@@ -137,7 +160,7 @@ extension Engine {
     alert.icon = icon
     alert.addButton(withTitle: "Add Extension")
     alert.addButton(withTitle: "Cancel")
-    present(alert.window, for: contents, { alert.beginSheetModal(for: $0, completionHandler: $1) }) {
+    present(alert.window, for: tab, { alert.beginSheetModal(for: $0, completionHandler: $1) }) {
       completionHandler($0 == .alertFirstButtonReturn)
     }
   }
@@ -148,36 +171,83 @@ extension Engine {
     _ contents: ECWebContents, requestsOpeningURL url: URL, inApplicationNamed appName: String, fromOrigin origin: URL?,
     completionHandler: @escaping (Bool) -> Void
   ) {
+    askToOpen(contents, app: appName, from: origin, completion: completionHandler)
+  }
+
+  // Either engine's page.
+  func askToOpen(_ page: AnyObject, app appName: String, from origin: URL?, completion: @escaping (Bool) -> Void) {
+    if defers(page, { self.askToOpen(page, app: appName, from: origin, completion: completion) }) { return }
+    guard let tab = owners[ObjectIdentifier(page)]?.tab else { return completion(false) }
     let alert = NSAlert()
     alert.messageText = "Open “\(appName)”?"
     alert.informativeText = "\(origin?.host() ?? "A website") wants to open this application."
     alert.addButton(withTitle: "Open \(appName)").keyEquivalent = ""
     alert.addButton(withTitle: "Cancel").keyEquivalent = "\r"
-    present(alert.window, for: contents, { alert.beginSheetModal(for: $0, completionHandler: $1) }) {
-      completionHandler($0 == .alertFirstButtonReturn)
+    present(alert.window, for: tab, { alert.beginSheetModal(for: $0, completionHandler: $1) }) {
+      completion($0 == .alertFirstButtonReturn)
     }
   }
 
   func webContents(_ contents: ECWebContents, didUpdateTargetURL url: URL?) {
-    guard let tab = tab(of: contents) else { return }
+    guard let tab = shownTab(of: contents) else { return }
     // Written only on change, so repeated events do not invalidate the views reading it.
-    if hoveredLinks[tab] != url { hoveredLinks[tab] = url }
+    guard hoveredLinks[tab] != url else { return }
+    hoveredLinks[tab] = url
+    if let url {
+      warmWebKit(tab, for: url)
+    }
   }
 
   func webContents(_ contents: ECWebContents, didChangeSelection selectionText: String) {
-    guard let tab = tab(of: contents) else { return }
+    guard let tab = shownTab(of: contents) else { return }
     let selection = selectionText.isEmpty ? nil : selectionText
     if selections[tab] != selection { selections[tab] = selection }
   }
 
   func webContentsDidRequestClose(_ contents: ECWebContents) {
+    closeRequested(by: contents)
+  }
+
+  // The menu's commands on the app's own chrome, which the main menu performs before a page of either engine sees them,
+  // as Chrome does with its tab and window shortcuts: a busy page cannot hold them, and no page can claim them.
+  static let reservedActions: Set<Selector> = [
+    #selector(NSApplication.terminate(_:)), #selector(NSWindow.performClose(_:)), #selector(Shell.closeTab(_:)),
+    #selector(WindowController.newTab(_:)), #selector(Shell.newWindow(_:)), #selector(Shell.newIncognitoWindow(_:)),
+    #selector(Shell.newLittleSailfish(_:)), #selector(Shell.reopenClosedTab(_:)),
+    #selector(WindowController.openLocation(_:)), #selector(WindowController.toggleSidebarDocking(_:)),
+    #selector(WindowController.nextTab(_:)), #selector(WindowController.previousTab(_:)),
+    #selector(WindowController.cycleTabForward(_:)), #selector(WindowController.cycleTabBackward(_:)),
+    #selector(WindowController.selectSidebarItem(_:)), #selector(WindowController.nextSpace(_:)),
+    #selector(WindowController.previousSpace(_:)), #selector(WindowController.selectSpace(_:)),
+  ]
+
+  // The engine also offers modifier-only presses (flagsChanged), which have no characters to match.
+  func webContents(_ contents: ECWebContents, reservesKeyEquivalent event: NSEvent) -> Bool {
+    guard event.type == .keyDown, let menu = NSApp.mainMenu, let action = MenuShortcuts.item(for: event, in: menu)?.action
+    else { return false }
+    return Self.reservedActions.contains(action)
+  }
+
+  func webContents(_ contents: ECWebContents, showContextMenu menu: ECContextMenu) {
     guard let tab = tab(of: contents) else { return }
-    Self.continuation.yield(.closeRequested(tab: tab))
+    showPageMenu(menu, for: tab, page: contents)
+  }
+
+  func showPageMenu(_ menu: any PageMenuTarget, for tab: UUID, page: any TabPage) {
+    guard let window = page.view.window else { return }
+    let items = NSMenu()
+    items.items = pageMenuItems(menu, for: tab, page: page)
+    // A context menu event, so AppKit adds Services and Writing Tools for the page's view.
+    let event = NSEvent.mouseEvent(
+      with: .rightMouseDown, location: window.mouseLocationOutsideOfEventStream, modifierFlags: [],
+      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+      eventNumber: 0, clickCount: 1, pressure: 1)!
+    let view = window.firstResponder as? NSView
+    NSMenu.popUpContextMenu(items, with: event, for: view?.isDescendant(of: page.view) == true ? view! : page.view)
   }
 
   // The page, link, image, selection and text field menus (Chromium's, without Cast).
-  func webContents(_ contents: ECWebContents, showContextMenu menu: ECContextMenu) {
-    guard let tab = tab(of: contents), let window = contents.view.window else { return }
+  func pageMenuItems(_ menu: any PageMenuTarget, for tab: UUID, page: any TabPage) -> [NSMenuItem] {
     let open: (URL) -> Void = { Self.continuation.yield(.newWindowRequested(tab: tab, url: $0, background: false)) }
     let openWindow = { (url: URL, incognito: Bool) -> Void in
       Self.continuation.yield(.windowRequested(tab: tab, url: url, incognito: incognito))
@@ -256,49 +326,53 @@ extension Engine {
         [ActionMenuItem("Emoji & Symbols") { NSApp.orderFrontCharacterPalette(nil) }],
         [ActionMenuItem("Import Passwords") { open(URL(string: "chrome://password-manager/settings")!) }],
         [
-          ActionMenuItem("Undo", isEnabled: flags.contains(.canUndo)) { contents.undo(nil) },
-          ActionMenuItem("Redo", isEnabled: flags.contains(.canRedo)) { contents.redo(nil) },
+          ActionMenuItem("Undo", isEnabled: flags.contains(.canUndo)) { page.perform(.undo) },
+          ActionMenuItem("Redo", isEnabled: flags.contains(.canRedo)) { page.perform(.redo) },
         ],
         [
-          ActionMenuItem("Cut", isEnabled: flags.contains(.canCut)) { contents.cut(nil) },
-          ActionMenuItem("Copy", isEnabled: flags.contains(.canCopy)) { contents.copy(nil) },
-          ActionMenuItem("Paste", isEnabled: flags.contains(.canPaste)) { contents.paste(nil) },
+          ActionMenuItem("Cut", isEnabled: flags.contains(.canCut)) { page.perform(.cut) },
+          ActionMenuItem("Copy", isEnabled: flags.contains(.canCopy)) { page.perform(.copy) },
+          ActionMenuItem("Paste", isEnabled: flags.contains(.canPaste)) { page.perform(.paste) },
           ActionMenuItem("Paste and Match Style", isEnabled: flags.contains(.canPaste)) {
-            contents.pasteAndMatchStyle(nil)
+            page.perform(.pasteAndMatchStyle)
           },
-          ActionMenuItem("Select All", isEnabled: flags.contains(.canSelectAll)) { contents.selectAll(nil) },
+          ActionMenuItem("Select All", isEnabled: flags.contains(.canSelectAll)) { page.perform(.selectAll) },
         ],
         [ActionMenuItem("Language Settings") { open(URL(string: "chrome://settings/languages")!) }, direction],
       ]
     } else if !selection.isEmpty {
       // The search goes first on plain text and after the copy items on a link.
       let copies = [
-        ActionMenuItem("Copy") { contents.copy(nil) },
+        ActionMenuItem("Copy") { page.perform(.copy) },
         ActionMenuItem("Copy Link to Highlight") {
-          contents.linkToHighlight { url in
+          page.linkToHighlight { url in
             guard let url else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(url.absoluteString, forType: .string)
           }
         },
       ]
-      sections.append((menu.linkURL == nil ? [search] + copies : copies + [search]) + [ActionMenuItem("Print…") { contents.print() }])
-    } else if menu.linkURL == nil, menu.imageURL == nil, let url = contents.url {
+      sections.append((menu.linkURL == nil ? [search] + copies : copies + [search]) + [ActionMenuItem("Print…") { page.printPage() }])
+    } else if menu.linkURL == nil, menu.imageURL == nil, let url = page.url {
+      // Back and Forward follow the tab's reported page, as the sidebar's buttons do.
       sections += [
         [
-          ActionMenuItem("Back", isEnabled: contents.canGoBack) { contents.goBack() },
-          ActionMenuItem("Forward", isEnabled: contents.canGoForward) { contents.goForward() },
-          ActionMenuItem("Reload") { contents.reload() },
+          ActionMenuItem("Back", isEnabled: lastPages[tab]?.canGoBack == true) { Task { await self.goBack(tab) } },
+          ActionMenuItem("Forward", isEnabled: lastPages[tab]?.canGoForward == true) { Task { await self.goForward(tab) } },
+          ActionMenuItem("Reload") { Task { await self.reload(tab) } },
         ],
         [
-          ActionMenuItem("Save As…") { contents.savePage() },
-          ActionMenuItem("Print…") { contents.print() },
-        ] + (contents.translationLanguage.map { [ActionMenuItem("Translate to \($0)") { contents.translate() }] } ?? []),
+          ActionMenuItem("Save As…") { page.savePage() },
+          ActionMenuItem("Print…") { page.printPage() },
+        ] + (page.translationLanguage.map { [ActionMenuItem("Translate to \($0)") { page.translate() }] } ?? [])
+          + (otherEngine(tab).map { engine in
+            [ActionMenuItem("Open Page in \(engine.name)") { Task { await self.reopen(tab, in: engine) } }]
+          } ?? []),
       ]
       // View Page Source is grouped with Inspect.
       developer.append(ActionMenuItem("View Page Source") { open(URL(string: "view-source:" + url.absoluteString)!) })
     }
-    sections.append(developer + [ActionMenuItem("Inspect") { menu.inspect() }])
+    sections.append(developer + (page.hasDeveloperTools ? [ActionMenuItem("Inspect") { menu.inspect() }] : []))
     if !selection.isEmpty {
       let speech = NSMenuItem(title: "Speech", action: nil, keyEquivalent: "")
       speech.submenu = NSMenu()
@@ -308,15 +382,7 @@ extension Engine {
       ]
       sections.append([speech])
     }
-    let items = NSMenu()
-    items.items = Array(sections.filter { !$0.isEmpty }.flatMap { [.separator()] + $0 }.dropFirst())
-    // A context menu event, so AppKit adds Services and Writing Tools for the page's view.
-    let event = NSEvent.mouseEvent(
-      with: .rightMouseDown, location: window.mouseLocationOutsideOfEventStream, modifierFlags: [],
-      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
-      eventNumber: 0, clickCount: 1, pressure: 1)!
-    let view = window.firstResponder as? NSView
-    NSMenu.popUpContextMenu(items, with: event, for: view?.isDescendant(of: contents.view) == true ? view! : contents.view)
+    return Array(sections.filter { !$0.isEmpty }.flatMap { [.separator()] + $0 }.dropFirst())
   }
 
   // Chrome's selection text in menu items: 50 characters, cut at a word.
@@ -327,7 +393,7 @@ extension Engine {
   }
 }
 
-private final class ActionMenuItem: NSMenuItem {
+final class ActionMenuItem: NSMenuItem {
   private let handler: () -> Void
 
   init(_ title: String, isEnabled: Bool = true, isOn: Bool = false, _ handler: @escaping () -> Void) {

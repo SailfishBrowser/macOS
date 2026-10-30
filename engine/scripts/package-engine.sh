@@ -1,5 +1,5 @@
 #!/bin/sh
-# Zips a built EngineCore.framework, symlinks kept, as the asset of release engine-<version> that
+# Zips a built EngineCore.framework, symlinks kept, as the asset of release engine-<version>-<revision> that
 # macOS/scripts/fetch-engine.sh downloads, and prints its SHA-256 for engine/ENGINE_SHA256. Run on the build Mac.
 # Usage: package-engine.sh [<framework>] [<output dir>]
 #   Defaults: ~/chromium/src/out/Engine/EngineCore.framework and the current directory.

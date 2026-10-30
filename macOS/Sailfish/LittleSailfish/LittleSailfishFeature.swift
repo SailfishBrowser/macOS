@@ -105,8 +105,11 @@ struct LittleSailfishFeature {
         return load(url, &state)
 
       case let .pageUpdated(page):
+        let shown = state.tab.map { $0.pages[$0.shownPage] }
         state.tab?.update(page)
-        return .none
+        // The extension window follows the page shown, which a switch of engine or Back across engines changes.
+        guard let tab = state.tab, tab.pages[tab.shownPage] != shown else { return .none }
+        return .run { [id = state.id, profile = state.profileID] _ in await engine.littleWindow(id, profile, tab.id) }
 
       case let .setOpenInMenu(shown):
         state.isOpenInMenuShown = shown && state.tab != nil
@@ -132,7 +135,7 @@ struct LittleSailfishFeature {
       lastActiveAt: now, isLive: true)
     state.tab = tab
     return .run { [id = state.id, profile = state.profileID] _ in
-      await engine.create(tab.id, profile, false)
+      await engine.create(tab.id, profile, false, tab.pages, tab.shownPage, url)
       await engine.littleWindow(id, profile, tab.id)
       await engine.load(tab.id, url)
     }

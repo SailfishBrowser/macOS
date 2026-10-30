@@ -23,7 +23,7 @@ final class AppFeatureTests: XCTestCase {
       $0.date = .constant(now)
       $0.continuousClock = ImmediateClock()
       $0.persistence.save = { _ in }
-      $0.webEngine.create = { tab, profile, incognito in calls.withValue { $0.append("create \(tab) \(profile) \(incognito)") } }
+      $0.webEngine.create = { tab, profile, incognito, _, _, _ in calls.withValue { $0.append("create \(tab) \(profile) \(incognito)") } }
       $0.webEngine.load = { _, _ in }
       $0.webEngine.littleWindow = { _, _, _ in }
       $0.webEngine.close = { tab in calls.withValue { $0.append("close \(tab)") } }
@@ -105,7 +105,7 @@ final class AppFeatureTests: XCTestCase {
       $0.webEngine.keepSessions = { _ in }
       $0.webEngine.deleteProfile = { id in deleted.withValue { $0.append(id) } }
       $0.webEngine.close = { id in engine.withValue { $0.append("close \(id)") } }
-      $0.webEngine.create = { id, profile, _ in engine.withValue { $0.append("create \(id) \(profile)") } }
+      $0.webEngine.create = { id, profile, _, _, _, _ in engine.withValue { $0.append("create \(id) \(profile)") } }
       $0.webEngine.load = { _, _ in }
     }
 

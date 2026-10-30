@@ -9,9 +9,21 @@ namespace download {
 class DownloadItem;
 }
 
+namespace net {
+class CanonicalCookie;
+}
+
 @interface ECDownload ()
 - (instancetype)initWithItem:(download::DownloadItem*)item;
 @end
+
+@interface ECCookie ()
+- (instancetype)initWithCanonicalCookie:(const net::CanonicalCookie&)cookie;
+@end
+
+// Whether the cookie's domain is one of the registrable domains or under one.
+bool CookieIsUnderDomains(const net::CanonicalCookie& cookie,
+                          NSArray<NSString*>* domains);
 
 @interface ECBrowserContext ()
 @property(readonly) Profile* profile;

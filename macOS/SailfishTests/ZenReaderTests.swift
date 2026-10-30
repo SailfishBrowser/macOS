@@ -152,7 +152,7 @@ final class ZenReaderTests: XCTestCase {
     ])
     let source = SourceBrowser.zen.historySource(BrowserProfile(name: "Default", folder: profile))
     XCTAssertEqual(try HistoryReader.read(source), [
-      HistoryEntry(url: "https://a.example/", title: "A", visitCount: 2, typedCount: 1, lastVisit: added),
+      HistoryRecord(url: "https://a.example/", title: "A", visitCount: 2, typedCount: 1, lastVisit: added),
     ])
   }
 
