@@ -6,37 +6,75 @@ import WebKit
 
 // Ad blocking in WebKit pages: uBlock Origin's default filter lists, converted into WebKit content rule lists and
 // given to every WebKit page while "Block ads and trackers with uBlock Origin" is on. The lists start as the bundled
-// uBlock Origin's copies and are fetched again on uBlock's schedule. They compile in the background and no page waits
-// for them: a page made before they exist gets them from its next load.
+// uBlock Origin's copies and are fetched again on uBlock's schedule. Compiled lists stay in WebKit's content rule list
+// store, with a record of the filter list files they were compiled from. A launch whose files match the record does
+// nothing more until the session's first WebKit view, warm or for a page, which looks the lists up from the store in
+// milliseconds; only the first launch after an install or a list change compiles, in the background at launch. The
+// first WebKit view also starts the fetching.
 @MainActor enum ContentBlocker {
   // Part of every compiled list's identifier; raising it when the converter's output changes compiles the lists again.
-  nonisolated private static let converterVersion = 1
+  nonisolated fileprivate static let converterVersion = 1
   private static let identifierPrefix = "ContentBlocker"
   // The lists compiled so far, on every live WebKit page while the setting is on.
   private(set) static var ruleLists: [WKContentRuleList] = [] {
     didSet { applyToLivePages() }
   }
-  private static var task: Task<Void, Never>?
+  // The launch's check of the store, or its compile, and the fetching that starts with the first WebKit view.
+  private static var preparing: Task<Void, Never>?
+  private static var fetching: Task<Void, Never>?
+  // The identifier prefix of the stored lists the check found for the current filter lists.
+  private static var storedPrefix: String?
+  private static var isWebKitInUse = false
 
-  // Looks up the compiled lists or compiles them, then fetches each filter list on uBlock Origin's schedule: checked 37
-  // seconds after the lists are ready and every hour after that, each list fetched once its copy has expired. Does
-  // nothing once started.
+  // The setting is on: at launch, or switched on.
   static func start() {
-    guard task == nil else { return }
+    guard preparing == nil else { return }
     let root = URL(filePath: Engine.adBlocker)
-    task = Task {
+    preparing = Task {
+      if let prefix = await compiledPrefix(root: root) {
+        storedPrefix = prefix
+      } else {
+        do {
+          await compile(try await Task.detached(priority: .utility) { try FilterLists(root: root) }.value)
+        } catch {
+          Logger().error("Filter lists not read: \(error)")
+        }
+      }
+    }
+    fetch()
+  }
+
+  // A WebKit view is made, warm or for a page.
+  static func webKitDidStart() {
+    isWebKitInUse = true
+    fetch()
+  }
+
+  // Once the setting is on and a WebKit view exists: the stored lists for pages, then each filter list fetched on
+  // uBlock Origin's schedule, checked 37 seconds in and every hour after that, each list fetched once its copy has
+  // expired.
+  private static func fetch() {
+    guard let preparing, isWebKitInUse, fetching == nil else { return }
+    let root = URL(filePath: Engine.adBlocker)
+    fetching = Task {
+      await preparing.value
+      let store = WKContentRuleListStore.default()!
+      if ruleLists.isEmpty, let prefix = storedPrefix,
+        let lists = await lookUp(await stored(in: store)[prefix, default: []], prefix: prefix, in: store)
+      {
+        ruleLists = lists
+      }
+      guard (try? await Task.sleep(for: .seconds(37))) != nil else { return }
       var lists: FilterLists
       do {
         lists = try await Task.detached(priority: .utility) { try FilterLists(root: root) }.value
       } catch {
         return Logger().error("Filter lists not read: \(error)")
       }
-      await compile(lists.texts)
-      guard (try? await Task.sleep(for: .seconds(37))) != nil else { return }
       repeat {
         let fetched = await lists.fetchingDue()
-        if fetched.texts != lists.texts {
-          await compile(fetched.texts)
+        if fetched.digests != lists.digests {
+          await compile(fetched)
         }
         lists = fetched
       } while (try? await Task.sleep(for: .seconds(3600))) != nil
@@ -44,8 +82,10 @@ import WebKit
   }
 
   static func stop() {
-    task?.cancel()
-    task = nil
+    preparing?.cancel()
+    fetching?.cancel()
+    preparing = nil
+    fetching = nil
   }
 
   // Gives the controller the compiled lists while the setting is on and takes them away while it is off; its page
@@ -63,29 +103,42 @@ import WebKit
     }
   }
 
-  // Looks up the lists compiled from these texts, or compiles them, and removes every other stored list.
-  private static func compile(_ texts: [String]) async {
-    let store = WKContentRuleListStore.default()!
-    let version = await Task.detached(priority: .utility) { digest(texts) }.value
-    let prefix = "\(identifierPrefix).\(version)."
-    // The stored lists by the identifier prefix of the compile that made them.
-    let stored = Dictionary(
+  // The stored lists by the identifier prefix of the compile that made them.
+  private static func stored(in store: WKContentRuleListStore) async -> [String: [String]] {
+    Dictionary(
       grouping: (await store.availableIdentifiers() ?? []).filter { $0.hasPrefix(identifierPrefix + ".") }
     ) { $0.split(separator: ".").prefix(2).joined(separator: ".") + "." }
+  }
+
+  // The prefix of the stored lists compiled from the current filter list files, when the record names it and all of
+  // its lists are in the store.
+  private static func compiledPrefix(root: URL) async -> String? {
+    let stamp = try? await Task.detached(priority: .utility) { try FilterLists.stamp(root: root) }.value
+    guard let stamp, let prefix = FilterLists.compiled(for: stamp) else { return nil }
+    let identifiers = await stored(in: WKContentRuleListStore.default()!)[prefix, default: []]
+    return isComplete(identifiers, prefix: prefix) ? prefix : nil
+  }
+
+  // Looks up the lists compiled from these filter lists, or compiles them, and removes every other stored list.
+  private static func compile(_ lists: FilterLists) async {
+    let store = WKContentRuleListStore.default()!
+    let prefix = "\(identifierPrefix).\(digest(lists.digests))."
+    let stored = await stored(in: store)
     // The lists this compile keeps.
     let current: Set<String>
     if let lists = await lookUp(stored[prefix, default: []], prefix: prefix, in: store) {
-      ruleLists = lists
+      if lists.map(\.identifier) != ruleLists.map(\.identifier) {
+        ruleLists = lists
+      }
       current = Set(stored[prefix, default: []])
     } else {
-      // While these compile, pages keep the lists they have, or get the last complete compile's when they have none,
-      // as after a quit during a compile.
-      for (older, identifiers) in stored where ruleLists.isEmpty && older != prefix {
-        if let lists = await lookUp(identifiers, prefix: older, in: store) {
-          ruleLists = lists
-        }
+      // While these compile, pages keep the lists they have.
+      let chunks: [String]
+      do {
+        chunks = try await Task.detached(priority: .utility) { encoded(rules(from: try lists.texts())) }.value
+      } catch {
+        return Logger().error("Filter lists not read: \(error)")
       }
-      let chunks = await Task.detached(priority: .utility) { encoded(rules(from: texts)) }.value
       // A first compile gives pages each list as it is ready; a recompile replaces the old lists at once.
       let replacing = !ruleLists.isEmpty
       current = Set(chunks.indices.map { "\(prefix)\($0).\(chunks.count)" })
@@ -108,14 +161,15 @@ import WebKit
     for identifier in stored.values.joined() where !current.contains(identifier) {
       try? await store.removeContentRuleList(forIdentifier: identifier)
     }
+    lists.record(prefix: prefix)
   }
 
   // The stored lists of one compile, in order, when all of them are there and this WebKit can read them.
   private static func lookUp(
     _ identifiers: [String], prefix: String, in store: WKContentRuleListStore
   ) async -> [WKContentRuleList]? {
+    guard isComplete(identifiers, prefix: prefix) else { return nil }
     let ordered = identifiers.indices.map { "\(prefix)\($0).\(identifiers.count)" }
-    guard !identifiers.isEmpty, Set(ordered) == Set(identifiers) else { return nil }
     var lists: [WKContentRuleList] = []
     for identifier in ordered {
       guard let list = try? await store.contentRuleList(forIdentifier: identifier) else { return nil }
@@ -124,10 +178,15 @@ import WebKit
     return lists
   }
 
-  nonisolated private static func digest(_ texts: [String]) -> String {
+  // Whether these identifiers are every list of one compile.
+  private static func isComplete(_ identifiers: [String], prefix: String) -> Bool {
+    !identifiers.isEmpty && Set(identifiers.indices.map { "\(prefix)\($0).\(identifiers.count)" }) == Set(identifiers)
+  }
+
+  nonisolated private static func digest(_ digests: [Data]) -> String {
     var hash = SHA256()
     hash.update(data: Data("\(converterVersion)".utf8))
-    texts.forEach { hash.update(data: Data($0.utf8)) }
+    digests.forEach { hash.update(data: $0) }
     return hash.finalize().prefix(8).map { String(format: "%02x", $0) }.joined()
   }
 
@@ -208,8 +267,9 @@ struct ContentRule: Hashable, Sendable {
   }
 }
 
-// The default filter lists' texts: each list's last fetched copy in URL.dataDirectory/ContentBlocker, or else the
-// bundled uBlock Origin's, with where and how often uBlock Origin fetches it.
+// The default filter lists: each list's last fetched copy in URL.dataDirectory/ContentBlocker, or else the bundled
+// uBlock Origin's, with where and how often uBlock Origin fetches it. Only the files keep the texts, which are read
+// again to compile, so a session does not hold them.
 private struct FilterLists: Sendable {
   // The lists uBlock Origin enables by default, by their key in its assets.json.
   private static let keys = [
@@ -221,25 +281,39 @@ private struct FilterLists: Sendable {
 
   struct List: Sendable {
     let key: String
-    var text: String
+    // The copy's file, and its text's SHA-256.
+    let file: URL
+    let digest: Data
     // Where uBlock Origin fetches the list, in its order.
     let urls: [URL]
     // The days a copy stays current when its text names no expiry.
     let updateAfter: Double
+    // The days this copy stays current.
+    let expiry: Double
     // When the saved copy was fetched; nil for the bundled copy, which is due at the first check.
-    var fetched: Date?
+    let fetched: Date?
+
+    init(key: String, text: String, file: URL, urls: [URL], updateAfter: Double, fetched: Date?) {
+      self.key = key
+      self.file = file
+      digest = Data(SHA256.hash(data: Data(text.utf8)))
+      self.urls = urls
+      self.updateAfter = updateAfter
+      expiry = Self.expiry(of: text) ?? updateAfter
+      self.fetched = fetched
+    }
 
     var isDue: Bool {
       fetched.map { Date.now.timeIntervalSince($0) >= expiry * 86400 } ?? true
     }
 
-    // The days a copy stays current: its own Expires header, read as uBlock Origin reads it, or else the asset's.
-    private var expiry: Double {
+    // The days a copy stays current by its own Expires header, read as uBlock Origin reads it.
+    private static func expiry(of text: String) -> Double? {
       let header = text.prefix(1024).split(whereSeparator: \.isNewline).lazy
         .map { $0.drop { "!# ".contains($0) }.lowercased() }
         .first { $0.hasPrefix("expires:") }
       guard let match = header?.firstMatch(of: /(\d+)\s*([wdhm]?)/), let count = Double(match.1), count > 0 else {
-        return updateAfter
+        return nil
       }
       switch match.2 {
       case "w": return count * 7
@@ -269,43 +343,94 @@ private struct FilterLists: Sendable {
 
   private(set) var lists: [List]
 
-  var texts: [String] { lists.map(\.text) }
+  var digests: [Data] { lists.map(\.digest) }
+
+  func texts() throws -> [String] {
+    try lists.map { try String(contentsOf: $0.file, encoding: .utf8) }
+  }
 
   // `root` is the bundled uBlock Origin, whose contentURL paths are relative to it.
   init(root: URL) throws {
-    let assets = try JSONDecoder().decode(
-      [String: Asset].self, from: Data(contentsOf: root.appending(path: "assets/assets.json")))
-    lists = try Self.keys.compactMap { key -> List? in
-      guard let asset = assets[key] else { return nil }
-      let remote = (asset.cdnURLs.isEmpty ? asset.contentURL : asset.cdnURLs).compactMap(URL.init(string:))
-        .filter { $0.scheme == "https" || $0.scheme == "http" }
-      let saved = Self.directory.appending(path: "\(key).txt")
-      if let text = try? String(contentsOf: saved, encoding: .utf8) {
-        let fetched = try saved.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-        return List(key: key, text: text, urls: remote, updateAfter: asset.updateAfter ?? 7, fetched: fetched)
-      }
-      let bundled = asset.contentURL.filter { !$0.hasPrefix("http") }.map { root.appending(path: $0) }
-        .first { FileManager.default.fileExists(atPath: $0.path) }
-      guard let bundled else { return nil }
+    lists = try Self.files(root: root).map { file in
+      let fetched = file.isSaved
+        ? try file.url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate : nil
       return List(
-        key: key, text: try String(contentsOf: bundled, encoding: .utf8), urls: remote,
-        updateAfter: asset.updateAfter ?? 7)
+        key: file.key, text: try String(contentsOf: file.url, encoding: .utf8), file: file.url, urls: file.urls,
+        updateAfter: file.updateAfter, fetched: fetched)
     }
   }
 
-  // The lists with each due one fetched again and saved; a list whose fetch fails keeps its copy until a later check.
+  // Each list's copy: its last fetched one, or else the bundled one, with where and how often it is fetched.
+  private static func files(
+    root: URL
+  ) throws -> [(key: String, url: URL, isSaved: Bool, urls: [URL], updateAfter: Double)] {
+    let assets = try JSONDecoder().decode(
+      [String: Asset].self, from: Data(contentsOf: root.appending(path: "assets/assets.json")))
+    return keys.compactMap { key in
+      guard let asset = assets[key] else { return nil }
+      let remote = (asset.cdnURLs.isEmpty ? asset.contentURL : asset.cdnURLs).compactMap(URL.init(string:))
+        .filter { $0.scheme == "https" || $0.scheme == "http" }
+      let saved = directory.appending(path: "\(key).txt")
+      let bundled = asset.contentURL.filter { !$0.hasPrefix("http") }.map { root.appending(path: $0) }
+      guard let url = ([saved] + bundled).first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+        return nil
+      }
+      return (key, url, url == saved, remote, asset.updateAfter ?? 7)
+    }
+  }
+
+  // The converter's version and each list copy's path, size and modification date: what the record of a compile
+  // names, read without reading the lists.
+  static func stamp(root: URL) throws -> String {
+    try stamp(of: files(root: root).map(\.url))
+  }
+
+  private static func stamp(of files: [URL]) throws -> String {
+    try (["\(ContentBlocker.converterVersion)"]
+      + files.map { file in
+        let values = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        return "\(file.path) \(values.fileSize ?? 0) \(values.contentModificationDate?.timeIntervalSince1970 ?? 0)"
+      }).joined(separator: "\n")
+  }
+
+  private static let record = directory.appending(path: "Compiled.json")
+
+  private struct Record: Codable {
+    let stamp: String
+    let prefix: String
+  }
+
+  // The identifier prefix of the stored lists compiled from the copies with this stamp.
+  static func compiled(for stamp: String) -> String? {
+    (try? JSONDecoder().decode(Record.self, from: Data(contentsOf: record))).flatMap { $0.stamp == stamp ? $0.prefix : nil }
+  }
+
+  // Records that the stored lists with this prefix are compiled from these copies.
+  func record(prefix: String) {
+    do {
+      try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
+      try JSONEncoder().encode(Record(stamp: Self.stamp(of: lists.map(\.file)), prefix: prefix)).write(to: Self.record)
+    } catch {
+      Logger().error("Compiled lists not recorded: \(error)")
+    }
+  }
+
+  // The lists with each due one fetched again and saved; a list whose fetch or save fails keeps its copy until a later
+  // check.
   func fetchingDue() async -> FilterLists {
     var result = self
-    for index in lists.indices where lists[index].isDue {
-      guard let text = await Self.fetch(lists[index].urls) else { continue }
+    for (index, list) in lists.enumerated() where list.isDue {
+      guard let text = await Self.fetch(list.urls) else { continue }
+      let file = Self.directory.appending(path: "\(list.key).txt")
       do {
         try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
-        try text.write(to: Self.directory.appending(path: "\(lists[index].key).txt"), atomically: true, encoding: .utf8)
+        try text.write(to: file, atomically: true, encoding: .utf8)
       } catch {
         Logger().error("Filter list not saved: \(error)")
+        continue
       }
-      result.lists[index].text = text
-      result.lists[index].fetched = .now
+      result.lists[index] = List(
+        key: list.key, text: text, file: file, urls: list.urls, updateAfter: list.updateAfter, fetched: .now)
     }
     return result
   }

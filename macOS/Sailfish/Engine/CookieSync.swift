@@ -35,7 +35,7 @@ import WebKit
   private var scope: [String] = []
   private var rules: AnyCancellable?
   private var operations: Task<Void, Never>?
-  private var isLive = false
+  private(set) var isLive = false
   private var isBusy = false
   private var isEnded = false
   private var flushScheduled = false
@@ -364,12 +364,21 @@ import WebKit
     return Dictionary(cookies.map { ($0.key, $0) }) { $1 }
   }
 
+  // Sent all at once: WebKit applies them in order, and awaiting each would hold the next for a round trip to its
+  // network process.
   private func setInWebKit(_ cookies: [HTTPCookie], removing keys: [CookieKey]) async {
-    for cookie in cookies {
-      await store.setCookie(cookie)
-    }
-    for key in keys {
-      await store.deleteCookie(key.webKitCookie)
+    guard !cookies.isEmpty || !keys.isEmpty else { return }
+    await withCheckedContinuation { continuation in
+      let group = DispatchGroup()
+      for cookie in cookies {
+        group.enter()
+        store.setCookie(cookie) { group.leave() }
+      }
+      for key in keys {
+        group.enter()
+        store.delete(key.webKitCookie) { group.leave() }
+      }
+      group.notify(queue: .main) { continuation.resume() }
     }
   }
 
@@ -604,8 +613,12 @@ extension Engine {
     case .chromium:
       await sync.flush()
     case .webkit:
-      await sync.open()
-      await sync.drain(for: url)
+      // Opening reads every cookie in scope from Chromium, so only a sync already open drains.
+      if sync.isLive {
+        await sync.drain(for: url)
+      } else {
+        await sync.open()
+      }
     }
   }
 

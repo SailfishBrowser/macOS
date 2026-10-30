@@ -76,8 +76,12 @@ private struct SplitPanes: View {
       let vertical = isVertical
       let available = (vertical ? proxy.size.height : proxy.size.width) - gutter * Double(tabIDs.count - 1)
       let layout = vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+      // A lone page keeps one pane as its tab changes, so the page it replaces stays under a WebKit page until that
+      // one has drawn; a split's panes follow their tabs.
+      let keys = tabIDs.count == 1 ? [nil] : tabIDs.map(Optional.some)
       layout {
-        ForEach(Array(tabIDs.enumerated()), id: \.element) { index, id in
+        ForEach(Array(keys.enumerated()), id: \.element) { index, _ in
+          let id = tabIDs[index]
           if index > 0 {
             divider(index - 1, available)
           }
@@ -196,7 +200,7 @@ private struct Pane: View {
         PageDialogOverlay(tab: tab.id)
       }
     }
-    .task(id: isFrozen) {
+    .task(id: Frozen(isFrozen: isFrozen, tab: tab?.id)) {
       guard isFrozen else {
         // The still stays through the Library's closing motion, then the live page returns.
         guard (try? await Task.sleep(for: .milliseconds(300))) != nil else { return }
@@ -206,6 +210,12 @@ private struct Pane: View {
       guard still == nil, let tab, let page = Engine.shared.page(tab.id) else { return }
       page.snapshot { still = $0 }
     }
+  }
+
+  // A lone pane's tab changes under it, and a still is of one tab.
+  private struct Frozen: Equatable {
+    let isFrozen: Bool
+    let tab: Tab.ID?
   }
 
   private func select() {

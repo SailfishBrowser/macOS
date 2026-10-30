@@ -215,16 +215,15 @@ final class Shell: NSObject, NSMenuDelegate {
     store.send(.dismissRecoveredSpaces)
   }
 
-  // Once the saved windows have loaded, the profile of each window's shown space and each profile with a tab showing
-  // a WebKit page starts WebKit, on the turn after the windows' first frame, so its first WebKit page opens as fast
-  // as later ones. Runs once.
+  // Once the saved windows have loaded, each profile with a tab showing a WebKit page starts WebKit, on the turn after
+  // the windows' first frame, so its first WebKit page opens as fast as later ones. Any other profile starts it when a
+  // hovered link or a typed address would open in WebKit. Runs once.
   private func warmWebKit() {
     guard store.isLoaded else { return }
-    warmToken = nil
-    let spaces = store.windows.flatMap { window in
-      window.spaces.spaces.filter { $0.id == window.spaces.selectedID || $0.tabs.contains { $0.engine == .webkit } }
-    }
-    let profiles = Set(spaces.map(\.profileID))
+    // NSObject keeps every observation token it returns, so only cancelling ends this one.
+    warmToken?.cancel()
+    let profiles = Set(
+      store.windows.flatMap(\.spaces.spaces).filter { $0.tabs.contains { $0.engine == .webkit } }.map(\.profileID))
     DispatchQueue.main.async {
       for profile in profiles {
         WebKitStores.warm(profile: profile, incognito: false)

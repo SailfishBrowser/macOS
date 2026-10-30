@@ -293,11 +293,11 @@ private struct PageHost: NSViewRepresentable {
       roundsTop ? [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
       : [.layerMinXMinYCorner, .layerMaxXMinYCorner]
     container.onMouseDown = onMouseDown
-    // A page moving between places (a Peek closing, a split forming) belongs to the newest container;
-    // older ones take it back only once it is free.
-    guard container.page !== view, context.coordinator.isNew || view.superview == nil || view.superview === container
-    else { return }
-    context.coordinator.isNew = false
+    // A page moving between places (a Peek closing, a split forming) belongs to the container given it last, which a
+    // lone pane is again when its tab changes; others take it back only once it is free.
+    let isClaim = context.coordinator.claimed !== view
+    context.coordinator.claimed = view
+    guard container.page !== view, isClaim || view.superview == nil || view.superview === container else { return }
     // The page leaving the container is kept as it looked, for the tab switcher.
     container.page.map { Engine.shared.captureThumbnail(of: $0) }
     view.autoresizingMask = []
@@ -313,7 +313,8 @@ private struct PageHost: NSViewRepresentable {
   }
 
   final class Coordinator {
-    var isNew = true
+    // The page this container was last given.
+    weak var claimed: NSView?
   }
 }
 

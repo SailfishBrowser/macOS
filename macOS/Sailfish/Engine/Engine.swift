@@ -391,6 +391,7 @@ extension WebEngineClient: DependencyKey {
     create: { await Engine.shared.create($0, $1, $2, pages: $3, shown: $4) },
     load: { await Engine.shared.load($0, $1) },
     switchEngine: { await Engine.shared.reopen($0, in: $1) },
+    warmWebKit: { await Engine.shared.warmWebKit(profile: $0, incognito: $1, for: $2) },
     littleWindow: { await Engine.shared.syncLittleWindow($0, profile: $1, tab: $2) },
     goBack: { await Engine.shared.goBack($0) },
     goForward: { await Engine.shared.goForward($0) },
