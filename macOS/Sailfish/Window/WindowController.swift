@@ -93,6 +93,11 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     // Esc closes Peek even while its page has focus, which a menu key equivalent would not reach.
     escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
       guard let self, event.window == window else { return event }
+      // Esc leaves the command bar wherever focus is: the bar's own Esc needs its field to have the keys.
+      if event.keyCode == 53, let bar = store.commandBar {
+        store.send(bar.keyword != nil || bar.isActions ? .commandBar(.presented(.leaveKeyword)) : .commandBar(.dismiss))
+        return nil
+      }
       if event.keyCode == 53, store.peek != nil {
         // Sent after the key event, whose handling would skip Peek's closing animation.
         DispatchQueue.main.async { self.store.send(.closePeek) }
