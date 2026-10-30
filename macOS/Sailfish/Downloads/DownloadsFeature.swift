@@ -105,7 +105,11 @@ struct DownloadsFeature {
             await send(.finishedShown(download.id))
           }
           .cancellable(id: CancelID.finished, cancelInFlight: true)
-          guard state.tidiesNames, download.originalName == nil, let file = download.fileURL else { return shown }
+          // An extension's .crx is the engine's to install from the path it downloaded to (the Chrome Web Store's
+          // installs too): renamed, the install finds no file and only the download is left.
+          guard state.tidiesNames, download.originalName == nil, let file = download.fileURL,
+            file.pathExtension.lowercased() != "crx"
+          else { return shown }
           return .merge(shown, .run { [download] send in
             if let renamed = try await tidyDownload(file, download.url.host()) {
               await send(.renamed(download.id, renamed))
