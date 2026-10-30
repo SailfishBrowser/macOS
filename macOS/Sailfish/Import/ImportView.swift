@@ -6,8 +6,9 @@ import UniformTypeIdentifiers
 // The import dialog, which the onboarding steps share: its logo, title and words on the left, the step's choices on
 // the right and its buttons at the bottom right, on navy. It keeps one size whatever the step.
 struct ImportView: View {
-  // Every step's size: the theme step's picker over the button row.
-  static let size = CGSize(width: 720, height: 622)
+  // Every step's size: the theme step's picker over the button row, as wide as the narrowest window, so the sheet always
+  // fits its window.
+  static let size = CGSize(width: 640, height: 622)
   static let padding: CGFloat = 28
   @Bindable var store: StoreOf<ImportFeature>
   // During the first launch's intro the sheet is invisible; once the intro's icon lands on its icon, the sheet and all
@@ -238,7 +239,7 @@ private struct ImportDialog<Leading: View, Content: View, Buttons: View>: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      HStack(alignment: .top, spacing: 32) {
+      HStack(alignment: .top, spacing: 24) {
         VStack(alignment: .leading, spacing: 14) {
           Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 48, height: 48).padding(.bottom, 26)
           ZStack(alignment: .topLeading) {
@@ -254,7 +255,7 @@ private struct ImportDialog<Leading: View, Content: View, Buttons: View>: View {
           }
           .opacity(isShown ? 1 : 0)
         }
-        .frame(width: 250, alignment: .leading)
+        .frame(width: 200, alignment: .leading)
         ZStack {
           content.frame(maxWidth: .infinity, maxHeight: .infinity).id(step).transition(StepSlide(movesBack: movesBack))
         }
