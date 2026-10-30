@@ -181,15 +181,17 @@ struct ThemePicker: View {
             update()
           }
           .disabled(handles.isEmpty)
-          // Up to three colors, each a third of a turn from the last.
+          // Up to three colors spaced evenly round the first at its distance: the second opposite it, as in shot 35.
           button("plus", isSelected: false) {
-            let turn = 2 * Double.pi / 3
-            let last = handles.last!.offset
+            let turn = 2 * Double.pi / Double(handles.count + 1)
             withAnimation(Motion.layout) {
-              handles.append(
-                Handle(
-                  offset: CGPoint(x: last.x * cos(turn) - last.y * sin(turn), y: last.x * sin(turn) + last.y * cos(turn)),
-                  lightness: handles.last!.lightness))
+              handles.append(Handle(offset: .zero, lightness: handles.last!.lightness))
+              let first = handles[0].offset
+              for index in handles.indices.dropFirst() {
+                let angle = turn * Double(index)
+                handles[index].offset = CGPoint(
+                  x: first.x * cos(angle) - first.y * sin(angle), y: first.x * sin(angle) + first.y * cos(angle))
+              }
             }
             tick()
             update()
