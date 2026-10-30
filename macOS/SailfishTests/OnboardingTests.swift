@@ -18,6 +18,7 @@ final class OnboardingTests: XCTestCase {
       $0.persistence.save = { _ in }
       $0.webEngine.saveSessions = {}
       $0.webEngine.keepSessions = { _ in }
+      $0.webEngine.removeDeletedStores = {}
       $0.webEngine.events = { .finished }
       $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
