@@ -4,77 +4,59 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 // The import dialog, which the onboarding steps share: its logo, title and words on the left, the step's choices on
-// the right and its buttons at the bottom right, on navy.
+// the right and its buttons at the bottom right, on navy. It keeps one size whatever the step.
 struct ImportView: View {
+  // Every step's size: the theme step's picker over the button row.
+  static let size = CGSize(width: 720, height: 622)
+  static let padding: CGFloat = 28
   @Bindable var store: StoreOf<ImportFeature>
   @State private var browser: SourceBrowser?
   @State private var theme = SpaceTheme()
   @Shared(.blocksAds) private var blocksAds
 
   var body: some View {
-    Group {
-      switch store.step {
-      case .browsers: browsers
-      case .arc: store.scope(state: \.arc, action: \.arc).map { ArcImportView(store: $0) }
-      case .options: options
-      case .importing:
-        ImportDialog(title: "Import") {
-          ProgressView().progressViewStyle(.linear).frame(width: 240)
-        } buttons: {}
-      case .finished: finished
-      case .defaultBrowser:
-        ImportDialog(title: "Default Browser") {
-          Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 128, height: 128)
-        } buttons: {
-          ImportDialogButton(title: "Not Now") { store.send(.nextTapped) }.keyboardShortcut(.cancelAction)
-          ImportDialogButton(title: "Set as Default", isPrimary: true) { store.send(.makeDefaultTapped) }
-            .keyboardShortcut(.defaultAction)
-        }
-      case .theme:
-        ImportDialog(title: "Theme") {
-          VStack(alignment: .leading, spacing: 12) {
-            if let name = Binding($store.spaceName) {
-              TextField("Space name", text: name)
-            }
-            ThemePicker(theme: $theme, original: SpaceTheme())
-          }
-        } buttons: {
-          ImportDialogButton(title: "Not Now") { store.send(.nextTapped) }.keyboardShortcut(.cancelAction)
-          ImportDialogButton(title: "Continue", isPrimary: true) { store.send(.themeChosen(theme)) }
-            .keyboardShortcut(.defaultAction)
-        }
-      case .adBlocker:
-        ImportDialog(title: "Ad Blocker") {
-          Toggle("Block ads and trackers with uBlock Origin", isOn: Binding($blocksAds))
-            .toggleStyle(.switch)
-            .onChange(of: blocksAds) { Engine.shared.adBlockingDidChange() }
-        } buttons: {
-          ImportDialogButton(title: "Continue", isPrimary: true) { store.send(.nextTapped) }.keyboardShortcut(.defaultAction)
-        }
-      case .mediaFolders:
-        ImportDialog(title: "Media Folders", message: "macOS asks to allow each folder.") {
-          MediaFolderList()
-        } buttons: {
-          ImportDialogButton(title: "Continue", isPrimary: true) { store.send(.mediaFoldersTapped) }
-            .keyboardShortcut(.defaultAction)
-        }
-      case .welcome:
-        ImportDialog(
-          title: "Welcome to Sailfish, \(NSFullUserName().split(separator: " ").first.map(String.init) ?? NSUserName())"
-        ) {
-          Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 128, height: 128)
-        } buttons: {
-          ImportDialogButton(title: "Start Browsing", isPrimary: true) { store.send(.doneTapped) }
-            .keyboardShortcut(.defaultAction)
-        }
+    ImportDialog(
+      title: title, message: message,
+      close: store.step == .browsers && !store.isOnboarding ? { store.send(.backTapped) } : nil
+    ) {
+      if store.step == .theme, let name = Binding($store.spaceName) {
+        TextField("Space name", text: name).padding(.top, 12)
       }
+    } content: {
+      content
+    } buttons: {
+      buttons
     }
     .environment(\.colorScheme, .dark)
     .onAppear { store.send(.appeared) }
   }
 
-  private var browsers: some View {
-    ImportDialog(title: "Import from Another Browser", close: store.isOnboarding ? nil : { store.send(.backTapped) }) {
+  private var title: String {
+    switch store.step {
+    case .browsers: "Import from Another Browser"
+    case .arc: "Import from \(store.arc!.browser.rawValue)"
+    case .options: "Import from \(store.options!.browser.rawValue)"
+    case .importing: "Import"
+    case .finished: "Imported from \(store.summary!.browser.rawValue)"
+    case .defaultBrowser: "Default Browser"
+    case .theme: "Theme"
+    case .adBlocker: "Ad Blocker"
+    case .mediaFolders: "Media Folders"
+    case .welcome: "Welcome to Sailfish, \(NSFullUserName().split(separator: " ").first.map(String.init) ?? NSUserName())"
+    }
+  }
+
+  private var message: String? {
+    switch store.step {
+    case .options: "Bookmarks become pinned tabs and folders of a new Space. Cookies keep you signed in to your sites."
+    case .mediaFolders: "macOS asks to allow each folder."
+    default: nil
+    }
+  }
+
+  @ViewBuilder private var content: some View {
+    switch store.step {
+    case .browsers:
       VStack(spacing: 10) {
         if store.sources.isEmpty {
           Text("No other browser with data was found.").foregroundStyle(.secondary)
@@ -83,63 +65,109 @@ struct ImportView: View {
           BrowserChoice(browser: source.browser, isSelected: browser == source.browser) { browser = source.browser }
         }
       }
-    } buttons: {
+    case .arc:
+      store.scope(state: \.arc, action: \.arc).map { ArcImportView(store: $0) }
+    case .options:
+      options
+    case .importing:
+      ProgressView().progressViewStyle(.linear).frame(width: 240)
+    case .finished:
+      finished
+    case .defaultBrowser, .welcome:
+      Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 128, height: 128)
+    case .theme:
+      ThemePicker(theme: $theme, original: SpaceTheme())
+    case .adBlocker:
+      Toggle("Block ads and trackers with uBlock Origin", isOn: Binding($blocksAds))
+        .toggleStyle(.switch)
+        .onChange(of: blocksAds) { Engine.shared.adBlockingDidChange() }
+    case .mediaFolders:
+      MediaFolderList()
+    }
+  }
+
+  @ViewBuilder private var buttons: some View {
+    switch store.step {
+    case .browsers:
       ImportDialogButton(title: "Maybe Later") { store.send(store.isOnboarding ? .nextTapped : .backTapped) }
         .keyboardShortcut(.cancelAction)
       ImportDialogButton(title: "Next", isPrimary: true) { browser.map { store.send(.browserTapped($0)) } }
         .keyboardShortcut(.defaultAction)
         .disabled(browser == nil)
+    case .arc:
+      if let arc = store.scope(state: \.arc, action: \.arc) {
+        ImportDialogButton(title: "Cancel") { arc.send(.cancelTapped) }.keyboardShortcut(.cancelAction)
+        ImportDialogButton(title: "Import", isPrimary: true) { arc.send(.importTapped) }
+          .keyboardShortcut(.defaultAction)
+          .disabled(arc.data == nil || !ArcImportFeature.Category.allCases.contains(where: arc.state.isIncluded))
+      }
+    case .options:
+      ImportDialogButton(title: "Back") { store.send(.backTapped) }.keyboardShortcut(.cancelAction)
+      ImportDialogButton(title: "Import", isPrimary: true) { store.send(.importTapped) }
+        .keyboardShortcut(.defaultAction)
+        .disabled(store.options?.canImport != true)
+    case .importing:
+      EmptyView()
+    case .finished:
+      ImportDialogButton(title: store.isOnboarding ? "Continue" : "Done", isPrimary: true) { store.send(.doneTapped) }
+        .keyboardShortcut(.defaultAction)
+    case .defaultBrowser:
+      ImportDialogButton(title: "Not Now") { store.send(.nextTapped) }.keyboardShortcut(.cancelAction)
+      ImportDialogButton(title: "Set as Default", isPrimary: true) { store.send(.makeDefaultTapped) }
+        .keyboardShortcut(.defaultAction)
+    case .theme:
+      ImportDialogButton(title: "Not Now") { store.send(.nextTapped) }.keyboardShortcut(.cancelAction)
+      ImportDialogButton(title: "Continue", isPrimary: true) { store.send(.themeChosen(theme)) }
+        .keyboardShortcut(.defaultAction)
+    case .adBlocker:
+      ImportDialogButton(title: "Continue", isPrimary: true) { store.send(.nextTapped) }.keyboardShortcut(.defaultAction)
+    case .mediaFolders:
+      ImportDialogButton(title: "Continue", isPrimary: true) { store.send(.mediaFoldersTapped) }
+        .keyboardShortcut(.defaultAction)
+    case .welcome:
+      ImportDialogButton(title: "Start Browsing", isPrimary: true) { store.send(.doneTapped) }
+        .keyboardShortcut(.defaultAction)
     }
   }
 
   @ViewBuilder private var options: some View {
     if let options = Binding($store.options) {
       let current = options.wrappedValue
-      ImportDialog(
-        title: "Import from \(current.browser.rawValue)",
-        message: "Bookmarks become pinned tabs and folders of a new Space. Cookies keep you signed in to your sites."
-      ) {
-        VStack(alignment: .leading, spacing: 12) {
-          if current.profiles.count > 1 {
-            Picker("Profile", selection: Binding(get: { current.profile }, set: { store.send(.profileChosen($0)) })) {
-              ForEach(current.profiles) { Text($0.name).tag($0) }
-            }
-          }
-          Toggle("Bookmarks\(current.bookmarks.map { " (\(ImportFeature.tabCount($0)))" } ?? "")", isOn: options.includesBookmarks)
-          if current.includesBookmarks {
-            TextField("Space name", text: options.spaceName).padding(.leading, 20)
-          }
-          Toggle("History", isOn: options.includesHistory)
-          if current.browser == .safari {
-            HStack {
-              Toggle("Passwords", isOn: options.includesPasswords).disabled(current.passwordsFile == nil)
-              Button("Choose File…") { choosePasswordsFile() }
-            }
-            Text(
-              current.passwordsFile?.lastPathComponent
-                ?? "Other apps can't read Safari's passwords. In the Passwords app choose File > Export All Passwords to File, choose that file here, then delete it once imported."
-            )
-              .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-          } else {
-            Toggle("Passwords", isOn: options.includesPasswords)
-          }
-          Toggle("Cookies", isOn: options.includesCookies)
-          if let service = current.browser.safeStorage, current.includesPasswords || current.includesCookies {
-            SafeStorageNote(service: service)
-          }
-          if let failure = current.failure {
-            FailureView(failure: failure)
-          } else if current.bookmarks == nil {
-            ProgressView().controlSize(.small)
+      VStack(alignment: .leading, spacing: 12) {
+        if current.profiles.count > 1 {
+          Picker("Profile", selection: Binding(get: { current.profile }, set: { store.send(.profileChosen($0)) })) {
+            ForEach(current.profiles) { Text($0.name).tag($0) }
           }
         }
-        .toggleStyle(.checkbox)
-      } buttons: {
-        ImportDialogButton(title: "Back") { store.send(.backTapped) }.keyboardShortcut(.cancelAction)
-        ImportDialogButton(title: "Import", isPrimary: true) { store.send(.importTapped) }
-          .keyboardShortcut(.defaultAction)
-          .disabled(!current.canImport)
+        Toggle("Bookmarks\(current.bookmarks.map { " (\(ImportFeature.tabCount($0)))" } ?? "")", isOn: options.includesBookmarks)
+        if current.includesBookmarks {
+          TextField("Space name", text: options.spaceName).padding(.leading, 20)
+        }
+        Toggle("History", isOn: options.includesHistory)
+        if current.browser == .safari {
+          HStack {
+            Toggle("Passwords", isOn: options.includesPasswords).disabled(current.passwordsFile == nil)
+            Button("Choose File…") { choosePasswordsFile() }
+          }
+          Text(
+            current.passwordsFile?.lastPathComponent
+              ?? "Other apps can't read Safari's passwords. In the Passwords app choose File > Export All Passwords to File, choose that file here, then delete it once imported."
+          )
+            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        } else {
+          Toggle("Passwords", isOn: options.includesPasswords)
+        }
+        Toggle("Cookies", isOn: options.includesCookies)
+        if let service = current.browser.safeStorage, current.includesPasswords || current.includesCookies {
+          SafeStorageNote(service: service)
+        }
+        if let failure = current.failure {
+          FailureView(failure: failure)
+        } else if current.bookmarks == nil {
+          ProgressView().controlSize(.small)
+        }
       }
+      .toggleStyle(.checkbox)
     }
   }
 
@@ -154,34 +182,30 @@ struct ImportView: View {
 
   @ViewBuilder private var finished: some View {
     if let summary = store.summary {
-      ImportDialog(title: "Imported from \(summary.browser.rawValue)") {
-        VStack(alignment: .leading, spacing: 8) {
-          if summary.spaces > 0 {
-            Text("\(summary.spaces) \(summary.spaces == 1 ? "space" : "spaces") with \(summary.tabs) tabs")
-          }
-          Text("\(summary.pages) pages of history")
-          if let passwords = summary.passwords {
-            Text("\(passwords) \(passwords == 1 ? "password" : "passwords")")
-          }
-          if let cookies = summary.cookies {
-            Text("\(cookies) \(cookies == 1 ? "cookie" : "cookies")")
-          }
-          if let failure = summary.failure {
-            FailureView(failure: failure)
-          }
+      VStack(alignment: .leading, spacing: 8) {
+        if summary.spaces > 0 {
+          Text("\(summary.spaces) \(summary.spaces == 1 ? "space" : "spaces") with \(summary.tabs) tabs")
         }
-      } buttons: {
-        ImportDialogButton(title: store.isOnboarding ? "Continue" : "Done", isPrimary: true) { store.send(.doneTapped) }
-          .keyboardShortcut(.defaultAction)
+        Text("\(summary.pages) pages of history")
+        if let passwords = summary.passwords {
+          Text("\(passwords) \(passwords == 1 ? "password" : "passwords")")
+        }
+        if let cookies = summary.cookies {
+          Text("\(cookies) \(cookies == 1 ? "cookie" : "cookies")")
+        }
+        if let failure = summary.failure {
+          FailureView(failure: failure)
+        }
       }
     }
   }
 }
 
-private struct ImportDialog<Content: View, Buttons: View>: View {
+private struct ImportDialog<Leading: View, Content: View, Buttons: View>: View {
   let title: String
-  var message: String?
-  var close: (() -> Void)? = nil
+  let message: String?
+  let close: (() -> Void)?
+  @ViewBuilder let leading: Leading
   @ViewBuilder let content: Content
   @ViewBuilder let buttons: Buttons
 
@@ -194,6 +218,7 @@ private struct ImportDialog<Content: View, Buttons: View>: View {
           if let message {
             Text(message).font(.system(size: 14)).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
           }
+          leading
         }
         .frame(width: 250, alignment: .leading)
         content.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -205,9 +230,8 @@ private struct ImportDialog<Content: View, Buttons: View>: View {
       .padding(.top, 24)
     }
     .foregroundStyle(Color(hex: 0xD6D6D9))
-    .padding(28)
-    .frame(minWidth: 580, minHeight: 454)
-    .fixedSize()
+    .padding(ImportView.padding)
+    .frame(width: ImportView.size.width, height: ImportView.size.height)
     .background(Color(hex: 0x161C2F))
     .overlay(alignment: .topTrailing) {
       if let close {

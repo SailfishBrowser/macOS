@@ -4,13 +4,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 // What an Arc folder or a Zen profile holds, by kind, each kind with a checkbox, as the import sheets of other
-// browsers list theirs.
+// browsers list theirs; the import dialog gives it its title and buttons.
 struct ArcImportView: View {
   let store: StoreOf<ArcImportFeature>
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text("Import from \(store.browser.rawValue)").font(.headline)
       if store.browser == .arc {
         HStack {
           Text((store.folder.path as NSString).abbreviatingWithTildeInPath)
@@ -33,16 +32,7 @@ struct ArcImportView: View {
       } else {
         ProgressView().controlSize(.small)
       }
-      HStack {
-        Spacer()
-        Button("Cancel") { store.send(.cancelTapped) }.keyboardShortcut(.cancelAction)
-        Button("Import") { store.send(.importTapped) }
-          .keyboardShortcut(.defaultAction)
-          .disabled(store.data == nil || !ArcImportFeature.Category.allCases.contains(where: store.state.isIncluded))
-      }
     }
-    .padding(16)
-    .frame(width: 440)
     .onAppear { store.send(.appeared) }
   }
 
