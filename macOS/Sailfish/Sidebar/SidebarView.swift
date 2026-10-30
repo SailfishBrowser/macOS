@@ -3047,14 +3047,10 @@ private struct FavoriteTile: View {
       .onHover { isHovering = $0 }
   }
 
-  // The favorites tile: 12.05pt continuous. Selected, it is lit with the space's primary color and ringed 2 pt inside
-  // its edge with the theme's colors; on a dark theme they also warm the fill.
+  // The favorites tile: 12.05pt continuous, with no stroke. Selected, it is lit with the space's primary color.
   @ViewBuilder private func background(_ shape: RoundedRectangle) -> some View {
     if tab.id == space.selectedTabID {
-      let ring = Theme.favoriteRing(space.theme)
       shape.fill(Theme.rowSelection(space.theme))
-        .overlay(shape.fill(ring).opacity(Theme.isLight(space.theme) ? 0 : 0.15))
-        .overlay(shape.strokeBorder(ring, lineWidth: 2))
     } else {
       shape.fill(isHovering && !isDragging ? Theme.fillHover : Theme.fill)
     }
