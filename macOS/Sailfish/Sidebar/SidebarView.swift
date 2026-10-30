@@ -2427,7 +2427,7 @@ private struct TabRow: View {
     }
     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
     .onHover { isHovering = $0 }
-    .hoverTooltip(tab.displayTitle, subtitle: "Double-click to rename", isEnabled: name == nil)
+    .hoverTooltip(tab.displayTitle, isEnabled: name == nil)
   }
 
   // Where the split half the dragged tab will take begins, once it is shown to the title's right.
