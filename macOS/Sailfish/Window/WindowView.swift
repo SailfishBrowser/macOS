@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import SwiftUI
+import WebKit
 
 struct WindowView: View {
   @Bindable var store: StoreOf<WindowFeature>
@@ -387,12 +388,14 @@ final class WebContainer: NSView {
   // The page takes the width it comes to rest at, pinned to the card's leading edge and clipped by the card, so a ⌘S
   // lays the engine out once and its new layout lands mid-slide. On a show the narrower page moves with
   // the edge and the card is wider than it until the motion ends; that strip shows the page's own background
-  // color, which the engine keeps on its view's backing layer. Before the layout has reported, the page fills the card.
+  // color, which Chromium keeps on its view's backing layer and a shown WebKit page gives as its under-page color (a
+  // clear one has drawn nothing of its own yet). Before the layout has reported, the page fills the card.
   func fitPage() {
     for view in subviews {
       view.frame = NSRect(x: 0, y: 0, width: restingWidth ?? bounds.width, height: bounds.height)
     }
-    layer?.backgroundColor = page?.subviews.first?.layer?.backgroundColor
+    let webKitColor = (page as? WKWebView).flatMap { $0.alphaValue > 0 ? $0.underPageBackgroundColor.cgColor : nil }
+    layer?.backgroundColor = webKitColor ?? page?.subviews.first?.layer?.backgroundColor
   }
 
   override func viewDidMoveToWindow() {
