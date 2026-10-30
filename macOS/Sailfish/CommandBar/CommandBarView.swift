@@ -27,10 +27,17 @@ struct CommandBarView: View {
   }
 
   // Arrow keys show the selected suggestion in the field without changing the query.
+  private var shown: String {
+    store.selection > 0 ? selected?.fill ?? store.query : store.query + store.inline
+  }
+
   private var text: Binding<String> {
     Binding(
-      get: { store.selection > 0 ? selected?.fill ?? store.query : store.query + store.inline },
+      get: { shown },
       set: {
+        // Return hands back the text the field shows, which is no edit: taken as one, it would reset the selection
+        // and open the first row instead of the selected one.
+        guard $0 != shown else { return }
         store.send(.queryChanged($0))
         // While the keystroke is handled, so no frame shows the typed text without its completion.
         selectInline()
