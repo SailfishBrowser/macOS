@@ -189,9 +189,9 @@ struct CommandBarFeature {
       // The best match (as its open tab if there is one), the search for the typed text, matching
       // commands and open tabs, then sites before search suggestions. A page matches a tab regardless of "www.".
       // A command comes first unless the best match is a site the text completes to.
-      let bestTab = matches.first.flatMap { best in others.first { $0.url.displayString == best.url.displayString } }
+      let bestTab = matches.first.flatMap { best in others.first { $0.url.page == best.url.page } }
       let tabs = others.filter { $0.matches(query) && $0 != bestTab }
-      let rest = matches.dropFirst().filter { match in !tabs.contains { $0.url.displayString == match.url.displayString } }
+      let rest = matches.dropFirst().filter { match in !tabs.contains { $0.url.page == match.url.page } }
       let verbatim = rest.first { $0.type == .search && $0.contents.lowercased() == query }
       let best = bestTab.map(Suggestion.tab) ?? matches.first.map(Suggestion.match)
       let completes = bestTab != nil || matches.first.map { $0.type != .search && !$0.inlineAutocompletion.isEmpty } == true
