@@ -17,6 +17,8 @@ func applyAppIcon() {
 
 struct IconPane: View {
   @Shared(.appIcon) private var current
+  // Read from their files once, as every tap redraws the pane.
+  private static let images = Dictionary(uniqueKeysWithValues: AppIcon.allCases.map { ($0, $0.image()) })
 
   var body: some View {
     // Nine icons are taller than the pane, so the list scrolls.
@@ -30,7 +32,7 @@ struct IconPane: View {
               .overlay(Circle().fill(.white).padding(7).opacity(current == icon ? 1 : 0))
               .frame(width: 22, height: 22)
               .padding(.trailing, 21)
-            Image(nsImage: icon.image()).resizable().frame(width: 62, height: 62).padding(.trailing, 8)
+            Image(nsImage: Self.images[icon]!).resizable().frame(width: 62, height: 62).padding(.trailing, 8)
             VStack(alignment: .leading, spacing: 3) {
               Text(icon.name).font(.system(size: 15, weight: .semibold))
               if current == icon {
