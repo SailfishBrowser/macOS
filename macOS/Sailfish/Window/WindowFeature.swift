@@ -364,7 +364,7 @@ struct WindowFeature {
             if let previous {
               await engine.close(previous)
             }
-            await engine.create(tab.id, space.profileID, space.isIncognito, tab.pages, tab.shownPage)
+            await engine.create(tab.id, space.profileID, space.isIncognito, tab.pages, tab.shownPage, url)
             await engine.load(tab.id, url)
           }
         )

@@ -1,4 +1,5 @@
 import AppKit
+import ComposableArchitecture
 @preconcurrency import EngineCore
 
 // One of a tab's pages: its id, which names its saved history, and the engine that renders it.
@@ -11,7 +12,17 @@ struct PageRecord: Codable, Equatable, Sendable {
 // page before it as it was left, and Forward at its end the page after it. Only the shown page is made when the tab
 // is; a page behind it is made from its saved history once Back or Forward reaches it.
 extension Engine {
-  func create(_ tab: UUID, _ profile: UUID, _ incognito: Bool, pages: [PageRecord], shown: Int) async {
+  // A Chromium page saved at a URL the site table opens in WebKit stays behind, unmade, with a WebKit page for the URL
+  // after it.
+  func create(_ tab: UUID, _ profile: UUID, _ incognito: Bool, pages: [PageRecord], shown: Int, url: URL) async {
+    var (pages, shown) = (pages, shown)
+    @Shared(.siteEngines) var siteEngines
+    if pages[shown].engine == .chromium, Self.sessions.load(pages[shown].id) != nil,
+      pageEngine(for: url, from: .chromium, choice: choices[tab], cause: .restore, siteEngines) == .webkit
+    {
+      shown += 1
+      pages.insert(PageRecord(id: UUID(), engine: .webkit), at: shown)
+    }
     _ = await context(profile)
     if pages[shown].engine == .webkit {
       await CookieSync.shared(profile: profile, incognito: incognito).open()

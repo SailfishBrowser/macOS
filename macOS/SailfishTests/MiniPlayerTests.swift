@@ -32,7 +32,7 @@ final class MiniPlayerTests: XCTestCase {
       WindowFeature()
     } withDependencies: {
       $0.date = .constant(now)
-      $0.webEngine.create = { _, _, _, _, _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
       $0.webEngine.load = { _, _ in }
       $0.webEngine.media = { _, command in commands.withValue { $0.append(command) } }
     }

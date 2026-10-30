@@ -58,8 +58,10 @@ enum ZoomStep: Equatable, Sendable {
 
 @DependencyClient
 struct WebEngineClient: Sendable {
-  // Registers the tab's pages and makes the shown one from its saved history.
-  var create: @Sendable (_ tab: UUID, _ profile: UUID, _ incognito: Bool, _ pages: [PageRecord], _ shown: Int) async -> Void
+  // Registers the tab's pages and makes the shown one from its saved history, for the URL the tab then loads.
+  var create: @Sendable (
+    _ tab: UUID, _ profile: UUID, _ incognito: Bool, _ pages: [PageRecord], _ shown: Int, _ url: URL
+  ) async -> Void
   var load: @Sendable (_ tab: UUID, _ url: URL) async -> Void
   // Reloads the shown page's URL in the other engine, as a page of its own.
   var switchEngine: @Sendable (_ tab: UUID, _ engine: PageEngineKind) async -> Void
