@@ -296,8 +296,6 @@ private struct BrowserChoice: View {
   }
 }
 
-// The folders the media folders step asks macOS for, as Finder shows them; the screenshots folder is often one of the
-// others.
 // The options step's choices, drawn from the options it is handed rather than from the store's optional, so the step
 // keeps its last state while it slides out after Back or Import clears them.
 private struct OptionsForm: View {
@@ -357,6 +355,8 @@ private struct OptionsForm: View {
   }
 }
 
+// The folders the media folders step asks macOS for, as Finder shows them; the screenshots folder is often one of the
+// others.
 private struct MediaFolderList: View {
   var body: some View {
     let folders = MediaSources.allCases.compactMap(\.folder).map(\.standardizedFileURL)
