@@ -3075,7 +3075,7 @@ private struct FavoriteTile: View {
   // favicon with a color tints it, more strongly when selected.
   private func background(_ shape: RoundedRectangle, tint: Color?) -> some View {
     let isSelected = tab.id == space.selectedTabID
-    return shape.fill(isSelected ? Theme.rowSelection(space.theme) : isHovering && !isDragging ? Theme.fillHover : Theme.fill)
+    return shape.fill(isSelected ? Theme.favoriteSelection(space.theme) : isHovering && !isDragging ? Theme.fillHover : Theme.fill)
       .overlay(shape.fill(Theme.favoriteTint(tint ?? .clear, isSelected: isSelected)))
   }
 }
