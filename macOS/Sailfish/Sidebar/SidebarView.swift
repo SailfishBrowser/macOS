@@ -1056,10 +1056,14 @@ struct SidebarView: View {
       .zone(.folder(folder.id), $zones)
   }
 
-  // Order: New Nested Folder, Turn into Space, Copy All Links | Change Icon, Rename | Duplicate, Move to |
-  // Delete.
+  // Order: Refresh for a live folder, else New Nested Folder, Turn into Space, Copy All Links | Change Icon, Rename |
+  // Duplicate, Move to | Delete.
   @ViewBuilder private func folderMenu(_ folder: Folder) -> some View {
-    Button("New Nested Folder…") { newFolder(in: .folder(folder.id)) }
+    if folder.source == nil {
+      Button("New Nested Folder…") { newFolder(in: .folder(folder.id)) }
+    } else {
+      Button("Refresh") { send(.refreshLiveFolder(folder.id)) }
+    }
     Button("Turn “\(folder.name)” into Space") { store.send(.spaces(.folderToSpace(folder.id, in: space.id))) }
       .disabled(store.isIncognito)
     if !folderTabs(folder.id, in: space).isEmpty {
@@ -1272,6 +1276,11 @@ struct SidebarView: View {
           }
       } else {
         Text(folder.name).fontWeight(.semibold)
+        // A live folder whose last refresh failed keeps its tabs and shows why on its warning sign.
+        if let failure = folder.source?.failure {
+          Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11)).foregroundStyle(Theme.secondaryText)
+            .hoverTooltip(failure)
+        }
         // The hover "−" unloads the folder's open tabs.
         let live = folderTabs(folder.id, in: space).filter(\.isLive)
         if hoveredFolder == folder.id, drag == nil, !live.isEmpty {
@@ -1343,7 +1352,9 @@ struct SidebarView: View {
     let isTab = if case .tab = drag.item { true } else { false }
     switch zone {
     case let .tab(other):
-      guard let tab = space.tabs[id: other], isTab || tab.placement.isPinnedSection else { return nil }
+      // A live folder's rows take nothing in.
+      guard let tab = space.tabs[id: other], isTab || tab.placement.isPinnedSection, space.takesRows(tab.placement)
+      else { return nil }
       if tab.placement == .favorite { return favoriteTarget(at: point) }
       // Offers a split on all of another tab's row but its edges, the dragged tab on the pointer's side; the
       // line between rows shows only within a few points of their boundary.
@@ -1364,7 +1375,7 @@ struct SidebarView: View {
       guard let folder = space.folders[id: other] else { return nil }
       if point.y < frame.minY + frame.height * 0.25 { return .slot(folder.placement, before: other) }
       if point.y > frame.maxY - frame.height * 0.25 { return .slot(folder.placement, before: next(other, in: folder.placement)) }
-      return other == drag.item.id ? nil : .into(other)
+      return other == drag.item.id || folder.source != nil ? nil : .into(other)
     case .title:
       return .slot(.pinned, before: space.rows(in: .pinned).first?.id)
     // The hint stands in for the empty pinned section, so a row dropped on it is pinned.
@@ -1662,7 +1673,7 @@ struct SidebarView: View {
         } else {
           TabRow(
             tab: tab, profileID: space.profileID, isIncognito: space.isIncognito, isSelected: tab.id == space.selectedTabID,
-            name: nil, endRename: { _ in }, backToPinnedURL: {}, isLifted: true
+            name: nil, endRename: { _ in }, backToPinnedURL: {}, isLifted: true, isLiveFolderItem: !space.takesRows(tab.placement)
           ) {}
           .equatable()
           .padding(.vertical, Self.rowGap)
@@ -1724,6 +1735,7 @@ struct SidebarView: View {
       },
       // The dragged row stays in place, lifted.
       isLifted: drag?.item == .tab(tab.id),
+      isLiveFolderItem: !space.takesRows(tab.placement),
       splitHover: splitHover,
       toggleMute: { send(.toggleMute(tab.id)) }
     ) {
@@ -1804,7 +1816,7 @@ struct SidebarView: View {
     Menu("Move to") {
       Button("Pinned") { for tab in tabs { send(.move(tab.id, .pinned, before: nil)) } }
       Button("Today") { for tab in tabs { send(.move(tab.id, .unpinned, before: space.tabs(in: .unpinned).first?.id)) } }
-      ForEach(space.folders) { folder in
+      ForEach(space.folders.filter { $0.source == nil }) { folder in
         Button(folder.name) { for tab in tabs { send(.move(tab.id, .folder(folder.id), before: nil)) } }
       }
       Divider()
@@ -1888,7 +1900,7 @@ struct SidebarView: View {
       if tab.placement != .unpinned {
         Button("Today") { send(.move(tab.id, .unpinned, before: space.tabs(in: .unpinned).first?.id)) }
       }
-      ForEach(space.folders.filter { tab.placement != .folder($0.id) }) { folder in
+      ForEach(space.folders.filter { tab.placement != .folder($0.id) && $0.source == nil }) { folder in
         Button(folder.name) { send(.move(tab.id, .folder(folder.id), before: nil)) }
       }
       Divider()
@@ -2405,11 +2417,13 @@ private struct TabRow: View, @MainActor Equatable {
   let backToPinnedURL: () -> Void
   // Highlighted with its X, as the dragged row and its copy are.
   var isLifted = false
+  var isLiveFolderItem = false
   // A dragged tab resting on this row: once the half the row will split into shows, the title keeps clear of it.
   var splitHover: SplitHover? = nil
   var toggleMute: () -> Void = {}
   let close: () -> Void
   @Environment(\.isDragging) private var isDragging
+  @Environment(\.spaceTheme) private var theme
   @State private var isHovering = false
   @State private var isIconHovered = false
   @State private var width: CGFloat = 0
@@ -2418,7 +2432,7 @@ private struct TabRow: View, @MainActor Equatable {
   static func == (lhs: TabRow, rhs: TabRow) -> Bool {
     lhs.tab == rhs.tab && lhs.profileID == rhs.profileID && lhs.isIncognito == rhs.isIncognito
       && lhs.isSelected == rhs.isSelected && (lhs.name == nil) == (rhs.name == nil) && lhs.isLifted == rhs.isLifted
-      && lhs.splitHover == rhs.splitHover
+      && lhs.isLiveFolderItem == rhs.isLiveFolderItem && lhs.splitHover == rhs.splitHover
   }
 
   var body: some View {
@@ -2475,7 +2489,11 @@ private struct TabRow: View, @MainActor Equatable {
         .buttonStyle(.plain)
         .help(tab.isMuted ? "Unmute" : "Mute")
       }
-      if isHovering && !isDragging && name == nil || isLifted {
+      let showsClose = (isHovering && !isDragging && name == nil || isLifted) && (!isLiveFolderItem || tab.isLive)
+      if tab.isUnread && !showsClose {
+        Circle().fill(Theme.accent(theme)).frame(width: 7, height: 7).padding(.trailing, 4)
+      }
+      if showsClose {
         Spacer(minLength: 0)
         Button(action: close) {
           // The "−" unloads a loaded pinned tab. Its X is 11 pt across and its "−" a 14 x 2 pt bar, both in the

@@ -1,7 +1,7 @@
 import ComposableArchitecture
 import SwiftUI
 
-// The space menu, without Live Folders: on the space's title and footer dot in the sidebar, and on its card in the
+// The space menu: on the space's title and footer dot in the sidebar, and on its card in the
 // Library, which leaves out Manage Spaces….
 struct SpaceMenu: View {
   let store: StoreOf<WindowFeature>
@@ -19,6 +19,7 @@ struct SpaceMenu: View {
     SpaceProfileMenu(title: "Set Profile", store: store, space: space)
     Divider()
     Button("New Folder", action: newFolder)
+    Button("New Live Folder…") { newLiveFolder() }
     Divider()
     Button("Share Space…") { share() }
     // Export “…” into Folder: the space becomes a folder in the space picked. Every space is listed, this one
@@ -45,6 +46,13 @@ struct SpaceMenu: View {
       RenameSpaceDialog(
         space: space.name, save: { store.send(.spaces(.update(space.id, name: $0, icon: space.icon, theme: space.theme))) },
         dismiss: dismiss)
+    }
+  }
+
+  private func newLiveFolder() {
+    guard let window = NSApp.keyWindow else { return }
+    presentModal(over: window) { dismiss in
+      NewLiveFolderDialog(create: { store.send(.tab(.newLiveFolder($0), in: space.id), animation: Motion.row) }, dismiss: dismiss)
     }
   }
 
