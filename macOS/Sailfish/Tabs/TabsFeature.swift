@@ -1159,6 +1159,15 @@ struct TabsFeature {
         return archive(state.members(of: id).map(\.id), &state)
       }
     }
+    // A tab's last shown time counts until it stops being shown, by whatever action, for archiving and sleeping.
+    .onChange(of: \.shownTabIDs) { shown, _ in
+      Reduce { state, _ in
+        for id in shown.subtracting(state.shownTabIDs) {
+          state.tabs[id: id]?.lastActiveAt = now
+        }
+        return .none
+      }
+    }
     // Runs after every change but a page's, which never touches a group.
     Reduce { state, action in
       if case .pageUpdated = action {} else {
@@ -1389,8 +1398,6 @@ struct TabsFeature {
   }
 
   private func select(_ id: Tab.ID, _ state: inout State) -> Effect<Action> {
-    // A tab's last shown time counts until it is switched away from, for archiving.
-    state.selectedTabID.map { state.tabs[id: $0]?.lastActiveAt = now }
     state.selectedTabID = id
     state.selection = []
     state.tabs[id: id]?.lastActiveAt = now
