@@ -35,10 +35,12 @@ struct Tab: Codable, Equatable, Identifiable {
   // The tab's pages once its page has reported them (see `pages`), and the one it shows.
   var savedPages: [PageRecord]?
   var shownPage = 0
+  // A live folder's item that arrived after its first fill and has not been opened.
+  var isUnread = false
 
   enum CodingKeys: String, CodingKey {
     case id, url, title, placement, pinnedURL, customTitle, icon, createdAt, lastActiveAt, groupID
-    case savedPages = "pages", shownPage
+    case savedPages = "pages", shownPage, isUnread
   }
 
   // A tab whose page never reported has one page, Chromium's, under the tab's id.
@@ -96,6 +98,7 @@ extension Tab {
     groupID = try container.decodeIfPresent(TabGroup.ID.self, forKey: .groupID)
     savedPages = try container.decodeIfPresent([PageRecord].self, forKey: .savedPages)
     shownPage = try container.decodeIfPresent(Int.self, forKey: .shownPage) ?? 0
+    isUnread = try container.decodeIfPresent(Bool.self, forKey: .isUnread) ?? false
   }
 }
 
@@ -184,6 +187,8 @@ struct Folder: Codable, Equatable, Identifiable {
   // The pinned section or the folder it is in.
   var placement = Placement.pinned
   var icon: String?
+  // A live folder's source, which decides the folder's tabs.
+  var source: LiveFolderSource?
 }
 
 @Reducer
