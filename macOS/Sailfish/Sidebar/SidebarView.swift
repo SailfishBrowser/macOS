@@ -2756,6 +2756,8 @@ private struct DownloadStack: View {
     if hover.isOnButton || hover.isOnStack, !recent.isEmpty {
       DownloadStackRows(rows: Array(recent.prefix(4).reversed())) { downloads.send(.cancel($0)) }
         .foregroundStyle(Theme.primaryText)
+        // The panel is dark on every theme, as the plus menu is.
+        .environment(\.colorScheme, .dark)
         .padding(.horizontal, 2)
         // Bridges the gap down to the button's top, so the pointer can reach the rows without the stack closing.
         .padding(.bottom, 5)
@@ -2784,12 +2786,11 @@ private struct DownloadStackRows: View {
           .opacity(isRisen ? 1 : 0)
       }
     }
-    // The rows have no fill of their own: without the panel the tabs under them show through.
+    // The rows have no fill of their own: without the panel the tabs under them show through. It is the plus menu's.
     .background {
-      RoundedRectangle(cornerRadius: Theme.CommandBar.radius).fill(.ultraThinMaterial)
-        .overlay(RoundedRectangle(cornerRadius: Theme.CommandBar.radius).fill(Theme.CommandBar.background))
-        .overlay(RoundedRectangle(cornerRadius: Theme.CommandBar.radius).strokeBorder(Theme.CommandBar.innerLine, lineWidth: 1))
-        .shadow(color: .black.opacity(0.3), radius: 8, y: 2)
+      RoundedRectangle(cornerRadius: 10).fill(Theme.menu)
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.06)))
+        .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
         .padding(.vertical, -4)
         .opacity(isRisen ? 1 : 0)
     }
@@ -3074,7 +3075,7 @@ private struct FavoriteTile: View {
   // favicon with a color tints it, more strongly when selected.
   private func background(_ shape: RoundedRectangle, tint: Color?) -> some View {
     let isSelected = tab.id == space.selectedTabID
-    return shape.fill(isSelected ? Theme.rowSelection(space.theme) : isHovering && !isDragging ? Theme.fillHover : Theme.fill)
+    return shape.fill(isSelected ? Theme.favoriteSelection(space.theme) : isHovering && !isDragging ? Theme.fillHover : Theme.fill)
       .overlay(shape.fill(Theme.favoriteTint(tint ?? .clear, isSelected: isSelected)))
   }
 }

@@ -124,7 +124,12 @@ enum Theme {
   static func favoriteTint(_ color: Color, isSelected: Bool) -> Color {
     color.opacity(isSelected ? 0.35 : 0.2)
   }
-  // A selected tab row or favorite, lit with the space's primary color: a light tint of it on light themes, a
+  // A selected favorite: on a light theme a dark wash of the space's primary color, darker than the tiles around it, so
+  // a white or grey icon stays legible on it; on a dark theme the selected row's fill.
+  static func favoriteSelection(_ theme: SpaceTheme) -> Color {
+    isLight(theme) ? tint(theme.gradient[0], saturation: 0.5, brightness: 0.5).opacity(0.3) : rowSelection(theme)
+  }
+  // A selected tab row, lit with the space's primary color: a light tint of it on light themes, a
   // translucent one on dark themes (white at 19% takes the color of the sidebar under it).
   static func rowSelection(_ theme: SpaceTheme) -> Color {
     isLight(theme)
