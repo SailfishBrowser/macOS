@@ -10,6 +10,11 @@ extension SharedKey where Self == AppStorageKey<Double>.Default {
   static var swipeCommitDistance: Self { Self[.appStorage("swipeCommitDistance"), default: 12] }
 }
 
+extension SharedKey where Self == AppStorageKey<Bool>.Default {
+  // Show as Toolbar: the address also sits in a strip across the top of the page, in every window.
+  static var showsURLToolbar: Self { Self[.appStorage("showsURLToolbar"), default: false] }
+}
+
 @Reducer
 struct WindowFeature {
   @ObservableState
@@ -43,6 +48,7 @@ struct WindowFeature {
     var peek: Peek?
     // Expand Current Split: the focused pane fills the page area until the selection changes.
     var expandedPane: Tab.ID?
+    @Shared(.showsURLToolbar) var showsURLToolbar
     // The tabs this window showed, most recent first, across its spaces, for ⌃Tab.
     var recentTabs: [Tab.ID] = []
     // An extension the command bar asked to run; the sidebar runs it on the selected page and clears this.
@@ -195,6 +201,7 @@ struct WindowFeature {
     case endSwipe(SwipeSurface, width: CGFloat, velocity: CGFloat)
     case undo
     case toggleExpandedPane
+    case toggleURLToolbar
     // Clear Archive: empties the archive, which no undo brings back.
     case clearArchive
     // Shows a toast, replacing any showing; it goes after Toast.duration unless another replaces it first.
@@ -667,6 +674,10 @@ struct WindowFeature {
         let selected = state.spaces.selected.selectedTabID
         guard state.spaces.selected.split(of: selected) != nil else { return .none }
         state.expandedPane = state.expandedPane == nil ? selected : nil
+        return .none
+
+      case .toggleURLToolbar:
+        state.$showsURLToolbar.withLock { $0.toggle() }
         return .none
 
       case .undo:

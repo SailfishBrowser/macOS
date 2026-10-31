@@ -7,6 +7,20 @@ import XCTest
 final class WindowFeatureTests: XCTestCase {
   let now = Date(timeIntervalSince1970: 1_000)
 
+  func testTheURLToolbarIsOffUntilToggledAndReachesEveryWindow() async {
+    let home = Space(id: UUID(1), name: "Home", profileID: UUID(200), createdAt: now)
+    let window = WindowFeature.State(id: UUID(3), sidebar: .init(), spaces: .init(spaces: [home], selectedID: home.id))
+    let other = WindowFeature.State(id: UUID(4), sidebar: .init(), spaces: .init(spaces: [home], selectedID: home.id))
+    XCTAssertFalse(window.showsURLToolbar)
+    let store = TestStore(initialState: window) { WindowFeature() }
+
+    await store.send(.toggleURLToolbar) { $0.$showsURLToolbar.withLock { $0 = true } }
+    XCTAssertTrue(other.showsURLToolbar)
+
+    await store.send(.toggleURLToolbar) { $0.$showsURLToolbar.withLock { $0 = false } }
+    XCTAssertFalse(other.showsURLToolbar)
+  }
+
   func testOpeningARowFromTheLibraryClosesItOnThatSpaceAndTab() async {
     let home = Space(id: UUID(1), name: "Home", profileID: UUID(200), createdAt: now)
     var work = Space(id: UUID(2), name: "Work", profileID: UUID(200), createdAt: now)
