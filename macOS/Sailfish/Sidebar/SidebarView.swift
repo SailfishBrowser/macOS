@@ -2771,6 +2771,15 @@ private struct DownloadStackRows: View {
           .opacity(isRisen ? 1 : 0)
       }
     }
+    // The rows have no fill of their own: without the panel the tabs under them show through.
+    .background {
+      RoundedRectangle(cornerRadius: Theme.CommandBar.radius).fill(.ultraThinMaterial)
+        .overlay(RoundedRectangle(cornerRadius: Theme.CommandBar.radius).fill(Theme.CommandBar.background))
+        .overlay(RoundedRectangle(cornerRadius: Theme.CommandBar.radius).strokeBorder(Theme.CommandBar.innerLine, lineWidth: 1))
+        .shadow(color: .black.opacity(0.3), radius: 8, y: 2)
+        .padding(.vertical, -4)
+        .opacity(isRisen ? 1 : 0)
+    }
     .onAppear { withAnimation(Motion.downloadStack) { isRisen = true } }
   }
 }
