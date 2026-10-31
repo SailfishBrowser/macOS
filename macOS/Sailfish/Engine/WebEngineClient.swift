@@ -78,6 +78,8 @@ struct WebEngineClient: Sendable {
   var setMuted: @Sendable (_ tab: UUID, _ muted: Bool) async -> Void
   var media: @Sendable (_ tab: UUID, _ command: MediaCommand) async -> Void
   var close: @Sendable (_ tab: UUID) async -> Void
+  // Whether the tab's page may be closed to sleep: false while it waits on the user, as with typed text not sent.
+  var canSleep: @Sendable (_ tab: UUID) async -> Bool = { _ in false }
   // Closes the tab's page and forgets its saved history.
   var discard: @Sendable (_ tab: UUID) async -> Void = { _ in }
   var closeIncognito: @Sendable (_ profile: UUID) async -> Void
