@@ -12,8 +12,10 @@
 #     for the password; notarytool otherwise takes it only on the command line, where ps shows it.
 #   NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER: an App Store Connect API key's .p8 file, its ID and its issuer ID.
 #   PROVISIONING_PROFILE: the Developer ID provisioning profile carrying iCloud (container iCloud.com.harunkkhan.browser);
-#     it is embedded in the app and the app is signed with scripts/entitlements/app-profile.plist. Empty signs with
-#     app.plist and no profile, so the app publishes nothing to iCloud.
+#     it is embedded in the app and the app is signed with scripts/entitlements/app-profile.plist, plus the passkey
+#     entitlement (com.apple.developer.web-browser.public-key-credential) when the profile grants it, which it does
+#     once Apple has approved it for the App ID. Empty signs with app.plist and no profile, so the app publishes
+#     nothing to iCloud and has no passkeys.
 #   An identity in a keychain that only the GUI session may use needs this script run inside that session, with the
 #   keychain unlocked (release.sh's SIGN_WRAPPER).
 #   Needs dmgbuild on PATH: python3 -m venv ~/.dmgbuild && ~/.dmgbuild/bin/pip install dmgbuild==1.6.7, then add
@@ -75,7 +77,14 @@ for plugin in "$APP"/Contents/PlugIns/*; do
 done
 if [ -n "${PROVISIONING_PROFILE:-}" ]; then
   cp "$PROVISIONING_PROFILE" "$APP/Contents/embedded.provisionprofile"
-  sign $FULL --entitlements "$ENT/app-profile.plist" "$APP"
+  # A key the profile does not grant makes macOS refuse to launch the app, so the passkey key follows the profile.
+  PASSKEYS=com.apple.developer.web-browser.public-key-credential
+  security cms -D -i "$PROVISIONING_PROFILE" > "$OUT/profile.plist"
+  cp "$ENT/app-profile.plist" "$OUT/app-profile.plist"
+  if /usr/libexec/PlistBuddy -c "Print :Entitlements:$PASSKEYS" "$OUT/profile.plist" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c "Add :$PASSKEYS bool true" "$OUT/app-profile.plist"
+  fi
+  sign $FULL --entitlements "$OUT/app-profile.plist" "$APP"
 else
   sign $FULL --entitlements "$ENT/app.plist" "$APP"
 fi

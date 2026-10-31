@@ -108,8 +108,8 @@ jobs:
           [ -n "$IDENTITY" ] || { echo "no Developer ID Application identity in DEVELOPER_ID_P12"; exit 1; }
           echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
-      # The base64 of the Developer ID provisioning profile with iCloud for the App ID. Unset, the app is signed
-      # without it and publishes nothing to iCloud.
+      # The base64 of the Developer ID provisioning profile with iCloud for the App ID, and passkeys once Apple has
+      # approved them for it. Unset, the app is signed without it, publishes nothing to iCloud and has no passkeys.
       - name: Write the provisioning profile
         env:
           DEVELOPER_ID_PROVISIONING_PROFILE: ${{ secrets.DEVELOPER_ID_PROVISIONING_PROFILE }}
