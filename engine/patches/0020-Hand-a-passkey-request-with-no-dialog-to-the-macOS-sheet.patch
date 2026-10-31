@@ -1,0 +1,121 @@
+From: jt914 <josephtso914@gmail.com>
+Subject: [PATCH] Hand a passkey request with no dialog to the macOS sheet
+
+EngineCore's tabs cannot host Chrome's passkey dialog, so a request that
+reached Chrome's list of sign-in methods, its account picker, a security key
+prompt or a phone's QR code was cancelled (patch 0010). That covers a sign-in
+with several accounts, the first sign-in before macOS has given the app access
+to its passkeys, and a new passkey on a Mac where iCloud Drive is off. When
+iCloud Keychain is available (the app carries
+com.apple.developer.web-browser.public-key-credential), macOS's passkey sheet
+offers the same choices, so the request goes to it instead. Once the user has
+dismissed the sheet, such a step cancels the request as before.
+---
+diff --git a/chrome/browser/ui/views/webauthn/authenticator_request_dialog_view_controller_views.cc b/chrome/browser/ui/views/webauthn/authenticator_request_dialog_view_controller_views.cc
+--- a/chrome/browser/ui/views/webauthn/authenticator_request_dialog_view_controller_views.cc
++++ b/chrome/browser/ui/views/webauthn/authenticator_request_dialog_view_controller_views.cc
+@@ -32,11 +32,7 @@ AuthenticatorRequestDialogViewController::Create(
+   // destroyed. The request may be able to still run to completion if it does
+   // not require any user input, otherwise it will be blocked and time out. We
+   // should audit this.
+-  auto* manager = web_modal::WebContentsModalDialogManager::FromWebContents(
+-      constrained_window::GetTopLevelWebContents(web_contents));
+-  // EngineCore's tabs have a manager but no delegate to host a web-modal
+-  // dialog in, so there is nowhere to show the dialog either.
+-  if (!manager || !manager->delegate()) {
++  if (!CanShow(web_contents)) {
+     return nullptr;
+   }
+ 
+@@ -44,6 +40,16 @@ AuthenticatorRequestDialogViewController::Create(
+       web_contents, model);
+ }
+ 
++// static
++bool AuthenticatorRequestDialogViewController::CanShow(
++    content::WebContents* web_contents) {
++  auto* manager = web_modal::WebContentsModalDialogManager::FromWebContents(
++      constrained_window::GetTopLevelWebContents(web_contents));
++  // EngineCore's tabs have a manager but no delegate to host a web-modal
++  // dialog in, so there is nowhere to show the dialog either.
++  return manager && manager->delegate();
++}
++
+ AuthenticatorRequestDialogViewControllerViews::
+     AuthenticatorRequestDialogViewControllerViews(
+         content::WebContents* web_contents,
+diff --git a/chrome/browser/ui/webauthn/authenticator_request_dialog_view_controller.h b/chrome/browser/ui/webauthn/authenticator_request_dialog_view_controller.h
+--- a/chrome/browser/ui/webauthn/authenticator_request_dialog_view_controller.h
++++ b/chrome/browser/ui/webauthn/authenticator_request_dialog_view_controller.h
+@@ -21,6 +21,9 @@ class AuthenticatorRequestDialogViewController {
+       content::WebContents* web_contents,
+       AuthenticatorRequestDialogModel* model);
+ 
++  // Whether `web_contents` has a host to show the dialog in.
++  static bool CanShow(content::WebContents* web_contents);
++
+   virtual ~AuthenticatorRequestDialogViewController() = default;
+ };
+ 
+diff --git a/chrome/browser/webauthn/authenticator_request_dialog_controller.cc b/chrome/browser/webauthn/authenticator_request_dialog_controller.cc
+--- a/chrome/browser/webauthn/authenticator_request_dialog_controller.cc
++++ b/chrome/browser/webauthn/authenticator_request_dialog_controller.cc
+@@ -44,6 +44,7 @@
+ #include "chrome/browser/ui/chrome_pages.h"
+ #include "chrome/browser/ui/passwords/ui_utils.h"
+ #include "chrome/browser/ui/webauthn/ambient/ambient_signin_controller.h"
++#include "chrome/browser/ui/webauthn/authenticator_request_dialog_view_controller.h"
+ #include "chrome/browser/ui/webauthn/passkey_upgrade_request_controller.h"
+ #include "chrome/browser/ui/webauthn/user_actions.h"
+ #include "chrome/browser/webauthn/authenticator_reference.h"
+@@ -1045,6 +1046,7 @@ void AuthenticatorRequestDialogController::
+   ephemeral_state_.dispatched_platform_authenticator_type_ =
+       platform_authenticator_it->type;
+   if (platform_authenticator_it->type == AuthenticatorType::kICloudKeychain) {
++    icloud_keychain_sheet_shown_ = true;
+     webauthn::user_actions::RecordICloudShown(
+         transport_availability_.request_type);
+   } else if (platform_authenticator_it->type == AuthenticatorType::kTouchID) {
+@@ -1742,6 +1744,29 @@ void AuthenticatorRequestDialogController::SetCurrentStep(Step step) {
+   cable_connecting_sheet_timer_.Stop();
+   cable_connecting_ready_to_advance_ = false;
+ 
++  // EngineCore's tabs cannot host Chrome's dialog. Where it would let the user
++  // pick a passkey, a security key or a phone, macOS's passkey sheet offers the
++  // same choices, so the request goes there. Once the user has dismissed the
++  // sheet, a dialog step cancels the request (AuthenticatorRequestDialogModel::
++  // SetStep).
++  if ((step == Step::kMechanismSelection ||
++       step == Step::kSelectPriorityMechanism ||
++       step == Step::kUsbInsertAndActivate ||
++       step == Step::kBlePowerOnAutomatic ||
++       step == Step::kBlePowerOnManual || step == Step::kBlePermissionMac ||
++       step == Step::kCableV2QRCode) &&
++      ui_presentation() == UIPresentation::kModal &&
++      transport_availability_.has_icloud_keychain && allow_icloud_keychain_ &&
++      !icloud_keychain_sheet_shown_) {
++    content::RenderFrameHost* render_frame_host = MaybeGetRenderFrameHost();
++    if (render_frame_host &&
++        !AuthenticatorRequestDialogViewController::CanShow(
++            content::WebContents::FromRenderFrameHost(render_frame_host))) {
++      StartICloudKeychain();
++      return;
++    }
++  }
++
+   model_->SetStep(step);
+ }
+ 
+diff --git a/chrome/browser/webauthn/authenticator_request_dialog_controller.h b/chrome/browser/webauthn/authenticator_request_dialog_controller.h
+--- a/chrome/browser/webauthn/authenticator_request_dialog_controller.h
++++ b/chrome/browser/webauthn/authenticator_request_dialog_controller.h
+@@ -502,6 +502,9 @@ class AuthenticatorRequestDialogController
+   // profile authenticator.
+   bool should_create_in_icloud_keychain_ = false;
+ 
++  // True once this request has shown macOS's passkey sheet.
++  bool icloud_keychain_sheet_shown_ = false;
++
+   // enclave_enabled_status_ determines whether Google Password Manager entries
+   // should be offered both for `makeCredential` or `getAssertion`. If reauth
+   // needed, instead of offering the actual passkeys or creating a passkey,

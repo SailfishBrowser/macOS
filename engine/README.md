@@ -77,6 +77,8 @@ Upstream changes (`patches/`):
 18. Register "Save security codes" off by default.
 19. Hide user-installed fonts from pages with `--hide-user-installed-fonts`
     (see User-installed fonts).
+20. Hand a passkey request that has no dialog host to macOS's passkey sheet
+    when iCloud Keychain is available.
 
 ## Tabs
 
