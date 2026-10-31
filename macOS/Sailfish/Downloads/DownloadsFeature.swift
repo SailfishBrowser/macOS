@@ -160,12 +160,16 @@ extension DependencyValues {
 }
 
 private enum TidyDownloadKey: DependencyKey {
-  // Renames the finished file to its tidier name, if it has one, and returns where it went.
+  // Renames the finished file to its tidier name, if it has one, and returns where it went. On macOS 26 the
+  // on-device model may name it instead, once the rule has found the name messy.
   static let liveValue: @Sendable (URL, String?) async throws -> URL? = { file, site in
     let title =
       file.pathExtension.lowercased() == "pdf"
       ? PDFDocument(url: file)?.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String : nil
-    guard let name = DownloadName.tidy(file.lastPathComponent, site: site, title: title) else { return nil }
+    guard var name = DownloadName.tidy(file.lastPathComponent, site: site, title: title) else { return nil }
+    if #available(macOS 26, *), let stem = await DownloadNamer.name(for: file, tidied: name, site: site, title: title) {
+      name = file.pathExtension.isEmpty ? stem : "\(stem).\(file.pathExtension)"
+    }
     let folder = file.deletingLastPathComponent()
     let renamed = folder.appending(path: DownloadName.unique(name) {
       FileManager.default.fileExists(atPath: folder.appending(path: $0).path)
