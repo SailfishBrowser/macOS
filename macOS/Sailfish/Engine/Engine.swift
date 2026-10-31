@@ -311,6 +311,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
       contexts[profile] = context
       loads[profile] = nil
       applyAdBlocking(context)
+      applyHTTPSOnly(context)
       return context
     }
     loads[profile] = load
