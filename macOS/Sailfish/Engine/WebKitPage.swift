@@ -265,10 +265,12 @@ import WebKit
     ["http", "https", "about", "blob", "data", "file"].contains(url.scheme?.lowercased())
   }
 
+  // A main-frame navigation's page gets fingerprinting protection for its site.
   func webView(
-    _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
-    decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
+    _ webView: WKWebView, decidePolicyFor action: WKNavigationAction, preferences: WKWebpagePreferences,
+    decisionHandler handler: @escaping @MainActor (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
   ) {
+    let decisionHandler = { (policy: WKNavigationActionPolicy) in handler(policy, preferences) }
     if WebKitDownloads.isDownload(action) {
       return decisionHandler(.download)
     }
@@ -279,6 +281,7 @@ import WebKit
     guard let tab = engine.tab(of: self), let url = action.request.url else {
       return decisionHandler(.allowWithoutTryingAppLink)
     }
+    Fingerprinting.apply(to: preferences, of: webView, for: url)
     if !Self.rendersInPage(url) {
       decisionHandler(.cancel)
       return engine.webKitPage(self, asksToOpen: url, from: committedURL)

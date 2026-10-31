@@ -76,6 +76,7 @@ extension Engine {
     contents.delegate = self
     contents.addDocumentStartScript(ProtectedMedia.script)
     contents.addMessageObjectNamed(ProtectedMedia.objectName)
+    Fingerprinting.prepare(contents, page: id, context)
     livePages[id] = contents
     owners[ObjectIdentifier(contents)] = (tab, id)
     if let state = Self.sessions.load(id), contents.restoreSessionState(state) {
