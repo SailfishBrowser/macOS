@@ -30,7 +30,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   @ObservationIgnored var declinedSites: Set<String> = []
   // Each tab's last switch to WebKit for protected video, with the Chromium page it left, for the toast's Undo.
   @ObservationIgnored var offerSwitches: [UUID: (site: String, left: UUID)] = [:]
-  // Chrome's offers to save a card, by the toast's id, with the tab that made each.
+  // Chrome's offers to save a card, by the offer's id, with the tab that made each.
   @ObservationIgnored var cardOffers: [PendingCard.ID: (tab: UUID, answer: (ECCardOfferAnswer) -> Void)] = [:]
   // Each tab's open JavaScript dialog, shown over its page.
   var dialogs: [UUID: PageDialog] = [:]
