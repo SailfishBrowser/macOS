@@ -70,10 +70,11 @@ struct AppFeature {
     // Saved histories are kept for this many archived tabs, the newest.
     static let archivedSessions = 1000
 
-    // The pages whose saved history is kept: those of open tabs, of the newest archived ones (which keep the page
-    // under the tab's id) and of those undo can bring back.
+    // The pages whose saved history is kept: those of open tabs (the closed last window's included), of the newest
+    // archived ones (which keep the page under the tab's id) and of those undo can bring back.
     var sessionIDs: Set<UUID> {
       var tabs = windows.flatMap { $0.spaces.spaces.flatMap(\.tabs) }
+      tabs += closedWindow?.spaces.spaces.flatMap(\.tabs) ?? []
       tabs += profiles.flatMap(\.favorites)
       tabs += windows.compactMap { $0.peek?.tab }
       tabs += littleSailfishes.compactMap(\.tab)
