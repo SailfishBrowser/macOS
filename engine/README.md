@@ -171,6 +171,17 @@ denied or cancelled (permissions stay pending, Chrome's context menu shows).
   site that asked, and launches it once allowed (patches/0012). Chrome's
   "Open app?" dialog is web-modal and our tabs have no host for one, so it
   crashed. Without the delegate method the app is not opened.
+- Cards: a submitted form holding a new card makes Chrome offer to keep it
+  on this Mac, and the bridge hands the offer to the shell with the card's
+  network and last four digits (patches/0015), in place of Chrome's save
+  card bubble, which needs a tab interface our tabs lack. The shell answers
+  Save, Decline or Ignore, which Chrome receives as accepted, declined or
+  nothing at all. Offers Chrome would show only as an icon and offers from a
+  page that is not secure are dropped unanswered. The dropdown's "Save card
+  for faster checkout" entry, whose dialog crashed without a tab, is not
+  offered (patches/0016), "Manage Payment Methods..." opens the Payments
+  settings page as a new tab (patches/0017), and security codes are kept
+  only once the user turns on "Save security codes" (patches/0018).
 - Built-in extensions: `loadBuiltInExtensionAtPath:` registers an unpacked
   extension with the profile's `ComponentLoader` (`AddOrReplace`, the one
   entry that skips the component allowlist), so it loads for the session, in
