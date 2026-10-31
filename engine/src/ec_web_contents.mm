@@ -1149,9 +1149,12 @@ void AskToOpenExternalApp(const GURL& url,
         ->set_view_factory_for_testing(base::BindRepeating(
             &WebContentsDelegateBridge::CreatePermissionPrompt,
             base::Unretained(_bridge.get())));
-    // History records only tabs of Chrome's browser windows otherwise.
-    HistoryTabHelper::FromWebContents(_contents.get())
-        ->SetForceEligibleTabForTesting(true);
+    // History records only tabs of Chrome's browser windows otherwise. An
+    // incognito tab has no history helper (TabHelpers skips it).
+    if (!context.profile->IsOffTheRecord()) {
+      HistoryTabHelper::FromWebContents(_contents.get())
+          ->SetForceEligibleTabForTesting(true);
+    }
     [context.webContents addObject:self];
     _view = _contents->GetNativeView().GetNativeNSView();
     _contents->SetDelegate(_bridge.get());
