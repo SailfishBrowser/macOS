@@ -2,7 +2,7 @@ import AppKit
 import ComposableArchitecture
 import SwiftUI
 
-// The About window: the chosen app icon, the name, the app and Chromium versions, and an update check. It follows
+// The About window: the chosen app icon, the name, the app and Chromium versions, the copyright, and an update check. It follows
 // the system appearance and is reused while the app runs.
 @MainActor
 func makeAboutWindow(checkForUpdates: (() -> Void)?, showAcknowledgements: @escaping () -> Void) -> NSWindow {
@@ -38,6 +38,7 @@ private struct AboutView: View {
       VStack(spacing: 3) {
         Text("Version \(Self.info("CFBundleShortVersionString")) (\(Self.info("CFBundleVersion")))")
         Text("Chromium \(Self.info("CFBundleShortVersionString", of: Self.engine))")
+        Text(Self.info("NSHumanReadableCopyright"))
       }
       .font(.system(size: 12))
       .foregroundStyle(.secondary)

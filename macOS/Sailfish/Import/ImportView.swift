@@ -69,8 +69,7 @@ struct ImportView: View {
 
   private var message: String? {
     switch store.step {
-    case .options: "Bookmarks become pinned tabs and folders of a new Space. Cookies keep you signed in to your sites."
-    case .mediaFolders: "macOS asks to allow each folder."
+    case .options: "Bookmarks become pinned tabs and folders of a new Space."
     default: nil
     }
   }
@@ -89,7 +88,7 @@ struct ImportView: View {
     case .arc:
       store.scope(state: \.arc, action: \.arc).map { ArcImportView(store: $0) }
     case .options:
-      options
+      store.options.map { OptionsForm(options: $0, store: store) }
     case .importing:
       ProgressView().progressViewStyle(.linear).frame(width: 240)
     case .finished:
@@ -97,7 +96,7 @@ struct ImportView: View {
     case .defaultBrowser, .welcome:
       Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 128, height: 128)
     case .theme:
-      ThemePicker(theme: $theme, original: SpaceTheme(), isEditing: false)
+      ThemePicker(theme: $theme, original: SpaceTheme(), isEditing: false, isPopover: false)
         .onChange(of: theme) { store.send(.themeChanged(theme)) }
     case .adBlocker:
       Toggle("Block ads and trackers with uBlock Origin", isOn: Binding($blocksAds))
@@ -150,56 +149,6 @@ struct ImportView: View {
       ImportDialogButton(title: "Start Browsing", isPrimary: true) { store.send(.doneTapped) }
         .keyboardShortcut(.defaultAction)
     }
-  }
-
-  @ViewBuilder private var options: some View {
-    if let options = Binding($store.options) {
-      let current = options.wrappedValue
-      VStack(alignment: .leading, spacing: 12) {
-        if current.profiles.count > 1 {
-          Picker("Profile", selection: Binding(get: { current.profile }, set: { store.send(.profileChosen($0)) })) {
-            ForEach(current.profiles) { Text($0.name).tag($0) }
-          }
-        }
-        Toggle("Bookmarks\(current.bookmarks.map { " (\(ImportFeature.tabCount($0)))" } ?? "")", isOn: options.includesBookmarks)
-        if current.includesBookmarks {
-          TextField("Space name", text: options.spaceName).padding(.leading, 20)
-        }
-        Toggle("History", isOn: options.includesHistory)
-        if current.browser == .safari {
-          HStack {
-            Toggle("Passwords", isOn: options.includesPasswords).disabled(current.passwordsFile == nil)
-            Button("Choose File…") { choosePasswordsFile() }
-          }
-          Text(
-            current.passwordsFile?.lastPathComponent
-              ?? "Other apps can't read Safari's passwords. In the Passwords app choose File > Export All Passwords to File, choose that file here, then delete it once imported."
-          )
-            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        } else {
-          Toggle("Passwords", isOn: options.includesPasswords)
-        }
-        Toggle("Cookies", isOn: options.includesCookies)
-        if let service = current.browser.safeStorage, current.includesPasswords || current.includesCookies {
-          SafeStorageNote(service: service)
-        }
-        if let failure = current.failure {
-          FailureView(failure: failure)
-        } else if current.bookmarks == nil {
-          ProgressView().controlSize(.small)
-        }
-      }
-      .toggleStyle(.checkbox)
-    }
-  }
-
-  private func choosePasswordsFile() {
-    let panel = NSOpenPanel()
-    panel.allowedContentTypes = [.commaSeparatedText]
-    panel.message = "Choose the passwords file you exported from the Passwords app."
-    panel.prompt = "Choose"
-    guard panel.runModal() == .OK, let file = panel.url else { return }
-    store.send(.passwordsFileChosen(file))
   }
 
   @ViewBuilder private var finished: some View {
@@ -344,6 +293,65 @@ private struct BrowserChoice: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+  }
+}
+
+// The options step's choices, drawn from the options it is handed rather than from the store's optional, so the step
+// keeps its last state while it slides out after Back or Import clears them.
+private struct OptionsForm: View {
+  let options: ImportFeature.Options
+  let store: StoreOf<ImportFeature>
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      if options.profiles.count > 1 {
+        Picker("Profile", selection: Binding(get: { options.profile }, set: { store.send(.profileChosen($0)) })) {
+          ForEach(options.profiles) { Text($0.name).tag($0) }
+        }
+      }
+      Toggle("Bookmarks\(options.bookmarks.map { " (\(ImportFeature.tabCount($0)))" } ?? "")", isOn: binding(\.includesBookmarks))
+      if options.includesBookmarks {
+        TextField("Space name", text: binding(\.spaceName)).padding(.leading, 20)
+      }
+      Toggle("History", isOn: binding(\.includesHistory))
+      if options.browser == .safari {
+        HStack {
+          Toggle("Passwords", isOn: binding(\.includesPasswords)).disabled(options.passwordsFile == nil)
+          Button("Choose File…") { choosePasswordsFile() }
+        }
+        Text(
+          options.passwordsFile?.lastPathComponent
+            ?? "Other apps can't read Safari's passwords. In the Passwords app choose File > Export All Passwords to File, choose that file here, then delete it once imported."
+        )
+          .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      } else {
+        Toggle("Passwords", isOn: binding(\.includesPasswords))
+      }
+      Toggle("Cookies", isOn: binding(\.includesCookies))
+      if let service = options.browser.safeStorage, options.includesPasswords || options.includesCookies {
+        SafeStorageNote(service: service)
+      }
+      if let failure = options.failure {
+        FailureView(failure: failure)
+      } else if options.bookmarks == nil {
+        ProgressView().controlSize(.small)
+      }
+    }
+    .toggleStyle(.checkbox)
+  }
+
+  // Reads the options handed in; an edit goes to the store's options, which an outgoing step no longer has.
+  private func binding<Value>(_ field: WritableKeyPath<ImportFeature.Options, Value>) -> Binding<Value> {
+    Binding(get: { options[keyPath: field] }, set: { store.options?[keyPath: field] = $0 })
+  }
+
+  private func choosePasswordsFile() {
+    let panel = NSOpenPanel()
+    panel.allowedContentTypes = [.commaSeparatedText]
+    panel.message = "Choose the passwords file you exported from the Passwords app."
+    panel.prompt = "Choose"
+    guard panel.runModal() == .OK, let file = panel.url else { return }
+    store.send(.passwordsFileChosen(file))
   }
 }
 
