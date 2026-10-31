@@ -384,7 +384,7 @@ struct TabsFeature {
     // The folder every selected tab is in, else the pinned section: where a folder from a selection is made.
     var selectionContainer: Placement {
       let placements = Set(selectedTabs.map(\.placement))
-      if placements.count == 1, case let .folder(folder)? = placements.first { return .folder(folder) }
+      if placements.count == 1, case let .folder(folder)? = placements.first, takesRows(.folder(folder)) { return .folder(folder) }
       return .pinned
     }
 
@@ -433,6 +433,13 @@ struct TabsFeature {
     case newFolder(_ name: String = "Untitled", in: Placement, with: [Tab.ID] = [])
     // Undoes a folder's creation: the folder goes and its rows go back where they were.
     case undoNewFolder(Folder.ID, TabLayout)
+    // A live folder at the end of the pinned section, filled from the source at the URL.
+    case newLiveFolder(URL)
+    // Refreshes the live folders whose time has come, as the app's timer asks each minute.
+    case refreshLiveFolders
+    // Refresh in a live folder's menu.
+    case refreshLiveFolder(Folder.ID)
+    case liveFolderFetched(Folder.ID, Result<LiveFeed, any Error>)
     // Opens the folder and the folders and pinned section around it, as the command bar's folder row does.
     case openFolder(Folder.ID)
     // ⌘-click adds a tab to the multi-selection or takes it out; ⇧-click extends it from the shown tab.
@@ -550,6 +557,13 @@ struct TabsFeature {
   // A switch's strip has about 5 pt left to travel by then (Motion.layout), so the page's creation is not seen.
   static let switchDelay = Duration.milliseconds(180)
 
+  @Dependency(\.fetchLiveFeed) var fetchLiveFeed
+
+  // A live folder's refresh in flight; a newer one replaces it.
+  struct LiveRefresh: Hashable {
+    let folder: Folder.ID
+  }
+
   // The page creation a space switch put off, one per space.
   struct PendingActivation: Hashable {
     let space: TabsFeature.State.ID
@@ -643,7 +657,8 @@ struct TabsFeature {
         let rows = [PinnedRow.folder(folder)] + state.tree(.folder(id))
         let folders = rows.compactMap { if case let .folder(folder) = $0 { folder } else { nil } }
         let pinnedOrder = state.pinnedOrder
-        let (closed, effect) = remove(rows.compactMap { if case let .tab(tab) = $0 { tab.id } else { nil } }, &state)
+        let (closed, effect) = remove(
+          rows.compactMap { if case let .tab(tab) = $0 { tab.id } else { nil } }, archiving: folder.source == nil, &state)
         state.folders.removeAll { folder in folders.contains { $0.id == folder.id } }
         state.pinnedOrder.removeAll { id in rows.contains { $0.id == id } }
         guard rows.count > 1 else { return effect }
@@ -660,7 +675,10 @@ struct TabsFeature {
       case let .duplicate(id, target, before):
         guard let index = state.tabs.index(id: id) else { return .none }
         let tab = state.tabs[index]
-        let placement = target ?? (tab.placement == .favorite ? .unpinned : tab.placement)
+        // A live folder's item is copied to Today.
+        let natural = target ?? (tab.placement == .favorite ? .unpinned : tab.placement)
+        guard target.map({ state.takesRows($0) }) ?? true else { return .none }
+        let placement = state.takesRows(natural) ? natural : .unpinned
         var copy = Tab(
           id: uuid(), url: tab.url, title: tab.title, placement: placement,
           pinnedURL: placement == .unpinned ? nil : tab.pinnedURL ?? tab.url, createdAt: now, lastActiveAt: now
@@ -700,6 +718,7 @@ struct TabsFeature {
         return activate(&state)
 
       case let .move(id, placement, before):
+        guard state.takesRows(placement) else { return .none }
         let layout = TabLayout(state)
         move(id, placement, before: before, &state)
         return moved(from: layout, state)
@@ -724,7 +743,8 @@ struct TabsFeature {
         return moved(from: layout, state)
 
       case let .moveFolder(id, placement, before):
-        guard id != before, placement.isPinnedSection, state.folders[id: id] != nil else { return .none }
+        guard id != before, placement.isPinnedSection, state.takesRows(placement), state.folders[id: id] != nil
+        else { return .none }
         if case let .folder(parent) = placement, state.folder(parent, isWithin: id) { return .none }
         let layout = TabLayout(state)
         state.folders[id: id]?.placement = placement
@@ -732,6 +752,7 @@ struct TabsFeature {
         return moved(from: layout, state)
 
       case let .newFolder(name, container, tabs):
+        guard state.takesRows(container) else { return .none }
         let layout = TabLayout(state)
         let folder = Folder(id: uuid(), name: name, placement: container)
         state.folders.append(folder)
@@ -744,6 +765,44 @@ struct TabsFeature {
         }
         state.selection = []
         return .send(.delegate(.folderCreated(folder.id, layout)))
+
+      case let .newLiveFolder(url):
+        guard let source = LiveSources.source(for: url) else { return .none }
+        let layout = TabLayout(state)
+        let folder = Folder(id: uuid(), name: source.name, source: LiveFolderSource(url: url))
+        state.folders.append(folder)
+        state.place(folder.id, before: nil)
+        state.isPinnedCollapsed = false
+        return .merge(refresh(folder.id, &state), .send(.delegate(.folderCreated(folder.id, layout))))
+
+      case .refreshLiveFolders:
+        let due = state.folders.filter { $0.source.map { $0.refreshAfter <= now } ?? false }
+        return .merge(due.map { refresh($0.id, &state) })
+
+      case let .refreshLiveFolder(id):
+        return refresh(id, &state)
+
+      case let .liveFolderFetched(id, .success(feed)):
+        guard let folder = state.folders[id: id], var source = folder.source else { return .none }
+        let urls = Set(feed.links.map(\.url))
+        let dropped = state.tabs(in: .folder(id)).filter { !urls.contains($0.pinnedURL ?? $0.url) }.map(\.id)
+        let (_, effect) = remove(dropped, archiving: false, &state)
+        state.fill(id, with: feed.links, isUnread: source.refreshedAt != nil, now: now, uuid: { uuid() })
+        // A folder still called by its source's URL takes the source's own title.
+        if let title = feed.title, !title.isEmpty, folder.name == LiveSources.source(for: source.url)?.name {
+          state.folders[id: id]?.name = title
+        }
+        source.refreshedAt = now
+        source.failure = nil
+        state.folders[id: id]?.source = source
+        return effect
+
+      case let .liveFolderFetched(id, .failure(error)):
+        state.folders[id: id]?.source?.failure = error.localizedDescription
+        if case let .rateLimited(until)? = error as? LiveSourceError {
+          state.folders[id: id]?.source?.refreshAfter = until
+        }
+        return .none
 
       case let .undoNewFolder(id, layout):
         guard state.folders[id: id] != nil else { return .none }
@@ -1160,6 +1219,20 @@ struct TabsFeature {
     return Tab(id: id, url: url, title: url.host() ?? url.absoluteString, placement: .unpinned, createdAt: now, lastActiveAt: now)
   }
 
+  // Reads a live folder's source, and puts its next refresh one interval away.
+  private func refresh(_ id: Folder.ID, _ state: inout State) -> Effect<Action> {
+    guard let url = state.folders[id: id]?.source?.url else { return .none }
+    state.folders[id: id]?.source?.refreshAfter = now.addingTimeInterval(LiveSources.interval)
+    return .run { send in
+      do {
+        await send(.liveFolderFetched(id, .success(try await fetchLiveFeed(url))))
+      } catch {
+        await send(.liveFolderFetched(id, .failure(error)))
+      }
+    }
+    .cancellable(id: LiveRefresh(folder: id), cancelInFlight: true)
+  }
+
   // A split moves as one.
   private func move(_ id: Tab.ID, _ placement: Placement, before: UUID?, _ state: inout State) {
     let ids = state.split(of: id)?.tabIDs ?? [id]
@@ -1181,6 +1254,7 @@ struct TabsFeature {
     let target = state.split(of: other)?.tabIDs ?? [other]
     guard target.contains(id) || target.count < State.maxPanes else { return .none }
     unsplit(id, &state)
+    guard state.tabs[id: other].map({ state.takesRows($0.placement) }) ?? false else { return .none }
     guard var tab = state.tabs.remove(id: id), let anchor = state.tabs[id: other] else { return .none }
     var split = state.split(of: other) ?? Split(id: uuid(), tabIDs: [other], widths: [1])
     // Each pane gets an equal share.
@@ -1234,7 +1308,9 @@ struct TabsFeature {
   private func copyFolder(_ id: Folder.ID, into container: Placement?, _ state: inout State) -> Folder.ID {
     var copy = state.folders[id: id]!
     let original = copy.placement
-    copy = Folder(id: uuid(), name: copy.name, isOpen: copy.isOpen, placement: container ?? original, icon: copy.icon)
+    copy = Folder(
+      id: uuid(), name: copy.name, isOpen: copy.isOpen, placement: container ?? original, icon: copy.icon,
+      source: copy.source.map { LiveFolderSource(url: $0.url) })
     state.folders.append(copy)
     for row in state.rows(in: .folder(id)) {
       switch row {
@@ -1272,8 +1348,9 @@ struct TabsFeature {
     return select(shown.tab.id, &state)
   }
 
-  // What is removed is archived, except in incognito windows. The closed tabs carry their rows for undo.
-  private func remove(_ ids: [Tab.ID], _ state: inout State) -> ([ClosedTab], Effect<Action>) {
+  // What is removed is archived, except in incognito windows and a live folder's tabs. The closed tabs carry their
+  // rows for undo.
+  private func remove(_ ids: [Tab.ID], archiving: Bool = true, _ state: inout State) -> ([ClosedTab], Effect<Action>) {
     @Shared(.archive) var archive
     let removed = Set(ids)
     let shown = state.shownTabIDs
@@ -1293,7 +1370,7 @@ struct TabsFeature {
     }
     state.ownTabs.removeAll { removed.contains($0.id) }
     state.selection.subtract(removed)
-    if !state.isIncognito {
+    if archiving, !state.isIncognito {
       let archived = closed.reversed().map {
         ArchivedTab(id: $0.tab.id, url: $0.tab.url, title: $0.tab.displayTitle, profileID: state.profileID, archivedAt: now)
       }
@@ -1316,6 +1393,7 @@ struct TabsFeature {
     state.selectedTabID = id
     state.selection = []
     state.tabs[id: id]?.lastActiveAt = now
+    state.ownTabs[id: id]?.isUnread = false
     return activate(&state)
   }
 

@@ -93,6 +93,8 @@ final class PersistenceTests: XCTestCase {
     await store.receive(\.windows[id: UUID(0x300)].spaces.spaces[id: UUID(0x100)].activate) {
       $0.windows[id: UUID(0x300)]?.spaces.spaces[id: UUID(0x100)]?.tabs[id: UUID(0x50)]?.isLive = true
     }
+    await store.receive(\.refreshLiveFolders)
+    await store.receive(\.windows[id: UUID(0x300)].spaces.spaces[id: UUID(0x100)].refreshLiveFolders)
     XCTAssertNil(saved.value)
     await clock.advance(by: .seconds(1))
     let restored = try Snapshot.decode(XCTUnwrap(saved.value))

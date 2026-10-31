@@ -130,6 +130,8 @@ struct AppFeature {
 
   enum Action {
     case archiveIdleTabs
+    // Every space refreshes the live folders whose time has come.
+    case refreshLiveFolders
     // Adds a profile and moves the spaces to it; their tabs start fresh in it.
     case createProfile(name: String, spaces: Set<Space.ID>)
     case deleteProfile(Profile.ID)
@@ -324,6 +326,13 @@ struct AppFeature {
           }
         )
 
+      case .refreshLiveFolders:
+        return .merge(
+          state.windows.flatMap { window in
+            window.spaces.spaces.map { .send(.windows(.element(id: window.id, action: .tab(.refreshLiveFolders, in: $0.id)))) }
+          }
+        )
+
       case let .createProfile(name, spaces):
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return .none }
@@ -424,7 +433,8 @@ struct AppFeature {
         } catch {
           Logger().error("State not restored, saving disabled: \(error)")
         }
-        return start(&state, playsIntro: isFirstLaunch)
+        // Live folders refresh at launch, not a minute later.
+        return .merge(start(&state, playsIntro: isFirstLaunch), .send(.refreshLiveFolders))
 
       case let .recovered(snapshot):
         apply(snapshot, &state)

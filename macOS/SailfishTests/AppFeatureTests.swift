@@ -263,6 +263,9 @@ final class AppFeatureTests: XCTestCase {
       $0.$mediaFoldersAsked.withLock { $0 = true }
     }
     await store.receive(\.windows[id: UUID(3)].spaces.spaces[id: UUID(1)].activate)
+    await store.receive(\.refreshLiveFolders)
+    await store.receive(\.windows[id: UUID(3)].spaces.spaces[id: UUID(1)].refreshLiveFolders)
+    await store.receive(\.windows[id: UUID(3)].spaces.spaces[id: UUID(2)].refreshLiveFolders)
     await store.send(.dismissRecoveredSpaces) {
       $0.recoveredSpaces = []
     }
