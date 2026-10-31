@@ -66,7 +66,8 @@ panels, tab dialogs).
 
 `HistoryTabHelper` records only web contents in Chrome's browser windows, so
 the bridge marks each `ECWebContents` as a tab (`SetForceEligibleTabForTesting`,
-its only seam) and their visits reach History.
+its only seam) and their visits reach History. An incognito web contents
+gets no `HistoryTabHelper`, so it records nothing.
 
 The helpers' UI looks up a browser window and shows nothing without one.
 The bridge hands the page UI below to the shell instead; the password save
