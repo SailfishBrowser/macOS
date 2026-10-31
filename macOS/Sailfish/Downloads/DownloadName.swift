@@ -18,10 +18,7 @@ enum DownloadName {
     }
     strip(#/\s*(\((\d+|copy)\)|[ _-]copy)\s*$/#.ignoresCase(), with: "")
     strip(#/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/#.ignoresCase())
-    // A date, as 2023-08-17, 20230817 or 2023.08.17, with any time after it, which is dropped.
-    text = text.replacing(
-      #/(^|\D)(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})(?!\d)(?:(?:T|[ _-](?:at[ _])?)\d{2}[-_.:]?\d{2}(?:[-_.:]?\d{2})?(?:\.\d+)?(?:Z|[ _]?[AP]M)?)?/#
-    ) { match in
+    text = text.replacing(datePattern) { match in
       guard let date = date(match.2, match.3, match.4) else { return String(match.0) }
       isMessy = true
       return "\(match.1) \(date) "
@@ -57,6 +54,17 @@ enum DownloadName {
     let ext = (name as NSString).pathExtension
     let stem = ext.isEmpty ? name : (name as NSString).deletingPathExtension
     return (2...).lazy.map { ext.isEmpty ? "\(stem) \($0)" : "\(stem) \($0).\(ext)" }.first { !isTaken($0) }!
+  }
+
+  // The date the rule reads in `name`, as "Aug 17 2023", or nil when it has none.
+  static func date(in name: String) -> String? {
+    let text = name.removingPercentEncoding ?? name
+    return text.matches(of: datePattern).lazy.compactMap { date($0.2, $0.3, $0.4) }.first
+  }
+
+  // A date, as 2023-08-17, 20230817 or 2023.08.17, with any time after it, which is dropped.
+  private static var datePattern: Regex<(Substring, Substring, Substring, Substring, Substring)> {
+    #/(^|\D)(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})(?!\d)(?:(?:T|[ _-](?:at[ _])?)\d{2}[-_.:]?\d{2}(?:[-_.:]?\d{2})?(?:\.\d+)?(?:Z|[ _]?[AP]M)?)?/#
   }
 
   private static func date(_ year: Substring, _ month: Substring, _ day: Substring) -> String? {

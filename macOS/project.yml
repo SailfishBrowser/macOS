@@ -34,6 +34,9 @@ targets:
       - package: Sparkle
       - framework: Frameworks/EngineCore.framework
         embed: true
+      # Apple's on-device model, which macOS 15 lacks: Tidy Downloads asks it for names on macOS 26.
+      - sdk: FoundationModels.framework
+        weak: true
       - target: DockTile
         copy:
           destination: plugins
