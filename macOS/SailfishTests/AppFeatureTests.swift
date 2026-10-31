@@ -65,6 +65,74 @@ final class AppFeatureTests: XCTestCase {
     ])
   }
 
+  private func windowStore(_ windows: IdentifiedArrayOf<WindowFeature.State>) -> TestStoreOf<AppFeature> {
+    let store = TestStore(initialState: AppFeature.State(windows: windows, isLoaded: true, pendingURLs: nil)) {
+      AppFeature()
+    } withDependencies: {
+      $0.uuid = .incrementing
+      $0.date = .constant(now)
+      $0.continuousClock = ImmediateClock()
+      $0.persistence.save = { _ in }
+      $0.webEngine.saveSessions = {}
+      $0.webEngine.keepSessions = { _ in }
+      $0.webEngine.create = { _, _, _, _, _, _ in }
+      $0.webEngine.load = { _, _ in }
+    }
+    store.exhaustivity = .off
+    return store
+  }
+
+  private func workWindow() -> WindowFeature.State {
+    var space = Space(id: UUID(100), name: "Work", profileID: UUID(200), createdAt: now)
+    space.tabs = [Tab(id: UUID(400), url: url, title: "a.example", placement: .unpinned, createdAt: now, lastActiveAt: now, isLive: true)]
+    space.selectedTabID = UUID(400)
+    return WindowFeature.State(id: UUID(300), sidebar: .init(), spaces: .init(spaces: [space], selectedID: space.id))
+  }
+
+  func testClosingTheLastWindowKeepsItsSpacesForTheNextOne() async {
+    let store = windowStore([workWindow()])
+
+    await store.send(.windowClosed(UUID(300)))
+    XCTAssertTrue(store.state.windows.isEmpty)
+    // Saved while no window is open, so quitting now keeps them too.
+    XCTAssertEqual(store.state.snapshot?.windows.flatMap(\.spaces.spaces).map(\.name), ["Work"])
+
+    await store.send(.reopen)
+    XCTAssertEqual(store.state.windows.map(\.id), [UUID(300)])
+    XCTAssertEqual(store.state.windows.first?.spaces.selected.selectedTabID, UUID(400))
+    XCTAssertNil(store.state.closedWindow)
+    XCTAssertEqual(store.state.snapshot?.windows.count, 1)
+  }
+
+  func testANewWindowBringsTheClosedSpacesBack() async {
+    let store = windowStore([workWindow()])
+
+    await store.send(.windowClosed(UUID(300)))
+    await store.send(.newWindow)
+    XCTAssertEqual(store.state.windows.flatMap(\.spaces.spaces).map(\.name), ["Work"])
+  }
+
+  func testAClosedWindowsProfileStaysInUse() async {
+    var state = AppFeature.State(windows: [workWindow()], isLoaded: true, pendingURLs: nil)
+    state.$profiles.withLock { $0 = [Profile(id: UUID(199), name: "Default"), Profile(id: UUID(200), name: "Work")] }
+    let store = windowStore(state.windows)
+    await store.send(.windowClosed(UUID(300)))
+    state.closedWindow = store.state.closedWindow
+    state.windows = []
+    XCTAssertFalse(state.canDeleteProfile(UUID(200)))
+  }
+
+  func testClosingAWindowWithOthersOpenKeepsNothingBack() async {
+    let other = WindowFeature.State(
+      id: UUID(301), sidebar: .init(),
+      spaces: .init(spaces: [Space(id: UUID(101), name: "Other", profileID: UUID(200), createdAt: now)], selectedID: UUID(101)))
+    let store = windowStore([workWindow(), other])
+
+    await store.send(.windowClosed(UUID(300)))
+    XCTAssertNil(store.state.closedWindow)
+    XCTAssertEqual(store.state.windows.map(\.id), [UUID(301)])
+  }
+
   func testANewWindowsSpaceIsPrimary() async {
     let store = TestStore(initialState: AppFeature.State(isLoaded: true, pendingURLs: nil)) {
       AppFeature()

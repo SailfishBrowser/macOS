@@ -26,6 +26,8 @@ struct AppFeature {
     var recoveredSpaces: [String] = []
     // The window last made key; its space is the globally last focused one, which a relaunch brings to the front.
     var focusedWindowID: WindowFeature.State.ID?
+    // The last regular window once it closed: saved with the others, and back with the next window.
+    var closedWindow: Snapshot.Window?
 
     // Toasts that belong to no window show in the last focused one.
     var toastWindowID: WindowFeature.State.ID? {
@@ -36,10 +38,11 @@ struct AppFeature {
       (focusedWindowID.flatMap { windows[id: $0] } ?? windows.last { !$0.isIncognito })?.spaces.selected
     }
 
-    // Default (the first profile) and those any window uses, incognito and Little Sailfish included, are kept.
+    // Default (the first profile) and those any window uses, incognito, closed and Little Sailfish included, are kept.
     func canDeleteProfile(_ id: Profile.ID) -> Bool {
       profiles.first?.id != id && profiles[id: id] != nil
         && !windows.contains { $0.spaces.spaces.contains { $0.profileID == id } }
+        && closedWindow?.spaces.spaces.contains { $0.profileID == id } != true
         && !littleSailfishes.contains { $0.profileID == id }
     }
 
@@ -118,7 +121,7 @@ struct AppFeature {
         archive: archive,
         windows: windows.filter { !$0.isIncognito }.map {
           Snapshot.Window(id: $0.id, frame: $0.frame, sidebar: $0.sidebar, spaces: $0.spaces)
-        },
+        } + (closedWindow.map { [$0] } ?? []),
         focusedWindow: focusedWindowID.flatMap { windows[id: $0] }.flatMap { $0.isIncognito ? nil : $0.id }
       )
     }
@@ -497,8 +500,7 @@ struct AppFeature {
         )
 
       case .newWindow:
-        state.windows.append(makeWindow(state))
-        return .none
+        return openWindow(&state)
 
       case let .openPage(url, profile):
         guard let window = state.window(using: profile) else {
@@ -527,10 +529,7 @@ struct AppFeature {
         return .none
 
       case .reopen:
-        if state.pendingURLs == nil, state.windows.isEmpty {
-          state.windows.append(makeWindow(state))
-        }
-        return .none
+        return state.pendingURLs == nil && state.windows.isEmpty ? openWindow(&state) : .none
 
       case let .setArchiveAfter(id, interval):
         state.$profiles.withLock { $0[id: id]?.archiveAfter = interval }
@@ -548,6 +547,11 @@ struct AppFeature {
         guard let window = state.windows.remove(id: id) else { return .none }
         // Incognito tabs never offer to save a login, so only a regular window can close on one.
         guard window.isIncognito else {
+          // The last regular window holds the only copy of its spaces, so they stay for the next window.
+          if !state.windows.contains(where: { !$0.isIncognito }) {
+            state.closedWindow = Snapshot.Window(
+              id: window.id, frame: window.frame, sidebar: window.sidebar, spaces: window.spaces)
+          }
           guard case let .saveLogin(login) = window.toast?.action else { return .none }
           return .run { _ in await engine.dropLogin(login) }
         }
@@ -680,6 +684,7 @@ struct AppFeature {
       windows.append(windows.remove(at: focused))
     }
     applyWindows(windows, &state)
+    state.closedWindow = nil
     state.focusedWindowID = snapshot?.focusedWindow
   }
 
@@ -733,6 +738,17 @@ struct AppFeature {
     )
   }
 
+  // The closed last window with its spaces when there is one, else a new window.
+  private func openWindow(_ state: inout State) -> Effect<Action> {
+    guard let closed = state.closedWindow else {
+      state.windows.append(makeWindow(state))
+      return .none
+    }
+    state.closedWindow = nil
+    state.windows.append(WindowFeature.State(id: closed.id, frame: closed.frame, sidebar: closed.sidebar, spaces: closed.spaces))
+    return .send(.windows(.element(id: closed.id, action: .tab(.activate, in: closed.spaces.selectedID))))
+  }
+
   // A new window's space uses the last focused space's profile, as a new window opens on that space.
   private func makeWindow(_ state: State) -> WindowFeature.State {
     if state.profiles.isEmpty {
@@ -764,11 +780,10 @@ struct AppFeature {
             .send(.windows(.element(id: window.id, action: .tab(.open(url), in: space))))
           )
         case .mostRecentSpace:
-          if !state.windows.contains(where: { !$0.isIncognito }) {
-            state.windows.append(makeWindow(state))
-          }
+          let opened = state.windows.contains { !$0.isIncognito } ? Effect<Action>.none : openWindow(&state)
           let window = state.windows.last { !$0.isIncognito }!
-          return .send(.windows(.element(id: window.id, action: .tab(.open(url), in: window.spaces.selectedID))))
+          return .concatenate(
+            opened, .send(.windows(.element(id: window.id, action: .tab(.open(url), in: window.spaces.selectedID)))))
         case .littleSailfish:
           let id = uuid()
           state.littleSailfishes.append(LittleSailfishFeature.State(id: id, profileID: littleSailfishProfile(state)))
