@@ -1,6 +1,7 @@
 import Foundation
 
-// The spaces of the regular windows, with their pinned pages and open tabs, as the phone shows them.
+// The spaces of the regular windows, the closed last one included, with their pinned pages and open tabs, as the
+// phone shows them.
 struct MacTabs: Equatable, Sendable {
   struct Page: Equatable, Sendable {
     let url: URL
@@ -22,8 +23,10 @@ extension AppFeature.State {
   var macTabs: MacTabs? {
     guard isLoaded else { return nil }
     let regular = windows.filter { !$0.isIncognito }
+    // The closed last window's spaces are kept for the next window, so they stay on the phone.
+    let spaces = regular.flatMap(\.spaces.spaces) + (closedWindow?.spaces.spaces.elements ?? [])
     return MacTabs(
-      spaces: regular.flatMap(\.spaces.spaces).map { space in
+      spaces: spaces.map { space in
         MacTabs.Entry(
           id: space.id,
           profileID: space.profileID,
@@ -38,6 +41,7 @@ extension AppFeature.State {
         )
       },
       current: (focusedWindowID.flatMap { regular[id: $0] } ?? regular.last)?.spaces.selectedID
+        ?? closedWindow?.spaces.selectedID
     )
   }
 }
