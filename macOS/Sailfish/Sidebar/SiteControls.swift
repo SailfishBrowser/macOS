@@ -11,6 +11,8 @@ struct SiteControls: View {
   let open: (URL) -> Void
   @State private var revision = 0
   @Shared(.siteEngines) private var siteEngines
+  @Shared(.fingerprintingProtection) private var fingerprintingProtection
+  @Shared(.fingerprintingExceptions) private var fingerprintingExceptions
 
   var body: some View {
     let _ = revision
@@ -46,6 +48,15 @@ struct SiteControls: View {
       header("Settings")
       if url.scheme == "http" || url.scheme == "https" {
         opensIn
+        if fingerprintingProtection {
+          let isProtected = !fingerprintingExceptions.contains(Engine.shared.siteOf(url))
+          Button {
+            Engine.shared.setFingerprintingProtection(!isProtected, forSiteOf: url, in: tab)
+          } label: {
+            setting("touchid", "Fingerprinting Protection", isProtected ? "On" : "Off", isOn: isProtected)
+          }
+          .buttonStyle(.plain)
+        }
       }
       // Developer mode follows the page's URL, so its row reports and does not toggle.
       setting("hammer.fill", "Developer Mode", url.isDeveloperPage ? "On" : "Off", isOn: url.isDeveloperPage)

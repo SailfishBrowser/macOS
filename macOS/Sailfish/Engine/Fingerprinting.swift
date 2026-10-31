@@ -290,4 +290,18 @@ extension Engine {
       }
     }
   }
+
+  // Site Controls: the site of the tab's page loses or regains protection, and the page loads again with it.
+  func setFingerprintingProtection(_ isOn: Bool, forSiteOf url: URL, in tab: UUID) {
+    @Shared(.fingerprintingExceptions) var exceptions
+    let site = siteOf(url)
+    $exceptions.withLock { exceptions in
+      exceptions.removeAll { $0 == site }
+      if !isOn {
+        exceptions.append(site)
+      }
+    }
+    fingerprintingDidChange()
+    page(tab)?.reload()
+  }
 }
