@@ -24,9 +24,11 @@ if isTesting {
   // launch on.
   @Shared(.fingerprintingProtection) var fingerprintingProtection
   // Chrome's Google Wallet passes, which Sailfish has no use for, ask macOS whether device sign-in is available as
-  // each page is made: a synchronous call that held the main thread for up to 120 ms per page.
+  // each page is made: a synchronous call that held the main thread for up to 120 ms per page. HTTPS-First Mode's
+  // dialog belongs to Chrome's tab features, which Sailfish's pages do not have, so the page shows Chrome's full-page
+  // warning instead of a blank page.
   ECEngine.start(
     withArguments: CommandLine.arguments + [
-      "--user-data-dir=" + Engine.userDataDir, "--disable-features=AutofillAiWalletPrivatePasses",
+      "--user-data-dir=" + Engine.userDataDir, "--disable-features=AutofillAiWalletPrivatePasses,HttpsFirstDialogUi",
     ] + (fingerprintingProtection ? ["--hide-user-installed-fonts"] : []))
 }
