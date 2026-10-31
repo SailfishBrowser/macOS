@@ -47,16 +47,21 @@ struct AutoArchiveBannerView: View {
       Image(systemName: "archivebox.fill").font(.system(size: 18)).foregroundStyle(Theme.primaryText).padding(.bottom, 2)
       Text("Auto Archive after \(Self.threshold(after))").font(.system(size: 13, weight: .semibold))
         .foregroundStyle(Theme.primaryText)
-      // The Profiles pane, where "Archive tabs after" is set.
-      Button("Settings") {
+      // The Profiles pane, where "Archive tabs after" is set, as the update pill's Restart button.
+      Button {
         let item = NSMenuItem()
         item.tag = SettingsPane.profiles.rawValue
         NSApp.sendAction(#selector(Shell.showSettings(_:)), to: nil, from: item)
+      } label: {
+        Text("Settings")
+          .font(.system(size: 12, weight: .semibold))
+          .foregroundStyle(.white)
+          .padding(.horizontal, 10)
+          .frame(height: 24)
+          .background(Theme.accent, in: RoundedRectangle(cornerRadius: 7))
       }
-        .buttonStyle(.plain)
-        .font(.system(size: 12, weight: .semibold))
-        .foregroundStyle(Theme.primaryText)
-        .padding(.top, 4)
+      .buttonStyle(.plain)
+      .padding(.top, 6)
     }
     .padding(.horizontal, 8)
     .padding(.bottom, 4)
