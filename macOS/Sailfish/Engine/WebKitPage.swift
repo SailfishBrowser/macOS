@@ -25,6 +25,8 @@ import WebKit
   // Whether a main-frame navigation has started and not committed or failed: an action arriving then is its redirect.
   private var isProvisional = false
   var isAskingToOpenApp = false
+  // The https URLs this navigation's http loads were upgraded to, from its first http load until it commits.
+  private var upgrades: Set<URL> = []
   // Set when a terminated content process reloads the page, until a load finishes.
   private var reloadedAfterTermination = false
   let finder = WebKitFind()
@@ -316,9 +318,31 @@ import WebKit
         return
       }
     }
+    if engine.upgradesToHTTPS(url, profile: profile, incognito: incognito) {
+      decisionHandler(.cancel)
+      return upgrade(action.request)
+    }
     Fingerprinting.apply(to: preferences, of: webView, for: url)
     navigationType = action.navigationType
     decisionHandler(.allowWithoutTryingAppLink)
+  }
+
+  // Loads an http request over https on the same port, as Chrome's HTTPS-First Mode does; a redirect back to http from
+  // a URL this navigation was upgraded to asks instead.
+  private func upgrade(_ request: URLRequest) {
+    var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+    components.scheme = "https"
+    if components.port == 80 { components.port = nil }
+    let url = components.url!
+    if !isProvisional { upgrades = [] }
+    guard !upgrades.contains(url) else {
+      upgrades = []
+      return Engine.shared.webKitPage(self, cannotUpgrade: request.url!)
+    }
+    upgrades.insert(url)
+    var upgraded = request
+    upgraded.url = url
+    webView.load(upgraded)
   }
 
   func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -327,6 +351,7 @@ import WebKit
 
   func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
     isProvisional = false
+    upgrades = []
     Engine.shared.webKitPageDidCommit(self)
     mediaDidCommit()
     Engine.shared.pageDidCommit(
@@ -337,9 +362,22 @@ import WebKit
     reloadedAfterTermination = false
   }
 
+  // An upgraded load that fails, other than by a cancel or by a policy (a redirect this page cancelled to upgrade it, or
+  // a download), asks before loading the page over http.
   func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
     isProvisional = false
     webView.alphaValue = 1
+    let error = error as NSError
+    let interrupted =
+      (error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled)
+      || (error.domain == "WebKitErrorDomain" && error.code == 102)
+    guard !interrupted, let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL, upgrades.contains(url) else {
+      return
+    }
+    upgrades = []
+    var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+    components.scheme = "http"
+    Engine.shared.webKitPage(self, cannotUpgrade: components.url!)
   }
 
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

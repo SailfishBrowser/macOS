@@ -50,6 +50,8 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   // Tabs of incognito contexts and of Little Sailfish windows, whose link menus leave out what they cannot open.
   @ObservationIgnored var incognitoTabs: Set<UUID> = []
   @ObservationIgnored var littleSailfishTabs: Set<UUID> = []
+  // The hosts each profile's incognito WebKit pages continued to over http, until its incognito windows close.
+  @ObservationIgnored var incognitoHTTPHosts: [UUID: Set<String>] = [:]
   // Sheets shown for each tab's page, dismissed when the tab closes.
   @ObservationIgnored var sheets: [UUID: [NSWindow]] = [:]
   // Sheets and requests waiting for their page to be shown, by page id, run again when it is (or closes).
@@ -273,6 +275,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     closeTabs(of: context)
     context.close()
     WebKitStores.dropIncognitoStore(profile: profile)
+    incognitoHTTPHosts[profile] = nil
   }
 
   // Closes the profile's context and pages, after a load in flight has given the context, then has the engine delete
@@ -289,6 +292,7 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
     try? FileManager.default.removeItem(at: URL.dataDirectory.appending(path: "WebKit/\(profile.uuidString)"))
     await WebKitStores.retireStore(profile: profile)
     await WebKitStoreRemovals.remove(profile)
+    forgetHTTPHosts(profile)
   }
 
   private func closeTabs(of context: ECBrowserContext) {
