@@ -207,6 +207,8 @@ struct WindowFeature {
     // Shows a toast, replacing any showing; it goes after Toast.duration unless another replaces it first.
     case showToast(String, Toast.Action? = nil, tap: Toast.Action? = nil, placement: Toast.Placement = .bottom)
     case dismissToast(Toast.ID)
+    // The toast's close button: it declines a card offer, and otherwise dismisses the toast.
+    case closeToast(Toast.ID)
     case confirmQuit(Bool)
     case toastAction(Toast.Action)
     // View > Zoom In / Zoom Out / Zoom to Actual Size on the selected tab's page, then the percent indicator.
@@ -526,7 +528,7 @@ struct WindowFeature {
           undoDepth: action == .undo ? state.undoStack.count : nil)
         state.toast = toast
         return .merge(
-          dropLogin(of: replaced),
+          Self.dropOffer(of: replaced, engine),
           .run { send in
             try await clock.sleep(for: Toast.duration)
             await send(.dismissToast(toast.id), animation: Motion.layout)
@@ -536,7 +538,14 @@ struct WindowFeature {
       case let .dismissToast(id):
         guard let toast = state.toast, toast.id == id else { return .none }
         state.toast = nil
-        return .merge(dropLogin(of: toast), .cancel(id: ToastDismissal(window: state.id)))
+        return .merge(Self.dropOffer(of: toast, engine), .cancel(id: ToastDismissal(window: state.id)))
+
+      case let .closeToast(id):
+        guard let toast = state.toast, toast.id == id else { return .none }
+        guard case let .saveCard(card) = toast.action else { return .send(.dismissToast(id)) }
+        state.toast = nil
+        return .merge(
+          .run { _ in await engine.answerCard(card, .decline) }, .cancel(id: ToastDismissal(window: state.id)))
 
       case let .zoom(step):
         // With a Peek open the keys zoom its page, not the tab under it.
@@ -594,9 +603,9 @@ struct WindowFeature {
             .cancel(id: ToastDismissal(window: state.id)),
             space == state.spaces.selectedID ? .none : .send(.spaces(.select(space))),
             .send(.tab(.select(tab), in: space)))
-        case .editShortcut, .revertDownloadName, .saveLogin, .undoEngineSwitch:
-          // The window opens the Shortcuts pane; the app renames the download back, saves the login or switches
-          // the tab back.
+        case .editShortcut, .revertDownloadName, .saveLogin, .saveCard, .undoEngineSwitch:
+          // The window opens the Shortcuts pane; the app renames the download back, saves the login or the card,
+          // or switches the tab back.
           return .cancel(id: ToastDismissal(window: state.id))
         }
 
@@ -842,10 +851,13 @@ struct WindowFeature {
     return .concatenate(switchSpace, .send(.tab(select, in: space)))
   }
 
-  // A save-password toast going unanswered forgets its login.
-  private func dropLogin(of toast: Toast?) -> Effect<Action> {
-    guard case let .saveLogin(login) = toast?.action else { return .none }
-    return .run { _ in await engine.dropLogin(login) }
+  // A save toast going unanswered forgets its login, or leaves its card offer unanswered.
+  static func dropOffer<A>(of toast: Toast?, _ engine: WebEngineClient) -> Effect<A> {
+    switch toast?.action {
+    case let .saveLogin(login): .run { _ in await engine.dropLogin(login) }
+    case let .saveCard(card): .run { _ in await engine.answerCard(card, .ignore) }
+    default: .none
+    }
   }
 
   static func archivedMessage(_ count: Int) -> String {

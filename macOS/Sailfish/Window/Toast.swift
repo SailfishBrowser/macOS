@@ -13,6 +13,8 @@ struct Toast: Equatable, Identifiable {
     case revertDownloadName(Download.ID)
     // "Save password for {site}?": saves the login typed into a WebKit page.
     case saveLogin(PendingLogin.ID)
+    // "Save Visa ending in 1111?": saves the card Chrome offered.
+    case saveCard(PendingCard.ID)
     // "{site} opened in WebKit": the tab shows its Chromium page again.
     case undoEngineSwitch(Tab.ID)
   }
@@ -157,7 +159,7 @@ struct ToastView: View {
   private func isUndo(_ action: Toast.Action) -> Bool {
     switch action {
     case .undo, .undoEngineSwitch: true
-    case .goToTab, .editShortcut, .revertDownloadName, .saveLogin: false
+    case .goToTab, .editShortcut, .revertDownloadName, .saveLogin, .saveCard: false
     }
   }
 
@@ -167,7 +169,7 @@ struct ToastView: View {
     case .goToTab: "Go there"
     case .editShortcut: "Edit the shortcut ↗"
     case .revertDownloadName: "Undo"
-    case .saveLogin: "Save"
+    case .saveLogin, .saveCard: "Save"
     case .undoEngineSwitch: "Undo"
     }
   }

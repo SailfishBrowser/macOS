@@ -216,6 +216,23 @@ struct AppFeature {
       case let .windows(.element(_, .toastAction(.saveLogin(id)))):
         return .run { _ in await engine.saveLogin(id) }
 
+      // A card Chrome offers to save: the window showing its tab, or the last focused one, offers to save it.
+      case let .engine(.cardOffered(tab, card)):
+        guard let window = state.window(showing: tab)?.id ?? state.toastWindowID else {
+          return .run { _ in await engine.answerCard(card.id, .ignore) }
+        }
+        let name = "\(card.network) ending in \(card.lastFourDigits)"
+        let message = card.isSecurityCodeOnly ? "Save security code for \(name)?" : "Save \(name)?"
+        return .send(.windows(.element(id: window, action: .showToast(message, .saveCard(card.id)))))
+
+      case let .windows(.element(_, .toastAction(.saveCard(id)))):
+        return .run { _ in await engine.answerCard(id, .save) }
+
+      case let .engine(.cardWithdrawn(id)):
+        guard let window = state.windows.first(where: { $0.toast?.action == .saveCard(id) }), let toast = window.toast
+        else { return .none }
+        return .send(.windows(.element(id: window.id, action: .dismissToast(toast.id))))
+
       // A tab switched to WebKit for protected video: the window showing it, or the last focused one, offers Undo.
       case let .engine(.openedInWebKit(tab, site)):
         guard let window = state.window(showing: tab)?.id ?? state.toastWindowID else { return .none }
@@ -550,27 +567,29 @@ struct AppFeature {
 
       case let .windowClosed(id):
         guard let window = state.windows.remove(id: id) else { return .none }
-        // Incognito tabs never offer to save a login, so only a regular window can close on one.
+        // A save toast shows in the last focused window when no window shows its tab, so either kind can close on one.
+        let dropOffer: Effect<Action> = WindowFeature.dropOffer(of: window.toast, engine)
         guard window.isIncognito else {
           // The last regular window holds the only copy of its spaces, so they stay for the next window.
           if !state.windows.contains(where: { !$0.isIncognito }) {
             state.closedWindow = Snapshot.Window(
               id: window.id, frame: window.frame, sidebar: window.sidebar, spaces: window.spaces)
           }
-          guard case let .saveLogin(login) = window.toast?.action else { return .none }
-          return .run { _ in await engine.dropLogin(login) }
+          return dropOffer
         }
         let profile = window.spaces.selected.profileID
         let tabs = window.spaces.spaces.flatMap(\.tabs).filter(\.isLive).map(\.id)
         let isLast = !state.windows.contains { $0.isIncognito && $0.spaces.selected.profileID == profile }
-        return .run { _ in
-          for tab in tabs {
-            await engine.close(tab)
-          }
-          if isLast {
-            await engine.closeIncognito(profile)
-          }
-        }
+        return .merge(
+          dropOffer,
+          .run { _ in
+            for tab in tabs {
+              await engine.close(tab)
+            }
+            if isLast {
+              await engine.closeIncognito(profile)
+            }
+          })
 
       case let .windows(.element(_, .createProfile(name, spaces))):
         return .send(.createProfile(name: name, spaces: spaces))

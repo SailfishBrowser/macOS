@@ -30,6 +30,8 @@ final class Engine: NSObject, @preconcurrency ECWebContentsDelegate {
   @ObservationIgnored var declinedSites: Set<String> = []
   // Each tab's last switch to WebKit for protected video, with the Chromium page it left, for the toast's Undo.
   @ObservationIgnored var offerSwitches: [UUID: (site: String, left: UUID)] = [:]
+  // Chrome's offers to save a card, by the toast's id, with the tab that made each.
+  @ObservationIgnored var cardOffers: [PendingCard.ID: (tab: UUID, answer: (ECCardOfferAnswer) -> Void)] = [:]
   // Each tab's open JavaScript dialog, shown over its page.
   var dialogs: [UUID: PageDialog] = [:]
   // Each tab's selected text, for the URL pill's Share Quote.
@@ -422,6 +424,7 @@ extension WebEngineClient: DependencyKey {
     cancelDownload: { await Engine.shared.cancelDownload($0) },
     saveLogin: { await PasswordFill.save($0) },
     dropLogin: { await PasswordFill.drop($0) },
+    answerCard: { id, answer in await Engine.shared.answerCard(id, answer) },
     undoEngineSwitch: { await Engine.shared.undoEngineSwitch($0) },
     zoom: { tab, step in await Engine.shared.zoom(tab, step) },
     saveSessions: { await Engine.shared.saveSessions() },

@@ -374,6 +374,7 @@ extension Engine {
     }
     permissionRequests.removeValue(forKey: tab)?.answer(false)
     dialogs.removeValue(forKey: tab)?.answer(false, "")
+    withdrawCards(of: tab)
     engineOffers[tab] = nil
     offerSwitches[tab] = nil
     selections[tab] = nil
