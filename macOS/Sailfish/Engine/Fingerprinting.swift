@@ -46,12 +46,11 @@ extension SharedKey where Self == FileStorageKey<[String]>.Default {
   // The script's configuration call is guarded by a value only this launch's scripts know.
   private static let secret = UUID().uuidString
 
-  // A new Chromium page of the context gets the script while the setting is on.
+  // A new Chromium page of the context gets the script while the setting is on. Its id may be an earlier page's,
+  // made again from its history, whose script this one does not have.
   static func prepare(_ contents: ECWebContents, page: UUID, _ context: ECBrowserContext) {
-    @Shared(.fingerprintingProtection) var isOn
-    guard isOn else { return }
-    contents.addDocumentStartScript(script(seed: seed(context)))
-    scriptedPages.insert(page)
+    scriptedPages.remove(page)
+    update(contents, page: page, context)
   }
 
   // The setting or an exception changed: a live Chromium page follows from its next load.
