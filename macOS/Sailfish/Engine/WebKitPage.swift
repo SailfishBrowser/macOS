@@ -318,7 +318,7 @@ import WebKit
         return
       }
     }
-    if engine.upgradesToHTTPS(url, profile: profile, incognito: incognito) {
+    if action.request.httpMethod == "GET", engine.upgradesToHTTPS(url, profile: profile, incognito: incognito) {
       decisionHandler(.cancel)
       return upgrade(action.request)
     }
@@ -327,8 +327,8 @@ import WebKit
     decisionHandler(.allowWithoutTryingAppLink)
   }
 
-  // Loads an http request over https on the same port, as Chrome's HTTPS-First Mode does; a redirect back to http from
-  // a URL this navigation was upgraded to asks instead.
+  // Loads an http GET over https on the same port, as Chrome's HTTPS-First Mode does (a form posted to http is not
+  // upgraded in either engine); a redirect back to http from a URL this navigation was upgraded to asks instead.
   private func upgrade(_ request: URLRequest) {
     var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
     components.scheme = "https"
