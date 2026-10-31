@@ -1106,6 +1106,12 @@ struct SidebarView: View {
             renamingGroup = nil
           }
           .onExitCommand { renamingGroup = nil }
+          // A click elsewhere keeps the new name.
+          .onChange(of: isNameFocused) { _, isFocused in
+            guard !isFocused, renamingGroup == group.id else { return }
+            send(.renameGroup(group.id, draftName))
+            renamingGroup = nil
+          }
       } else {
         Text(group.name).fontWeight(.semibold)
         Spacer(minLength: 0)
@@ -1259,6 +1265,13 @@ struct SidebarView: View {
                 withAnimation(Motion.row) { send(.deleteFolder(folder.id)) }
               }
             }
+            renamingFolder = nil
+            newFolderID = nil
+          }
+          // A click elsewhere keeps the new name.
+          .onChange(of: isNameFocused) { _, isFocused in
+            guard !isFocused, renamingFolder == folder.id else { return }
+            send(.renameFolder(folder.id, draftName))
             renamingFolder = nil
             newFolderID = nil
           }
