@@ -70,9 +70,10 @@ enum DownloadNamer {
       String.UnicodeScalarView(
         answer.unicodeScalars.compactMap { quotes.contains($0) ? nil : breaks.contains($0) ? " " : $0 }))
     text = text.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: "'‘’`")))
-    let ext = "." + file.pathExtension
-    if !file.pathExtension.isEmpty, text.lowercased().hasSuffix(ext.lowercased()) { text.removeLast(ext.count) }
-    while text.hasSuffix(".") { text.removeLast() }
+    let ext = "." + file.pathExtension.lowercased()
+    while text.hasSuffix(".") || (!file.pathExtension.isEmpty && text.lowercased().hasSuffix(ext)) {
+      text.removeLast(text.hasSuffix(".") ? 1 : ext.count)
+    }
     while text.hasPrefix(".") { text.removeFirst() }
     var name = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     if name.count > 60 {
