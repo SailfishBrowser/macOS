@@ -408,7 +408,7 @@ struct TabsFeature {
     // Closes the pages of tabs not shown for Settings' "Sleep tabs after" once the engine finds them waiting on
     // nothing; the tabs stay, and load their saved history when shown again. The window's mini player keeps its tab.
     case sleepIdle(after: TimeInterval, keeping: Set<Tab.ID>)
-    case sleep([Tab.ID], after: TimeInterval, keeping: Set<Tab.ID>)
+    case sleep(Tab.ID, after: TimeInterval, keeping: Set<Tab.ID>)
     case close(Tab.ID)
     // Clear (⇧⌘K): archives every Today tab, the shown one too.
     case clearToday
@@ -616,26 +616,23 @@ struct TabsFeature {
         return .merge(archive(idle.map(\.id), undoable: false, &state), .send(.delegate(.autoArchived(idle.count))))
 
       case let .sleepIdle(after, keeping):
-        let idle = sleepable(after, keeping, state)
-        guard !idle.isEmpty else { return .none }
-        return .run { send in
-          var ready: [Tab.ID] = []
-          for id in idle where await engine.canSleep(id) {
-            ready.append(id)
+        // Each page is asked on its own, so one that never answers, hung or crashed, holds up no other.
+        return .merge(sleepable(after, keeping, state).map { id in
+          .run { send in
+            if await engine.canSleep(id) {
+              await send(.sleep(id, after: after, keeping: keeping))
+            }
           }
-          await send(.sleep(ready, after: after, keeping: keeping))
-        }
+        })
 
-      case let .sleep(ids, after, keeping):
+      case let .sleep(id, after, keeping):
         // A tab shown, playing or moved away while its page was asked stays awake. One that sleeps is left as a
         // relaunch leaves it, with no page state.
-        let ready = sleepable(after, keeping, state).filter(ids.contains)
-        for id in ready {
-          state.ownTabs[id: id]?.isLive = false
-          state.ownTabs[id: id]?.isLoading = false
-          state.ownTabs[id: id]?.media = nil
-        }
-        return ready.isEmpty ? .none : .run { _ in for id in ready { await engine.close(id) } }
+        guard sleepable(after, keeping, state).contains(id) else { return .none }
+        state.ownTabs[id: id]?.isLive = false
+        state.ownTabs[id: id]?.isLoading = false
+        state.ownTabs[id: id]?.media = nil
+        return .run { _ in await engine.close(id) }
 
       case .clearToday:
         let (closed, effect) = remove(state.clearableTabs.map(\.id), &state)
