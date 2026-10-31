@@ -132,6 +132,7 @@ struct AppFeature {
     case archiveIdleTabs
     // Every space refreshes the live folders whose time has come.
     case refreshLiveFolders
+    case sleepIdleTabs
     // Adds a profile and moves the spaces to it; their tabs start fresh in it.
     case createProfile(name: String, spaces: Set<Space.ID>)
     case deleteProfile(Profile.ID)
@@ -330,6 +331,20 @@ struct AppFeature {
         return .merge(
           state.windows.flatMap { window in
             window.spaces.spaces.map { .send(.windows(.element(id: window.id, action: .tab(.refreshLiveFolders, in: $0.id)))) }
+          }
+        )
+
+      case .sleepIdleTabs:
+        @Shared(.sleepTabsAfter) var after
+        guard let after else { return .none }
+        // Downloads name no tab, so a profile's tabs stay awake while one of its downloads runs.
+        let downloading = Set(state.downloads.downloads.filter { $0.state == .inProgress }.compactMap(\.profileID))
+        return .merge(
+          state.windows.flatMap { window -> [Effect<Action>] in
+            let keeping = Set([window.miniPlayer].compactMap { $0 })
+            return window.spaces.spaces.filter { !downloading.contains($0.profileID) }.map {
+              .send(.windows(.element(id: window.id, action: .tab(.sleepIdle(after: after, keeping: keeping), in: $0.id))))
+            }
           }
         )
 

@@ -405,6 +405,10 @@ struct TabsFeature {
     case archive([Tab.ID])
     // Archives Today tabs not shown for the profile's "Archive tabs after".
     case archiveIdle
+    // Closes the pages of tabs not shown for Settings' "Sleep tabs after" once the engine finds them waiting on
+    // nothing; the tabs stay, and load their saved history when shown again. The window's mini player keeps its tab.
+    case sleepIdle(after: TimeInterval, keeping: Set<Tab.ID>)
+    case sleep([Tab.ID], after: TimeInterval, keeping: Set<Tab.ID>)
     case close(Tab.ID)
     // Clear (⇧⌘K): archives every Today tab, the shown one too.
     case clearToday
@@ -610,6 +614,28 @@ struct TabsFeature {
         }
         guard !idle.isEmpty else { return .none }
         return .merge(archive(idle.map(\.id), undoable: false, &state), .send(.delegate(.autoArchived(idle.count))))
+
+      case let .sleepIdle(after, keeping):
+        let idle = sleepable(after, keeping, state)
+        guard !idle.isEmpty else { return .none }
+        return .run { send in
+          var ready: [Tab.ID] = []
+          for id in idle where await engine.canSleep(id) {
+            ready.append(id)
+          }
+          await send(.sleep(ready, after: after, keeping: keeping))
+        }
+
+      case let .sleep(ids, after, keeping):
+        // A tab shown, playing or moved away while its page was asked stays awake. One that sleeps is left as a
+        // relaunch leaves it, with no page state.
+        let ready = sleepable(after, keeping, state).filter(ids.contains)
+        for id in ready {
+          state.ownTabs[id: id]?.isLive = false
+          state.ownTabs[id: id]?.isLoading = false
+          state.ownTabs[id: id]?.media = nil
+        }
+        return ready.isEmpty ? .none : .run { _ in for id in ready { await engine.close(id) } }
 
       case .clearToday:
         let (closed, effect) = remove(state.clearableTabs.map(\.id), &state)
@@ -1387,6 +1413,16 @@ struct TabsFeature {
       $archive.withLock { $0.insert(contentsOf: archived, at: 0) }
     }
     return (closed, .merge(.run { _ in for tab in live { await engine.close(tab) } }, activate(&state)))
+  }
+
+  // The space's own tabs whose pages may sleep: live, not shown for `after`, and silent. A favorite keeps its page,
+  // which its preview reads.
+  private func sleepable(_ after: TimeInterval, _ keeping: Set<Tab.ID>, _ state: State) -> [Tab.ID] {
+    let awake = state.shownTabIDs.union(keeping)
+    return state.ownTabs.filter {
+      $0.isLive && !awake.contains($0.id) && now.timeIntervalSince($0.lastActiveAt) >= after && !$0.isAudible
+        && $0.media.map { !$0.isPlaying && !$0.isInPictureInPicture } ?? true
+    }.map(\.id)
   }
 
   // Goes back to the tab this one was opened from, else the row above, else the row below.
