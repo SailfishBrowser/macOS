@@ -82,8 +82,8 @@ final class WindowController: NSWindowController, NSWindowDelegate {
       if window?.title != title { window?.title = title }
     }
     fullScreenToken = observe { [weak self] in self?.syncPageFullScreen() }
-    // Once the bar's field has left the window, and after the click that closed the bar, which can give the keys to
-    // what it clicked.
+    // The handback waits a turn, until the bar's field has left the window and the click that closed the bar has
+    // given the keys to what it clicked.
     commandBarToken = observe { [weak self] in
       let isShown = store.commandBar != nil
       DispatchQueue.main.async { self?.commandBarChanged(isShown: isShown) }
@@ -300,7 +300,6 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     }
   }
 
-  // Names the site filling the screen, as Chrome's full screen bubble does.
   // The page takes the keys again once the command bar over it goes, as in Arc, unless a text field took them.
   private func commandBarChanged(isShown: Bool) {
     defer { isCommandBarShown = isShown }
@@ -316,6 +315,7 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     view.acceptsFirstResponder ? view : view.subviews.lazy.compactMap(keyView).first
   }
 
+  // Names the site filling the screen, as Chrome's full screen bubble does.
   private func showFullScreenToast() {
     let host = shownFullScreenPage?.origin?.host()
     store.send(.showToast(host.map { "\($0) is full screen. To exit, press ⎋" } ?? "To exit full screen, press ⎋"))
