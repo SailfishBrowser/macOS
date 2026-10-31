@@ -69,8 +69,7 @@ struct ImportView: View {
 
   private var message: String? {
     switch store.step {
-    case .options: "Bookmarks become pinned tabs and folders of a new Space. Cookies keep you signed in to your sites."
-    case .mediaFolders: "macOS asks to allow each folder."
+    case .options: "Bookmarks become pinned tabs and folders of a new Space."
     default: nil
     }
   }
