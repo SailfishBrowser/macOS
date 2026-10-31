@@ -15,6 +15,8 @@ final class WindowController: NSWindowController, NSWindowDelegate {
   private var undoToken: ObserveToken?
   private var titleToken: ObserveToken?
   private var fullScreenToken: ObserveToken?
+  private var commandBarToken: ObserveToken?
+  private var isCommandBarShown = false
   // The page filling the window in element full screen, and whether the window went full screen for it.
   private weak var fullScreenPage: ECWebContents?
   private var isFullScreenForPage = false
@@ -80,6 +82,12 @@ final class WindowController: NSWindowController, NSWindowDelegate {
       if window?.title != title { window?.title = title }
     }
     fullScreenToken = observe { [weak self] in self?.syncPageFullScreen() }
+    // Once the bar's field has left the window, and after the click that closed the bar, which can give the keys to
+    // what it clicked.
+    commandBarToken = observe { [weak self] in
+      let isShown = store.commandBar != nil
+      DispatchQueue.main.async { self?.commandBarChanged(isShown: isShown) }
+    }
     // The sidebar draws the traffic lights.
     for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
       window.standardWindowButton(button)?.isHidden = true
@@ -293,6 +301,21 @@ final class WindowController: NSWindowController, NSWindowDelegate {
   }
 
   // Names the site filling the screen, as Chrome's full screen bubble does.
+  // The page takes the keys again once the command bar over it goes, as in Arc, unless a text field took them.
+  private func commandBarChanged(isShown: Bool) {
+    defer { isCommandBarShown = isShown }
+    guard isCommandBarShown, !isShown, let window, !(window.firstResponder is NSText),
+      let tab = store.peek?.tab.id ?? store.spaces.selected.selectedTabID,
+      let view = Engine.shared.view(tab), view.window === window, let keys = keyView(in: view)
+    else { return }
+    window.makeFirstResponder(keys)
+  }
+
+  // The view taking a page's keys: a WebKit page's own, the render view inside a Chromium page's.
+  private func keyView(in view: NSView) -> NSView? {
+    view.acceptsFirstResponder ? view : view.subviews.lazy.compactMap(keyView).first
+  }
+
   private func showFullScreenToast() {
     let host = shownFullScreenPage?.origin?.host()
     store.send(.showToast(host.map { "\($0) is full screen. To exit, press ⎋" } ?? "To exit full screen, press ⎋"))
