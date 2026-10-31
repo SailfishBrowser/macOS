@@ -439,10 +439,13 @@ struct AppFeature {
         // The Shell backed the sidebar up before sending this. Profiles and the archive stay as they are; only
         // the windows come from the backup, and incognito windows, never in a snapshot, stay open.
         guard state.isLoaded else { return .none }
-        // Only the replaced windows' pages close; the incognito windows keep theirs.
-        let live = state.windows.filter { !$0.isIncognito }.flatMap { window in
+        // Only the replaced windows' pages close, the closed last window's included; the incognito windows keep
+        // theirs.
+        let open = state.windows.filter { !$0.isIncognito }.flatMap { window in
           window.spaces.spaces.flatMap { $0.tabs.filter(\.isLive).map(\.id) } + (window.peek.map { [$0.tab.id] } ?? [])
         }
+        let closed = state.closedWindow?.spaces.spaces.flatMap { $0.tabs.filter(\.isLive).map(\.id) } ?? []
+        let live = open + closed
         let incognito = state.windows.filter(\.isIncognito)
         applyWindows(snapshot.windows, &state)
         state.windows.append(contentsOf: incognito)
@@ -685,17 +688,18 @@ struct AppFeature {
       windows.append(windows.remove(at: focused))
     }
     applyWindows(windows, &state)
-    state.closedWindow = nil
     state.focusedWindowID = snapshot?.focusedWindow
   }
 
-  // Takes the windows as the state's, with spaces of a profile missing here going back to Default.
+  // Takes the windows as the state's, in place of the open ones and the closed last one, with spaces of a profile
+  // missing here going back to Default.
   private func applyWindows(_ windows: [Snapshot.Window], _ state: inout State) {
     state.windows = IdentifiedArray(
       uniqueElements: windows.map {
         WindowFeature.State(id: $0.id, frame: $0.frame, sidebar: $0.sidebar, spaces: $0.spaces)
       }
     )
+    state.closedWindow = nil
     // A space whose profile is missing on this computer goes back to Default.
     if let fallback = state.profiles.first?.id {
       for window in state.windows {
