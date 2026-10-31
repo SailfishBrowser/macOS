@@ -255,6 +255,12 @@ struct AppFeature {
         return send(.pageUpdated(tab, page), toSpaceOf: tab, in: state)
 
       case let .engine(.newWindowRequested(tab, url, background)):
+        // Chrome's settings, such as "Manage Payment Methods…" from an incognito tab, open in a regular space.
+        if url.scheme == "chrome", let incognito = state.windows.first(where: {
+          $0.isIncognito && ($0.peek?.tab.id == tab || $0.spaces.spaces.contains { $0.tabs[id: tab] != nil })
+        }) {
+          return .send(.openPage(url, profile: incognito.spaces.selected.profileID))
+        }
         if state.littleSailfishes.contains(where: { $0.tab?.id == tab }) {
           return open([url], &state)
         }
