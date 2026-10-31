@@ -121,7 +121,7 @@ struct SpaceEditor: View {
       }
       .buttonStyle(.plain)
       .popover(isPresented: $isPickingTheme, arrowEdge: .trailing) {
-        ThemePicker(theme: $theme, original: original, isEditing: profiles == nil)
+        ThemePicker(theme: $theme, original: original, isEditing: profiles == nil, isPopover: true)
       }
       Spacer()
       // Not `.disabled`, which would dim the fill: the button only stops responding.

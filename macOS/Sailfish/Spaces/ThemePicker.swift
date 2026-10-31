@@ -14,6 +14,8 @@ struct ThemePicker: View {
   private let original: SpaceTheme
   // An existing space's theme, which has original colors to go back to.
   private let isEditing: Bool
+  // The picker fills a popover with its panel; in the onboarding dialog it sits on the dialog's navy.
+  private let isPopover: Bool
 
   enum Mode: String, CaseIterable {
     case free = "sparkles", light = "sun.max", dark = "moon"
@@ -50,10 +52,11 @@ struct ThemePicker: View {
     [0xFDFBFA, 0xFBEAF3, 0xECD2EA, 0xF7CDD2, 0xFAE1D5, 0xFEF9E7, 0xE4FCEC, 0xE0F2FB, 0xC5C6E2],
   ]
 
-  init(theme: Binding<SpaceTheme>, original: SpaceTheme, isEditing: Bool) {
+  init(theme: Binding<SpaceTheme>, original: SpaceTheme, isEditing: Bool, isPopover: Bool) {
     _theme = theme
     self.original = original
     self.isEditing = isEditing
+    self.isPopover = isPopover
     _handles = State(initialValue: theme.wrappedValue.colors.map(Self.handle))
   }
 
@@ -76,8 +79,8 @@ struct ThemePicker: View {
         arrow("chevron.right", page + 1)
       }
       HStack(spacing: 22) {
-        IntensitySlider(value: $theme.intensity, isEnabled: !handles.isEmpty)
-        GrainDial(value: $theme.grain, isEnabled: !handles.isEmpty)
+        IntensitySlider(value: $theme.intensity, isEnabled: !handles.isEmpty, ink: ink)
+        GrainDial(value: $theme.grain, isEnabled: !handles.isEmpty, ink: ink)
       }
       .padding(.leading, 10)
       if isEditing {
@@ -126,15 +129,21 @@ struct ThemePicker: View {
     .padding(7)
     .frame(width: 354, height: 506, alignment: .top)
     .presentationBackground(panel)
-    .environment(\.colorScheme, .dark)
+    .environment(\.colorScheme, isLight ? .light : .dark)
   }
+
+  // Light mode with a color draws black on a light panel; otherwise the picker draws white on a dark one.
+  private var isLight: Bool { isPopover && mode == .light && !theme.colors.isEmpty }
+  private var ink: Color { isLight ? .black : .white }
 
   // Shots 33 to 35: the panel is #2A2838 with no color, else the colors' average at half its brightness, which is
   // within 2 of the shots (#7FB8D6 gives #3F5C6B, measured #3F5A6B; #7FB8D6 and #D69C7E give #555555, measured #555557).
+  // In Light the average goes halfway toward white instead, so the pale colors give a near-white panel.
   private var panel: Color {
     if theme.colors.isEmpty { return Color(hex: 0x2A2838) }
+    let lift = isLight ? 0.5 : 0
     let channels = [16, 8, 0].map { (shift: UInt32) in
-      theme.colors.map { Double($0 >> shift & 0xFF) }.reduce(0, +) / Double(theme.colors.count) / 255 / 2
+      theme.colors.map { Double($0 >> shift & 0xFF) }.reduce(0, +) / Double(theme.colors.count) / 255 / 2 + lift
     }
     return Color(red: channels[0], green: channels[1], blue: channels[2])
   }
@@ -150,11 +159,11 @@ struct ThemePicker: View {
         // Shot 33: 80 dots across the 340 pt canvas, 4.25 pt apart.
         for x in stride(from: 2.0, to: size.width, by: 4.25) {
           for y in stride(from: 2.0, to: size.height, by: 4.25) {
-            context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1, height: 1)), with: .color(.white.opacity(0.14)))
+            context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1, height: 1)), with: .color(ink.opacity(0.14)))
           }
         }
       }
-      .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+      .background(ink.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
       // A click on the canvas places the first color there, or moves the main one there, as the system color wheel does.
       .gesture(SpatialTapGesture().onEnded { tap in
         withAnimation(Motion.layout) {
@@ -258,7 +267,7 @@ struct ThemePicker: View {
       Image(systemName: systemName).font(.system(size: 16, weight: .medium))
         .foregroundStyle(isSelected ? .primary : .secondary)
         .frame(width: 32, height: 32)
-        .background(isSelected ? Color.white.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7))
+        .background(isSelected ? ink.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7))
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
@@ -307,17 +316,18 @@ struct ThemePicker: View {
 private struct IntensitySlider: View {
   @Binding var value: Double
   let isEnabled: Bool
+  let ink: Color
 
   var body: some View {
     GeometryReader { proxy in
       let x = 11 + value * (proxy.size.width - 22)
       ZStack(alignment: .leading) {
-        Capsule().fill(.white.opacity(0.06)).frame(height: 22)
-        Wave().stroke(.white.opacity(0.3), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+        Capsule().fill(ink.opacity(0.06)).frame(height: 22)
+        Wave().stroke(ink.opacity(0.3), style: StrokeStyle(lineWidth: 3, lineCap: .round))
         if isEnabled {
-          Wave().stroke(.white.opacity(0.55), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+          Wave().stroke(ink.opacity(0.55), style: StrokeStyle(lineWidth: 3, lineCap: .round))
             .mask(alignment: .leading) { Rectangle().frame(width: x) }
-          Capsule().fill(.white).frame(width: 23, height: 55).position(x: x, y: proxy.size.height / 2)
+          Capsule().fill(ink).frame(width: 23, height: 55).position(x: x, y: proxy.size.height / 2)
         }
       }
       .contentShape(Rectangle())
@@ -346,17 +356,18 @@ private struct IntensitySlider: View {
 private struct GrainDial: View {
   @Binding var value: Double
   let isEnabled: Bool
+  let ink: Color
 
   var body: some View {
     ZStack {
       ForEach(0..<24, id: \.self) { index in
-        Circle().fill(.white.opacity(isEnabled && Double(index) / 24 < value ? 0.7 : 0.3)).frame(width: 3, height: 3)
+        Circle().fill(ink.opacity(isEnabled && Double(index) / 24 < value ? 0.7 : 0.3)).frame(width: 3, height: 3)
           .offset(y: -33)
           .rotationEffect(.degrees(Double(index) * 15))
       }
-      Circle().strokeBorder(.white.opacity(0.3), lineWidth: 1.5).frame(width: 40, height: 40)
+      Circle().strokeBorder(ink.opacity(0.3), lineWidth: 1.5).frame(width: 40, height: 40)
       if isEnabled {
-        Capsule().fill(.white).frame(width: 5, height: 13).offset(y: -32).rotationEffect(.degrees(value * 360))
+        Capsule().fill(ink).frame(width: 5, height: 13).offset(y: -32).rotationEffect(.degrees(value * 360))
       }
     }
     .frame(width: 72, height: 72)
