@@ -599,7 +599,7 @@ struct TabsFeature {
         return .none
 
       case let .archive(ids):
-        return archive(ids, &state)
+        return archive(ids.filter { id in state.tabs[id: id].map { state.takesRows($0.placement) } ?? false }, &state)
 
       case .archiveIdle:
         @Shared(.profiles) var profiles

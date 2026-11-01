@@ -1913,12 +1913,14 @@ struct SidebarView: View {
       }
     }
     Divider()
-    if tab.placement == .favorite {
-      // Unloads the favorite and takes it back to its pinned URL.
+    if tab.placement == .favorite || !space.takesRows(tab.placement) {
+      // Unloads the favorite or the live folder's item and takes it back to its pinned URL.
       Button("Close") { send(.close(tab.id)) }
         .disabled(!tab.isLive && !tab.hasLeftPinnedURL)
+    }
+    if tab.placement == .favorite {
       Button("Remove Favorite") { send(.move(tab.id, .unpinned, before: space.tabs(in: .unpinned).first?.id)) }
-    } else {
+    } else if space.takesRows(tab.placement) {
       Button("Archive Tab") { send(.archive([tab.id])) }
       if tab.placement == .unpinned {
         let (above, below) = space.todayNeighbors(of: tab.id)
