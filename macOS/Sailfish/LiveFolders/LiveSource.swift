@@ -100,11 +100,11 @@ extension TabsFeature.State {
   }
 
   // Lays the source's links out in a live folder, in the source's order. A new link arrives unloaded; one already
-  // pinned elsewhere in the space, as an item dragged out of the folder, is left there. Tabs for links the source
-  // dropped are taken out before this.
+  // pinned outside the space's live folders, as an item dragged out of the folder, is left there. Tabs for links the
+  // source dropped are taken out before this.
   mutating func fill(_ id: Folder.ID, with links: [LiveLink], isUnread: Bool, now: Date, uuid: () -> UUID) {
     var items = Dictionary(tabs(in: .folder(id)).map { ($0.pinnedURL ?? $0.url, $0.id) }, uniquingKeysWith: { first, _ in first })
-    let elsewhere = Set(tabs.filter { $0.placement != .folder(id) }.compactMap(\.pinnedURL))
+    let elsewhere = Set(tabs.filter { takesRows($0.placement) }.compactMap(\.pinnedURL))
     var arrived: Set<Tab.ID> = []
     for link in links where !elsewhere.contains(link.url) {
       if let item = items[link.url] {
