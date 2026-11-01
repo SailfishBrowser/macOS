@@ -1056,16 +1056,17 @@ struct SidebarView: View {
       .zone(.folder(folder.id), $zones)
   }
 
-  // Order: Refresh for a live folder, else New Nested Folder, Turn into Space, Copy All Links | Change Icon, Rename |
+  // Order: New Nested Folder and Turn into Space, or Refresh for a live folder, Copy All Links | Change Icon, Rename |
   // Duplicate, Move to | Delete.
   @ViewBuilder private func folderMenu(_ folder: Folder) -> some View {
+    // A live folder's tabs come from its source, so it takes no nested folder and stays a folder.
     if folder.source == nil {
       Button("New Nested Folder…") { newFolder(in: .folder(folder.id)) }
+      Button("Turn “\(folder.name)” into Space") { store.send(.spaces(.folderToSpace(folder.id, in: space.id))) }
+        .disabled(store.isIncognito)
     } else {
       Button("Refresh") { send(.refreshLiveFolder(folder.id)) }
     }
-    Button("Turn “\(folder.name)” into Space") { store.send(.spaces(.folderToSpace(folder.id, in: space.id))) }
-      .disabled(store.isIncognito)
     if !folderTabs(folder.id, in: space).isEmpty {
       Button("Copy All Links") { copyLinks(of: folder, markdown: false) }
         .modifierKeyAlternate(.option) {
@@ -1858,12 +1859,15 @@ struct SidebarView: View {
     // Mutes a tab whether or not it is playing.
     Button(tab.isMuted ? "Unmute" : "Mute") { send(.toggleMute(tab.id)) }
     if tab.pinnedURL != nil {
-      Menu("Edit Pinned Page") {
-        Button("Replace Pinned URL with Current") { send(.replacePinnedURL(tab.id)) }
-          .disabled(!tab.hasLeftPinnedURL)
-        Button("Edit…") { editPinnedURL(tab) }
-        Button("Back to Pinned URL") { send(.resetToPinnedURL(tab.id)) }
-          .disabled(!tab.hasLeftPinnedURL)
+      // A live folder's item has its source's link, which a refresh would put back.
+      if space.takesRows(tab.placement) {
+        Menu("Edit Pinned Page") {
+          Button("Replace Pinned URL with Current") { send(.replacePinnedURL(tab.id)) }
+            .disabled(!tab.hasLeftPinnedURL)
+          Button("Edit…") { editPinnedURL(tab) }
+          Button("Back to Pinned URL") { send(.resetToPinnedURL(tab.id)) }
+            .disabled(!tab.hasLeftPinnedURL)
+        }
       }
       if tab.hasLeftPinnedURL {
         Button("Separate From Pinned Tab") { send(.separateFromPinned(tab.id)) }
