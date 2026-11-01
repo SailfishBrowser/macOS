@@ -657,8 +657,7 @@ struct TabsFeature {
         let rows = [PinnedRow.folder(folder)] + state.tree(.folder(id))
         let folders = rows.compactMap { if case let .folder(folder) = $0 { folder } else { nil } }
         let pinnedOrder = state.pinnedOrder
-        let (closed, effect) = remove(
-          rows.compactMap { if case let .tab(tab) = $0 { tab.id } else { nil } }, archiving: folder.source == nil, &state)
+        let (closed, effect) = remove(rows.compactMap { if case let .tab(tab) = $0 { tab.id } else { nil } }, &state)
         state.folders.removeAll { folder in folders.contains { $0.id == folder.id } }
         state.pinnedOrder.removeAll { id in rows.contains { $0.id == id } }
         guard rows.count > 1 else { return effect }
@@ -786,7 +785,7 @@ struct TabsFeature {
         guard let folder = state.folders[id: id], var source = folder.source else { return .none }
         let urls = Set(feed.links.map(\.url))
         let dropped = state.tabs(in: .folder(id)).filter { !urls.contains($0.pinnedURL ?? $0.url) }.map(\.id)
-        let (_, effect) = remove(dropped, archiving: false, &state)
+        let (_, effect) = remove(dropped, &state)
         state.fill(id, with: feed.links, isUnread: source.refreshedAt != nil, now: now, uuid: { uuid() })
         // A folder still called by its source's URL takes the source's own title.
         if let title = feed.title, !title.isEmpty, folder.name == LiveSources.source(for: source.url)?.name {
@@ -807,7 +806,7 @@ struct TabsFeature {
       case let .undoNewFolder(id, layout):
         guard let folder = state.folders[id: id] else { return .none }
         let effect: Effect<Action> =
-          folder.source == nil ? .none : remove(state.tabs(in: .folder(id)).map(\.id), archiving: false, &state).1
+          folder.source == nil ? .none : remove(state.tabs(in: .folder(id)).map(\.id), &state).1
         restore(layout, &state)
         state.folders.remove(id: id)
         state.pinnedOrder.removeAll { $0 == id }
@@ -1350,9 +1349,9 @@ struct TabsFeature {
     return select(shown.tab.id, &state)
   }
 
-  // What is removed is archived, except in incognito windows and a live folder's tabs. The closed tabs carry their
-  // rows for undo.
-  private func remove(_ ids: [Tab.ID], archiving: Bool = true, _ state: inout State) -> ([ClosedTab], Effect<Action>) {
+  // What is removed is archived, except in incognito windows and a live folder's tabs, wherever the folder is. The
+  // closed tabs carry their rows for undo.
+  private func remove(_ ids: [Tab.ID], _ state: inout State) -> ([ClosedTab], Effect<Action>) {
     @Shared(.archive) var archive
     let removed = Set(ids)
     let shown = state.shownTabIDs
@@ -1372,8 +1371,8 @@ struct TabsFeature {
     }
     state.ownTabs.removeAll { removed.contains($0.id) }
     state.selection.subtract(removed)
-    if archiving, !state.isIncognito {
-      let archived = closed.reversed().map {
+    if !state.isIncognito {
+      let archived = closed.reversed().filter { state.takesRows($0.tab.placement) }.map {
         ArchivedTab(id: $0.tab.id, url: $0.tab.url, title: $0.tab.displayTitle, profileID: state.profileID, archivedAt: now)
       }
       $archive.withLock { $0.insert(contentsOf: archived, at: 0) }
