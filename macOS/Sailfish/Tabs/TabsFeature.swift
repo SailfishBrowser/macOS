@@ -805,11 +805,13 @@ struct TabsFeature {
         return .none
 
       case let .undoNewFolder(id, layout):
-        guard state.folders[id: id] != nil else { return .none }
+        guard let folder = state.folders[id: id] else { return .none }
+        let effect: Effect<Action> =
+          folder.source == nil ? .none : remove(state.tabs(in: .folder(id)).map(\.id), archiving: false, &state).1
         restore(layout, &state)
         state.folders.remove(id: id)
         state.pinnedOrder.removeAll { $0 == id }
-        return .none
+        return effect
 
       case let .openFolder(id):
         var placement = Placement.folder(id)
