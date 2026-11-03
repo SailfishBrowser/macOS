@@ -45,6 +45,8 @@ struct WindowView: View {
       backdrop(background)
         .gesture(WindowDragGesture())
         .allowsWindowActivationEvents(true)
+        // A double click does what the title bar's would, as Arc's frame does.
+        .onTapGesture(count: 2) { NSApp.keyWindow?.performTitleBarDoubleClick() }
     }
     .overlay { switcher }
     .animation(Motion.row, value: store.recentCycle != nil)
@@ -425,3 +427,15 @@ final class WebContainer: NSView {
   }
 }
 
+
+extension NSWindow {
+  // The system's title-bar double click, as set in System Settings: zoom, minimize or nothing. The frame
+  // around the page takes it too, so a double click fills the window as it does in Arc.
+  func performTitleBarDoubleClick() {
+    switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+    case "Minimize": performMiniaturize(nil)
+    case "None": break
+    default: performZoom(nil)
+    }
+  }
+}
