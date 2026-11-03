@@ -142,9 +142,7 @@ enum AppCommands {
   }
 
   private static func menuItem(for command: Command) -> NSMenuItem? {
-    let action = NSSelectorFromString(command.action)
-    return NSApp.mainMenu.map(MenuShortcuts.items).flatMap { items in
-      items.first { $0.action == action && $0.tag == command.tag && !$0.isHidden } ?? items.first { $0.action == action }
-    }
+    let items = MenuIndex.shared.items(for: NSSelectorFromString(command.action))
+    return items.first { $0.tag == command.tag && !$0.isHidden } ?? items.first
   }
 }

@@ -63,7 +63,7 @@ enum MenuShortcuts {
   // pair it is (New Window and Blank Window share one action).
   static func id(_ item: NSMenuItem) -> String? {
     guard let action = item.action else { return nil }
-    let same = NSApp.mainMenu.map(items)?.filter { $0.action == action && $0.tag == item.tag } ?? []
+    let same = MenuIndex.shared.items(for: action).filter { $0.tag == item.tag }
     let index = same.firstIndex { $0 === item } ?? 0
     return "\(NSStringFromSelector(action)):\(item.tag)" + (index == 0 ? "" : "#\(index)")
   }
@@ -129,5 +129,27 @@ enum MenuShortcuts {
     return items(in: menu).first { item in
       !own.contains { $0 === item } && !item.keyEquivalent.isEmpty && forms.contains(KeyBinding(item).normalized)
     }
+  }
+}
+
+@MainActor
+final class MenuIndex {
+  static let shared = MenuIndex()
+  private var index: (menu: NSMenu, items: [Selector: [NSMenuItem]])?
+
+  private init() {
+    for name in [NSMenu.didAddItemNotification, NSMenu.didRemoveItemNotification] {
+      NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [unowned self] _ in
+        MainActor.assumeIsolated { index = nil }
+      }
+    }
+  }
+
+  func items(for action: Selector) -> [NSMenuItem] {
+    let menu = NSApp.mainMenu!
+    if index?.menu !== menu {
+      index = (menu, Dictionary(grouping: MenuShortcuts.items(in: menu).filter { $0.action != nil }) { $0.action! })
+    }
+    return index?.items[action] ?? []
   }
 }
