@@ -986,7 +986,7 @@ struct SidebarView: View {
         .transition(.identity)
         .zIndex(2)
     case .divider:
-      divider(space)
+      SpacePage(store: store, id: space.id) { divider($0) }
     case .newTab:
       // Lights the row while the command bar is open for a new tab (white at 19% over a dark theme), and pulses
       // its label in a space just created until its first tab.
