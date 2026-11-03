@@ -273,12 +273,20 @@ struct TabsFeature {
       }
     }
 
-    // The limits: three favorites to a row and four panes to a split.
-    static let favoritesPerRow = 3
+    // The limits: four favorites to a row and four panes to a split.
+    static let favoritesPerRow = 4
+
+    // How many favorites fit in a row at this sidebar width: two in the narrowest
+    // sidebar, three at the default width, four once there is room.
+    static func favoriteColumns(forWidth width: CGFloat) -> Int {
+      if width < 180 { return 2 }
+      if width < 260 { return 3 }
+      return 4
+    }
     static let maxPanes = 4
 
     // The rows the user arranged. A favorite added without a place lays them all out again: as few
-    // rows as fit three to a row, filled evenly (4 is 2+2, 5 is 3+2).
+    // rows as fit four to a row, filled evenly (6 is 3+3, 7 is 4+3).
     var favoriteGrid: [[Tab]] {
       let favorites = favorites
       let rows = favoriteRows.map { $0.compactMap { favorites[id: $0] } }.filter { !$0.isEmpty }
@@ -420,7 +428,7 @@ struct TabsFeature {
     case muteAll(Bool)
     // Moves the tab before another row, or to the end of the placement.
     case move(Tab.ID, Placement, before: UUID?)
-    case moveFavorite(Tab.ID, to: FavoriteSlot)
+    case moveFavorite(Tab.ID, toOffset: Int)
     // Moves the folder into the pinned section or another folder, before a row or last.
     case moveFolder(Folder.ID, Placement, before: UUID?)
     // A new folder is "Untitled" unless named in the New Folder… dialog. With tabs, it is made around them
@@ -699,17 +707,19 @@ struct TabsFeature {
         move(id, placement, before: before, &state)
         return moved(from: layout, state)
 
-      case let .moveFavorite(id, slot):
+      case let .moveFavorite(id, toOffset: offset):
         guard state.tabs[id: id] != nil else { return .none }
         let layout = TabLayout(state)
-        var rows = state.favoriteGrid.map { $0.map(\.id).filter { $0 != id } }.filter { !$0.isEmpty }
-        if let column = slot.column {
-          guard slot.row < rows.count, rows[slot.row].count < State.favoritesPerRow, column <= rows[slot.row].count
-          else { return .none }
-          rows[slot.row].insert(id, at: column)
-        } else {
-          guard slot.row <= rows.count else { return .none }
-          rows.insert([id], at: slot.row)
+        // The sidebar lays the favorites out for its width, so the drop arrives as an offset into
+        // their order; the rows are packed again at the four-per-row maximum.
+        var flat = state.favoriteGrid.flatMap { $0.map(\.id) }.filter { $0 != id }
+        flat.insert(id, at: min(max(offset, 0), flat.count))
+        var rows: [[Tab.ID]] = []
+        var index = flat.startIndex
+        while index < flat.endIndex {
+          let end = min(index + State.favoritesPerRow, flat.endIndex)
+          rows.append(Array(flat[index..<end]))
+          index = end
         }
         if state.tabs[id: id]?.placement != .favorite {
           unsplit(id, &state)

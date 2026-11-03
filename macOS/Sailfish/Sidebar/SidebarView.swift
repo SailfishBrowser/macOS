@@ -93,6 +93,8 @@ struct SidebarView: View {
   private static let lineBand: CGFloat = 6
 
   private var space: Space { store.spaces.selected }
+  // How many favorites fit in a row at the sidebar's current width.
+  private var favoriteColumns: Int { Space.favoriteColumns(forWidth: width) }
   // How far a swipe has gone past the last space; a swipe closing the Library never gets there.
   private var overscroll: CGFloat {
     !store.isLibraryOpen && store.spaces.selectedID == store.spaces.spaces.last?.id
@@ -1487,7 +1489,7 @@ struct SidebarView: View {
       case let (.tab(id), .slot(placement, before)):
         send(.move(id, placement, before: before))
       case let (.tab(id), .favorite(slot)):
-        send(.moveFavorite(id, to: slot))
+        send(.moveFavorite(id, toOffset: favoriteOffset(for: slot)))
       case let (.tab(id), .grouped(group, before)):
         send(.group([id], into: group, before: before))
       case let (.tab(id), .into(folder)):
@@ -1593,17 +1595,32 @@ struct SidebarView: View {
     return .grouped(group, before: index + 1 < members.count ? members[index + 1] : nil)
   }
 
-  // The favorites' rows; a dragged favorite leaves them, and they reflow around the placeholder.
+  // The favorites' rows, reflowed for the sidebar's width; a dragged favorite leaves them, and they
+  // reflow around the placeholder.
   private func favoriteRows(_ space: Space) -> [[Tab]] {
-    space.favoriteGrid.map { $0.filter { drag?.isLanding != false || drag?.item != .tab($0.id) } }.filter { !$0.isEmpty }
+    let tabs = space.favoriteGrid.flatMap { $0 }.filter { drag?.isLanding != false || drag?.item != .tab($0.id) }
+    return stride(from: 0, to: tabs.count, by: favoriteColumns).map {
+      Array(tabs[$0..<min($0 + favoriteColumns, tabs.count)])
+    }
   }
 
-  // A favorite's own place, among the rows left without it.
+  // A favorite's own place, among the rows laid out for this width.
   private func slot(of id: Tab.ID) -> FavoriteSlot {
-    let grid = space.favoriteGrid
-    let row = grid.firstIndex { $0.contains { $0.id == id } }!
-    let column = grid[row].firstIndex { $0.id == id }!
-    return grid[row].count == 1 ? FavoriteSlot(row: row, column: nil) : FavoriteSlot(row: row, column: column)
+    let rows = favoriteRows(space)
+    for (row, tabs) in rows.enumerated() {
+      if let column = tabs.firstIndex(where: { $0.id == id }) {
+        return tabs.count == 1 ? FavoriteSlot(row: row, column: nil) : FavoriteSlot(row: row, column: column)
+      }
+    }
+    return FavoriteSlot(row: rows.count, column: nil)
+  }
+
+  // A display slot as an offset into the favorites' order, for the move.
+  private func favoriteOffset(for slot: FavoriteSlot) -> Int {
+    let rows = favoriteRows(space)
+    let before = rows.prefix(min(slot.row, rows.count)).map(\.count).reduce(0, +)
+    guard let column = slot.column, slot.row < rows.count else { return before }
+    return before + min(column, rows[slot.row].count)
   }
 
   // A row's top and bottom quarters, and the gaps, make a new row; its middle goes between its tiles.
@@ -1613,7 +1630,7 @@ struct SidebarView: View {
       guard let frame = row.compactMap({ zones.frames[.tab($0.id)] }).reduce(nil, { $0?.union($1) ?? $1 }) else { continue }
       if point.y < frame.minY + frame.height / 4 { return .favorite(FavoriteSlot(row: index, column: nil)) }
       if point.y <= frame.maxY - frame.height / 4 {
-        guard row.count < Space.favoritesPerRow else { return nil }
+        guard row.count < favoriteColumns else { return nil }
         let column = row.filter { zones.frames[.tab($0.id)].map { $0.midX < point.x } ?? false }.count
         return .favorite(FavoriteSlot(row: index, column: column))
       }
