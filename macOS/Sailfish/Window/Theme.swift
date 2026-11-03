@@ -98,12 +98,40 @@ enum Theme {
     static let closeGlyph = adaptive(Color(hex: 0xA6A5A7), Color(hex: 0x323232))
     static let hover = adaptive(.white.opacity(0.05), .black.opacity(0.04))
 
-    // The selected row's fill and the chips' color: on a light theme a light tint of the theme's hue,
-    // on a dark one the accent whatever the theme.
+    // The selected row's fill and the chips' color. Arc keeps this a vivid version of the space's hue, deep
+    // enough for white text (its row over a purple space measured #4248D8), and gives a grey space a dark
+    // neutral plate rather than a pale grey wash, which keeps the row readable.
     static func accent(_ theme: SpaceTheme) -> Color {
-      guard Theme.isLight(theme) else { return Theme.accent }
-      let color = NSColor(Color(hex: theme.gradient[0])).usingColorSpace(.deviceRGB)!
-      return Color(hue: color.hueComponent, saturation: 0.44, brightness: 1)
+      let base = NSColor(Color(hex: theme.gradient[0])).usingColorSpace(.deviceRGB)!
+      let isNeutral = base.saturationComponent < 0.12
+      guard !Theme.isLight(theme) else {
+        if isNeutral { return Color(hex: 0xE4E4E6) }
+        return Color(hue: base.hueComponent, saturation: 0.44, brightness: 1)
+      }
+      if isNeutral { return Color(hex: 0x2C2C30) }
+      return readableAccent(hue: base.hueComponent, saturation: 0.72, brightness: 0.86)
+    }
+
+    // The accent at this hue, deepened until white text on it clears 4.5:1, as Arc's selection does.
+    private static func readableAccent(hue: Double, saturation: Double, brightness: Double) -> Color {
+      var value = brightness
+      var color = Color(hue: hue, saturation: saturation, brightness: value)
+      while whiteContrast(color) < 4.5, value > 0.2 {
+        value -= 0.02
+        color = Color(hue: hue, saturation: saturation, brightness: value)
+      }
+      return color
+    }
+
+    private static func whiteContrast(_ color: Color) -> Double {
+      guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return 0 }
+      func linear(_ channel: CGFloat) -> Double {
+        let value = Double(channel)
+        return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+      }
+      let luminance =
+        0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent) + 0.0722 * linear(rgb.blueComponent)
+      return 1.05 / (luminance + 0.05)
     }
   }
 
@@ -157,8 +185,13 @@ enum Theme {
   // icons are white over the window, so they take its tint: the space title 45%, icons 60%, the empty pill's text
   // 30% and its magnifier 40%. The lit New Tab label is #DEDFFF.
   static let primaryText = adaptive(Color(hex: 0xEDEDF2), Color(hex: 0x14191C))
-  // Tab titles and the lit New Tab label: #DEDFFF (another capture read #DAD8FF).
-  static let rowText = adaptive(Color(hex: 0xDEDFFF), Color(hex: 0x14191C))
+  // Tab titles take the space's hue: a faint tint of it on dark themes, near-black on light ones.
+  // Greys stay grey rather than lavender, so a grey space reads grey.
+  static func rowText(_ theme: SpaceTheme) -> Color {
+    isLight(theme)
+      ? Color(hex: 0x14191C)
+      : tint(theme.gradient[0], saturation: 0.15, brightness: 1)
+  }
   // The URL in the pill: white at 56% over the pill.
   static let pillText = adaptive(.white.opacity(0.56), Color(hex: 0x14191C).opacity(0.8))
   static let secondaryText = adaptive(.white.opacity(0.45), .black.opacity(0.45))

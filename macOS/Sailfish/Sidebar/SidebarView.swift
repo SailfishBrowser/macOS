@@ -1000,7 +1000,7 @@ struct SidebarView: View {
         Image(systemName: "plus").font(.system(size: 14, weight: .medium))
         Text("New Tab")
       }
-      .foregroundStyle(isLit ? Theme.rowText : Theme.secondaryText)
+      .foregroundStyle(isLit ? Theme.rowText(space.theme) : Theme.secondaryText)
       .pulsing(space.id == freshSpace && space.ownTabs.isEmpty && !isLit)
       .onTapGesture { store.send(.showCommandBar) }
       .padding(.vertical, Self.rowGap)
@@ -2403,7 +2403,7 @@ private struct TabRow: View {
       } else {
         VStack(alignment: .leading, spacing: 0) {
           // A long title ends in an ellipsis.
-          Text(tab.displayTitle).foregroundStyle(Theme.rowText).frame(maxWidth: .infinity, alignment: .leading)
+          Text(tab.displayTitle).foregroundStyle(Theme.rowText(space.theme)).frame(maxWidth: .infinity, alignment: .leading)
           if let subtitle {
             Text(subtitle).font(.system(size: 11)).foregroundStyle(Theme.secondaryText)
           }
@@ -2434,7 +2434,7 @@ private struct TabRow: View {
               Image(systemName: "xmark").font(.system(size: 13, weight: .bold))
             }
           }
-          .foregroundStyle(Theme.rowText.opacity(0.8))
+          .foregroundStyle(Theme.rowText(space.theme).opacity(0.8))
           .frame(width: 22, height: 22)
           .contentShape(Rectangle())
         }

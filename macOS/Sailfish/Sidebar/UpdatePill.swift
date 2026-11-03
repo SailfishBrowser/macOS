@@ -45,7 +45,7 @@ struct UpdatePill: View {
   private var label: some View {
     Text("Update ready")
       .font(.system(size: 13, weight: .semibold))
-      .foregroundStyle(Theme.rowText)
+      .foregroundStyle(Theme.rowText(theme))
       .lineLimit(1)
       .minimumScaleFactor(0.9)
   }

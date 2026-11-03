@@ -22,6 +22,16 @@ struct CommandBarView: View {
     store.isActions ? "Actions" : store.keyword?.name
   }
 
+  // The info badge follows the space: a grey space gets a plain dark disc and a neutral glyph, while a
+  // colored one keeps Arc's navy disc and its lavender ring.
+  private var isNeutralAccent: Bool {
+    (NSColor(accent).usingColorSpace(.sRGB)?.saturationComponent ?? 1) < 0.2
+  }
+  private var infoFill: Color { isNeutralAccent ? Color(hex: 0x17171A) : Style.infoFill }
+  private var infoGlyph: Color { isNeutralAccent ? Color(hex: 0x8E8E93) : Style.infoGlyph }
+  // The field's selection stays grey rather than lavender on a grey space.
+  private var textSelection: Color { isNeutralAccent ? Color(hex: 0x6E6E73) : Style.textSelection }
+
   private var selected: CommandBarFeature.Suggestion? {
     store.suggestions.indices.contains(store.selection) ? store.suggestions[store.selection] : nil
   }
@@ -118,9 +128,9 @@ struct CommandBarView: View {
             dismiss()
             AppCommands.perform(Command(title: "Edit Keyboard Shortcuts", symbol: "", action: "showSettings:", tag: SettingsPane.shortcuts.rawValue))
           } label: {
-            Image(systemName: "info.circle").font(.system(size: 17, weight: .medium)).foregroundStyle(Style.infoGlyph)
+            Image(systemName: "info.circle").font(.system(size: 17, weight: .medium)).foregroundStyle(infoGlyph)
               .frame(width: 24, height: 24)
-              .background(Style.infoFill, in: Circle())
+              .background(infoFill, in: Circle())
           }
           .buttonStyle(.plain)
           .help("Keyboard Shortcuts")
@@ -257,7 +267,7 @@ struct CommandBarView: View {
       if shown < text.utf16.count {
         editor.replaceCharacters(in: NSRange(location: shown, length: 0), with: String(text.utf16.dropFirst(shown))!)
       }
-      editor.selectedTextAttributes = [.backgroundColor: NSColor(Style.textSelection)]
+      editor.selectedTextAttributes = [.backgroundColor: NSColor(textSelection)]
       editor.insertionPointColor = NSColor(red: 0x34 / 255, green: 0x78 / 255, blue: 0xF6 / 255, alpha: 1)
       editor.setSelectedRange(range)
       return true
