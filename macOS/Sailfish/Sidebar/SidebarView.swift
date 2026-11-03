@@ -67,8 +67,6 @@ struct SidebarView: View {
   @FocusState private var isListFocused: Bool
   // The edge of the list past which the selected tab is scrolled, where an indicator shows.
   @State private var selectedOffscreen: VerticalEdge?
-  // The list's visible height, which its empty area below the rows fills.
-  @State private var listHeight: CGFloat = 0
   // Text, a link or files from outside the app are over the sidebar, bound for the top of Today.
   @State private var isDropTargeted = false
   // A space created in this window, whose New Tab label pulses until its first tab.
@@ -76,9 +74,8 @@ struct SidebarView: View {
   @Shared(.showsPinnedHint) private var showsPinnedHint
   @Shared(.autoArchiveBanner) private var autoArchiveBanner
   @Shared(.readyUpdate) private var readyUpdate
-  // The sidebar's width, which each page of the favorites strip takes. It starts at the width the sidebar is
-  // about to have: a sidebar sliding in is a fresh view, and a strip laid out at 0 until the first measurement
-  // drew the tiles bunched at the edge and moving apart while the sidebar was still on its way.
+  // The sidebar's width, the distance between neighboring pages of the strips. It starts at the width the sidebar
+  // is about to have, since a sidebar sliding in is a fresh view.
   @State private var width: CGFloat
 
   init(store: StoreOf<WindowFeature>) {
@@ -278,49 +275,45 @@ struct SidebarView: View {
   }
 
   private var content: some View {
-    GeometryReader { outer in
-      ZStack(alignment: .topLeading) {
-        VStack(alignment: .leading, spacing: 0) {
-          searchPill.padding(.horizontal, 8)
-          if !store.isIncognito {
-            favoritesStrip
-          }
-          // Keeps the pill and the favorites still and slides the spaces' own sections side by side, each
-          // from the same top.
-          GeometryReader { proxy in
-            let index = store.spaces.spaces.index(id: store.spaces.selectedID) ?? 0
-            HStack(spacing: 0) {
-              ForEach(store.spaces.spaces) { space in
-                SpacePage(store: store, id: space.id) { page($0) }
-                  .frame(width: proxy.size.width, height: proxy.size.height)
-                  .environment(\.isSelectedSpace, space.id == store.spaces.selectedID)
-                  // Only the space on screen takes clicks: a row of the one sliding out is not a row of the shown
-                  // space.
-                  .allowsHitTesting(space.id == store.spaces.selectedID)
-              }
-            }
-            // The strip follows the fingers during a swipe and settles with the switch's curve once they lift.
-            .offset(x: -CGFloat(index) * proxy.size.width + stripSwipe)
-            .animation(store.sidebar.swipe == nil ? Motion.swipeSettle : Motion.swipeTrack, value: store.sidebar.swipe)
-            .animation(spaceCreated ? nil : Motion.layout, value: index)
-          }
-          .clipped()
+    ZStack(alignment: .topLeading) {
+      VStack(alignment: .leading, spacing: 0) {
+        searchPill.padding(.horizontal, 8)
+        if !store.isIncognito {
+          favoritesStrip
         }
-        .frame(width: outer.size.width, height: outer.size.height, alignment: .top)
-        // The Create a Space panel is the page after the last space: it comes in from the right and pushes the
-        // space's section out to the left with the switch's spring. Cancelled, it goes back the same way;
-        // created, it fades over the new space, which is already in place.
-        .offset(x: isCreatingSpace ? -outer.size.width : 0)
-        .animation(spaceCreated ? nil : Motion.layout, value: isCreatingSpace)
-        if isCreatingSpace {
-          createPanel
-            .frame(width: outer.size.width, height: outer.size.height)
-            .transition(spaceCreated ? .opacity : .move(edge: .trailing))
+        // Keeps the pill and the favorites still and slides the spaces' own sections side by side, each
+        // from the same top.
+        let index = store.spaces.spaces.index(id: store.spaces.selectedID) ?? 0
+        PageStrip {
+          ForEach(store.spaces.spaces) { space in
+            SpacePage(store: store, id: space.id) { page($0) }
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
+              .environment(\.isSelectedSpace, space.id == store.spaces.selectedID)
+              // Only the space on screen takes clicks: a row of the one sliding out is not a row of the shown
+              // space.
+              .allowsHitTesting(space.id == store.spaces.selectedID)
+          }
         }
+        // The strip follows the fingers during a swipe and settles with the switch's curve once they lift.
+        .offset(x: -CGFloat(index) * width + stripSwipe)
+        .animation(store.sidebar.swipe == nil ? Motion.swipeSettle : Motion.swipeTrack, value: store.sidebar.swipe)
+        .animation(spaceCreated ? nil : Motion.layout, value: index)
+        .clipped()
       }
-      .animation(Motion.layout, value: isCreatingSpace)
-      .clipped()
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+      // The Create a Space panel is the page after the last space: it comes in from the right and pushes the
+      // space's section out to the left with the switch's spring. Cancelled, it goes back the same way;
+      // created, it fades over the new space, which is already in place.
+      .offset(x: isCreatingSpace ? -width : 0)
+      .animation(spaceCreated ? nil : Motion.layout, value: isCreatingSpace)
+      if isCreatingSpace {
+        createPanel
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .transition(spaceCreated ? .opacity : .move(edge: .trailing))
+      }
     }
+    .animation(Motion.layout, value: isCreatingSpace)
+    .clipped()
     // Dropped text, links and files open at the top of Today, where the line shows while they are over the sidebar.
     .sidebarDrop(isTargeted: $isDropTargeted) { urls in
       // Each opens at the top, so the last goes first to keep the dropped order.
@@ -380,7 +373,7 @@ struct SidebarView: View {
     let neighbor = spaces.index(id: store.spaces.selectedID).map { $0 + (swipe > 0 ? -1 : 1) }
       .flatMap { spaces.indices.contains($0) ? spaces[$0] : nil }
     let follows = swipe != 0 && neighbor.map { $0.profileID != space.profileID } ?? true
-    return HStack(alignment: .top, spacing: 0) {
+    return PageStrip {
       ForEach(runs, id: \.[0].id) { run in
         let isSelected = run.contains { $0.id == store.spaces.selectedID }
         favorites(run.first { $0.id == store.spaces.selectedID } ?? run[0])
@@ -388,7 +381,7 @@ struct SidebarView: View {
           .padding(.horizontal, 8)
           // Tiles close up under a dropped one with the row motion, otherwise with the layout move.
           .animation(drag?.isDropped == true ? Motion.row : Motion.layout, value: space.favoriteGrid.joined().map(\.id))
-          .frame(width: width, alignment: .top)
+          .frame(maxWidth: .infinity, alignment: .top)
           // The strip is as tall as the grid on screen; another profile's grid shows past its frame while it slides.
           .frame(height: isSelected ? nil : 0, alignment: .top)
           .environment(\.isSelectedSpace, isSelected)
@@ -399,7 +392,6 @@ struct SidebarView: View {
     .offset(x: -CGFloat(index) * width + (follows ? stripSwipe : 0))
     .animation(store.sidebar.swipe == nil ? Motion.swipeSettle : Motion.swipeTrack, value: store.sidebar.swipe)
     .animation(spaceCreated ? nil : Motion.layout, value: index)
-    .frame(width: width, alignment: .leading)
     .clipped()
   }
 
@@ -451,7 +443,7 @@ struct SidebarView: View {
         }
       }
       ScrollViewReader { proxy in
-        ScrollView {
+        RowList {
           VStack(spacing: 0) {
             ForEach(items) { listItem($0, in: space, selection: selection) }
             // The empty sidebar below the last row: opens a new tab on a double click and shows the sidebar
@@ -462,9 +454,7 @@ struct SidebarView: View {
               .onTapGesture(count: 2) { store.send(.showCommandBar) }
               .contextMenu { emptySidebarMenu }
           }
-          .frame(maxWidth: .infinity, minHeight: listHeight, alignment: .top)
         }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { listHeight = $1 }
         .overlay(alignment: selectedOffscreen == .top ? .top : .bottom) { overflowIndicator(space) }
         .onChange(of: store.sidebar.reveals) {
           // A split's row goes by its first pane.
@@ -959,7 +949,8 @@ struct SidebarView: View {
         .onGeometryChange(for: ShownRowEdge?.self) { proxy in
           guard isShown else { return nil }
           let frame = proxy.frame(in: .scrollView)
-          return ShownRowEdge(tab: tab.id, edge: frame.midY < 0 ? .top : frame.midY > listHeight ? .bottom : nil)
+          let height = proxy.bounds(of: .scrollView)!.height
+          return ShownRowEdge(tab: tab.id, edge: frame.midY < 0 ? .top : frame.midY > height ? .bottom : nil)
         } action: { shown in
           if let shown { selectedOffscreen = shown.edge }
         }
@@ -2089,6 +2080,35 @@ private struct SpacePage<Content: View>: View {
     if let space = store.spaces.spaces[id: id] {
       content(space).environment(\.spaceTheme, space.theme)
     }
+  }
+}
+
+private struct PageStrip: Layout {
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    let width = proposal.replacingUnspecifiedDimensions().width
+    let height = subviews.reduce(0) { max($0, $1.sizeThatFits(ProposedViewSize(width: width, height: proposal.height)).height) }
+    return CGSize(width: width, height: height)
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    for (index, subview) in subviews.enumerated() {
+      subview.place(
+        at: CGPoint(x: bounds.minX + CGFloat(index) * bounds.width, y: bounds.minY), anchor: .topLeading,
+        proposal: ProposedViewSize(width: bounds.width, height: proposal.height)
+      )
+    }
+  }
+}
+
+private struct RowList<Content: View>: View {
+  @ViewBuilder let content: Content
+  @State private var height: CGFloat = 0
+
+  var body: some View {
+    ScrollView {
+      content.frame(maxWidth: .infinity, minHeight: height, alignment: .top)
+    }
+    .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { height = $1 }
   }
 }
 
