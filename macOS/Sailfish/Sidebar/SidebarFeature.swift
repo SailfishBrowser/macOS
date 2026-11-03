@@ -4,7 +4,7 @@ import SwiftUI
 
 extension SharedKey where Self == AppStorageKey<Double>.Default {
   // The docked sidebar's width, which the user drags its trailing edge to set; one width for every window.
-  static var sidebarWidth: Self { Self[.appStorage("sidebarWidth"), default: 200] }
+  static var sidebarWidth: Self { Self[.appStorage("sidebarWidth"), default: 219] }
 }
 
 @Reducer
@@ -27,7 +27,7 @@ struct SidebarFeature {
     var openPopovers = 0
     @Shared(.sidebarWidth) var width
 
-    static let widths = 160.0...400
+    static let widths = 180.0...400
     // Counts Reveal Tab in Sidebar requests; each scrolls the selected tab into view.
     var reveals = 0
     // Counts ⌘. requests to move the keyboard focus into the sidebar's list.
