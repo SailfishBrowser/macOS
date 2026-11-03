@@ -65,7 +65,7 @@ struct LittleSailfishView: View {
 
   private func bar(_ tab: Tab) -> some View {
     HStack(spacing: 8) {
-      TrafficLights().frame(width: 66, alignment: .leading)
+      TrafficLights().frame(width: TrafficLights.width, alignment: .leading)
       HStack(spacing: 0) {
         // The profile shows as a chip only once there is a choice of profiles; else a magnifier.
         if app.profiles.count > 1, let profile = app.profiles[id: store.profileID] {

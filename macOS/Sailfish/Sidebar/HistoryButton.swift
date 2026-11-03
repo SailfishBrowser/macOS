@@ -12,6 +12,8 @@ struct HistoryButton: View {
   let tab: Tab?
   let space: Space
   let send: (TabsFeature.Action) -> Void
+  // The hover plate's side, which a narrow sidebar shrinks.
+  var plate: CGFloat = 34
   @State private var isHovering = false
   @State private var isPressed = false
   // The catcher's view, which the accessibility action anchors the menu to.
@@ -26,7 +28,7 @@ struct HistoryButton: View {
       // The arrows are 15x12 pt on a 34 pt pitch: SF Symbols at 16 pt.
       .font(.system(size: 16, weight: .medium))
       .foregroundStyle(Theme.icon)
-      .frame(width: 34, height: 34)
+      .frame(width: plate, height: plate)
       .background(isHovering && isEnabled ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 6))
       .scaleEffect(isPressed ? 0.88 : 1)
       .animation(Motion.row, value: isPressed)

@@ -8,6 +8,10 @@ struct SidebarView: View {
   @State private var isMenuOpen = false
   // The "+" menu opens with New Tab highlighted; hovering moves the highlight.
   @State private var menuHighlight = "New Tab"
+  // The navigation "…" menu's open state, its highlighted row, and whether the pointer is on it.
+  @State private var isNavMenuOpen = false
+  @State private var navMenuHighlight = "Reload"
+  @State private var isNavMenuHovered = false
   @State private var isPillHovered = false
   @State private var isClearHovered = false
   @State private var isTidyHovered = false
@@ -530,64 +534,137 @@ struct SidebarView: View {
 
   private var header: some View {
     let tab = space.selectedTab
-    return HStack(spacing: 0) {
-      TrafficLights().frame(width: 73, alignment: .leading)
-      IconButton(systemName: "sidebar.left") { store.send(.sidebar(.toggle)) }
-      Spacer(minLength: 0)
-      // Back, forward and reload sit at the right; a narrow sidebar drops reload first, then forward.
-      do {
-        ViewThatFits(in: .horizontal) {
-          navigationButtons(tab, count: 3)
-          navigationButtons(tab, count: 2)
-          navigationButtons(tab, count: 1)
-        }
-        .layoutPriority(1)
-      }
+    return ViewThatFits(in: .horizontal) {
+      // Wide: the toggle, reload and everything else are buttons of their own, so there is no menu.
+      headerRow(tab, toggle: 24, plate: 27, showsReload: true, showsMenu: false)
+      // Narrower: the toggle goes into the menu, reload staying out.
+      headerRow(tab, toggle: nil, plate: 27, showsReload: true, showsMenu: true)
+      // Narrowest: only back, forward and the menu show; reload and the toggle live in it.
+      headerRow(tab, toggle: nil, plate: 25, showsReload: false, showsMenu: true)
     }
-    // The reload sits 22 pt from the sidebar's edge.
-    .padding(.trailing, 5)
     .background {
       // The header's background moves the window, and a double click does what the title bar's would.
       Color.clear.contentShape(Rectangle())
         .gesture(WindowDragGesture())
         .allowsWindowActivationEvents(true)
-        .onTapGesture(count: 2) { titleBarDoubleClick() }
+        .onTapGesture(count: 2) { NSApp.keyWindow?.performTitleBarDoubleClick() }
     }
     .frame(height: 46)
     .offset(y: 1)
   }
 
-  private func navigationButtons(_ tab: Tab?, count: Int) -> some View {
+  // Traffic lights at the leading edge, back, forward, reload and the menu at the trailing one, so the
+  // navigation always keeps to the right at every width.
+  private func headerRow(
+    _ tab: Tab?, toggle: CGFloat?, plate: CGFloat, showsReload: Bool, showsMenu: Bool
+  ) -> some View {
     HStack(spacing: 0) {
-      HistoryButton(direction: .back, tab: tab, space: space, send: send)
-      if count > 1 {
-        HistoryButton(direction: .forward, tab: tab, space: space, send: send)
+      TrafficLights().frame(width: TrafficLights.width, alignment: .leading)
+      if let toggle {
+        // A little air after the window buttons; the navigation keeps its own gap before it.
+        IconButton(systemName: "sidebar.left", plate: toggle) { store.send(.sidebar(.toggle)) }
+          .padding(.leading, 10)
       }
-      if count > 2 {
+      Spacer(minLength: 4)
+      navigationButtons(
+        tab, plate: plate, showsReload: showsReload, showsMenu: showsMenu, showsToggle: toggle != nil
+      )
+    }
+    // The right gap matches the address bar's, 8 pt in from the sidebar's edge.
+    .padding(.trailing, 8)
+  }
+
+  // Back and forward, with reload and the menu while the header has room for them. A wide header shows
+  // reload as a button of its own, with the developer reload in its menu, so it needs no menu of its own.
+  private func navigationButtons(
+    _ tab: Tab?, plate: CGFloat, showsReload: Bool, showsMenu: Bool, showsToggle: Bool
+  ) -> some View {
+    HStack(spacing: 0) {
+      HistoryButton(direction: .back, tab: tab, space: space, send: send, plate: plate)
+      HistoryButton(direction: .forward, tab: tab, space: space, send: send, plate: plate)
+      if showsReload {
         if tab?.isLoading == true {
-          IconButton(systemName: "xmark", plate: 34) { send(.stop) }
+          IconButton(systemName: "xmark", plate: plate) { send(.stop) }
         } else {
           // ⌘-click duplicates the tab.
-          IconButton(systemName: "arrow.clockwise", plate: 34, isEnabled: tab?.isLive == true) {
+          IconButton(systemName: "arrow.clockwise", plate: plate, isEnabled: tab?.isLive == true) {
             guard let tab else { return }
             send(NSApp.currentEvent?.modifierFlags.contains(.command) == true ? .duplicate(tab.id) : .reload)
           }
+          .contextMenu {
+            if tab?.url.isDeveloperPage == true {
+              Button("Refresh (Ignore Cache)") {
+                NSApp.sendAction(#selector(WindowController.reloadBypassingCache(_:)), to: nil, from: nil)
+              }
+            }
+          }
         }
-        if tab?.url.isDeveloperPage == true {
-          ReloadMenu()
-        }
+      }
+      if showsMenu {
+        navMenu(tab: tab, plate: plate, showsReload: showsReload, showsToggle: showsToggle)
       }
     }
     .fixedSize()
   }
 
-  // The system's title-bar double click, as set in System Settings: zoom, minimize or nothing.
-  private func titleBarDoubleClick() {
-    guard let window = NSApp.keyWindow else { return }
-    switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
-    case "Minimize": window.performMiniaturize(nil)
-    case "None": break
-    default: window.performZoom(nil)
+  // The navigation menu holds only what the header is not already showing: reload while its button is
+  // away, and the sidebar toggle while its button is. A wide header shows both, so it has no menu at all.
+  private func navMenu(tab: Tab?, plate: CGFloat, showsReload: Bool, showsToggle: Bool) -> some View {
+    Button { isNavMenuOpen.toggle() } label: {
+      Image(systemName: "ellipsis")
+        .font(.system(size: 14, weight: .medium))
+        .foregroundStyle(Theme.icon)
+        .frame(width: plate, height: plate)
+        .background(isNavMenuHovered || isNavMenuOpen ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(PressBounce())
+    .onHover { isNavMenuHovered = $0 }
+    .help("More navigation actions")
+    .sidebarPopover(isPresented: $isNavMenuOpen, arrowEdge: .bottom) {
+      VStack(spacing: 0) {
+        if !showsReload {
+          MenuRow(
+            title: tab?.isLoading == true ? "Stop" : "Reload",
+            systemName: tab?.isLoading == true ? "xmark" : "arrow.clockwise",
+            shortcut: "⌘R", highlight: $navMenuHighlight
+          ) {
+            isNavMenuOpen = false
+            guard let tab else { return }
+            if tab.isLoading {
+              send(.stop)
+            } else if NSApp.currentEvent?.modifierFlags.contains(.command) == true {
+              // ⌘-click duplicates the tab, as the reload button does.
+              send(.duplicate(tab.id))
+            } else {
+              send(.reload)
+            }
+          }
+          .disabled(tab?.isLive != true && tab?.isLoading != true)
+          .opacity(tab?.isLive == true || tab?.isLoading == true ? 1 : 0.5)
+          if tab?.url.isDeveloperPage == true {
+            MenuRow(
+              title: "Refresh (Ignore Cache)", systemName: "arrow.clockwise.circle", shortcut: "⇧⌘R",
+              highlight: $navMenuHighlight
+            ) {
+              isNavMenuOpen = false
+              NSApp.sendAction(#selector(WindowController.reloadBypassingCache(_:)), to: nil, from: nil)
+            }
+          }
+        }
+        if !showsToggle {
+          MenuRow(
+            title: store.sidebar.isFloating ? "Show Sidebar" : "Hide Sidebar",
+            systemName: "sidebar.left", shortcut: "⌘S", highlight: $navMenuHighlight
+          ) {
+            isNavMenuOpen = false
+            store.send(.sidebar(.toggle))
+          }
+        }
+      }
+      .padding(8)
+      .frame(width: 222)
+      .environment(\.colorScheme, .dark)
     }
   }
 
@@ -2542,6 +2619,10 @@ private extension View {
 
 // Window buttons: gray until the pointer is over them, then colored with their glyphs.
 struct TrafficLights: View {
+  // The width the three buttons take up.
+  static let width: CGFloat = 70
+  static let dot: CGFloat = 14
+
   @State private var isHovering = false
 
   var body: some View {
@@ -2550,7 +2631,7 @@ struct TrafficLights: View {
       light(0xFEBC2E, "minus", #selector(NSWindow.performMiniaturize(_:)))
       light(0x28C840, "arrow.up.left.and.arrow.down.right", #selector(NSWindow.toggleFullScreen(_:)))
     }
-    .padding(.leading, 14)
+    .padding(.leading, 12)
     .onHover { isHovering = $0 }
   }
 
@@ -2558,10 +2639,10 @@ struct TrafficLights: View {
     Button { NSApp.sendAction(action, to: nil, from: nil) } label: {
       Circle()
         .fill(isHovering ? Color(hex: color) : Theme.trafficLight)
-        .frame(width: 12, height: 12)
+        .frame(width: Self.dot, height: Self.dot)
         .overlay {
           if isHovering {
-            Image(systemName: glyph).font(.system(size: 7, weight: .heavy)).foregroundStyle(.black.opacity(0.55))
+            Image(systemName: glyph).font(.system(size: 8, weight: .heavy)).foregroundStyle(.black.opacity(0.55))
           }
         }
     }
