@@ -123,10 +123,13 @@ import WebKit
           let list = try? await store.contentRuleList(forIdentifier: chunk.identifier)
         {
           compiled.append(list)
-        } else if let list = try await store.compileContentRuleList(
-          forIdentifier: chunk.identifier, encodedContentRuleList: chunk.json)
-        {
-          compiled.append(list)
+        } else {
+          guard (try? await Task.sleep(for: .seconds(1) / 60)) != nil else { return }
+          if let list = try await store.compileContentRuleList(
+            forIdentifier: chunk.identifier, encodedContentRuleList: chunk.json)
+          {
+            compiled.append(list)
+          }
         }
         if !replacing {
           ruleLists = compiled
