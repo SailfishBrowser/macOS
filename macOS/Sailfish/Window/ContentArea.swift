@@ -250,7 +250,7 @@ private struct PagePlaceholder: View {
 
   var body: some View {
     VStack(spacing: 10) {
-      TabFavicon(tab: tab, space: space)
+      TabFavicon(tab: tab, profileID: space.profileID, isIncognito: space.isIncognito)
       Text(tab.displayTitle).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.secondaryText).lineLimit(1)
     }
     .padding(.horizontal, 40)

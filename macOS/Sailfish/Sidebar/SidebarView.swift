@@ -763,7 +763,10 @@ struct SidebarView: View {
   }
 
   private func favoriteTile(_ tab: Tab, in space: Space) -> some View {
-    FavoriteTile(tab: tab, space: space)
+    FavoriteTile(
+      tab: tab, isSelected: tab.id == space.selectedTabID, theme: space.theme, profileID: space.profileID,
+      isIncognito: space.isIncognito
+    )
       .overlay {
         if keyRow == tab.id {
           RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.primaryText.opacity(0.4), lineWidth: 1.5)
@@ -865,7 +868,7 @@ struct SidebarView: View {
       Button { store.send(.sidebar(.reveal)) } label: {
         HStack(spacing: 6) {
           Image(systemName: edge == .top ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold))
-          TabFavicon(tab: tab, space: space).frame(width: 16, height: 16)
+          TabFavicon(tab: tab, profileID: space.profileID, isIncognito: space.isIncognito).frame(width: 16, height: 16)
         }
         .foregroundStyle(Theme.primaryText)
         .padding(.horizontal, 9)
@@ -1643,7 +1646,7 @@ struct SidebarView: View {
   // The Favorites placeholder: the dragged favicon on a light tile with a white outline.
   @ViewBuilder private func placeholder(_ slot: FavoriteSlot) -> some View {
     if let drag, !drag.isLanding, drag.shownTarget == .favorite(slot), let tab = dragged(drag) {
-      TabFavicon(tab: tab, space: space)
+      TabFavicon(tab: tab, profileID: space.profileID, isIncognito: space.isIncognito)
         .frame(maxWidth: .infinity)
         .frame(height: 46)
         .background(.white.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
@@ -1667,9 +1670,10 @@ struct SidebarView: View {
           favoriteTile(tab, in: space)
         } else {
           TabRow(
-            tab: tab, space: space, isSelected: tab.id == space.selectedTabID, name: nil, endRename: { _ in },
-            backToPinnedURL: {}, isLifted: true
+            tab: tab, profileID: space.profileID, isIncognito: space.isIncognito, isSelected: tab.id == space.selectedTabID,
+            name: nil, endRename: { _ in }, backToPinnedURL: {}, isLifted: true
           ) {}
+          .equatable()
           .padding(.vertical, Self.rowGap)
         }
       }
@@ -1693,11 +1697,14 @@ struct SidebarView: View {
   }
 
   private func tabRow(_ tab: Tab, in space: Space, selection: Set<Tab.ID>) -> some View {
-    let panes = space.split(of: tab.id).map { $0.tabIDs.compactMap { space.tabs[id: $0] } }
+    let split = space.split(of: tab.id)
     let hover = splitHover(on: tab.id, in: space)
     return Group {
-      if let panes {
-        SplitRow(tabs: panes, space: space, act: { send($0) }) { tabMenu($0) }
+      if let split {
+        SplitRow(
+          split: split.id, tabs: split.tabIDs.compactMap { space.tabs[id: $0] }, selectedTabID: space.selectedTabID,
+          theme: space.theme, profileID: space.profileID, isIncognito: space.isIncognito, act: { send($0) }
+        ) { tabMenu($0) }
           .splitHalf(hover)
           .padding(.vertical, Self.rowGap)
           .zone(.tab(tab.id), $zones)
@@ -1717,7 +1724,7 @@ struct SidebarView: View {
   private func plainTabRow(_ tab: Tab, in space: Space, isSelected: Bool, splitHover: SplitHover?) -> some View {
     // An unloaded pinned tab's X removes it; otherwise the button closes it.
     TabRow(
-      tab: tab, space: space, isSelected: isSelected,
+      tab: tab, profileID: space.profileID, isIncognito: space.isIncognito, isSelected: isSelected,
       name: renamingTab == tab.id ? $draftName : nil,
       endRename: { if $0 { finishRename(tab) } else { renamingTab = nil } },
       // ⌘-click keeps the page it moved on to, in a new Today tab.
@@ -1731,6 +1738,7 @@ struct SidebarView: View {
     ) {
       send(tab.pinnedURL != nil && !tab.isLive ? .archive([tab.id]) : .close(tab.id))
     }
+      .equatable()
       .splitHalf(splitHover)
       // ⌘-click and ⇧-click gather a multi-selection; a plain click selects the one tab.
       .pressDown(scale: 0.992) {
@@ -2330,7 +2338,8 @@ private struct SidebarRow<Content: View>: View {
 // A tab's favicon; before its page loads, the one history keeps for it.
 struct TabFavicon: View {
   let tab: Tab
-  let space: Space
+  let profileID: UUID
+  let isIncognito: Bool
   @State private var saved: NSImage?
 
   var body: some View {
@@ -2344,14 +2353,15 @@ struct TabFavicon: View {
     .preference(key: FaviconColor.self, value: (tab.pageFavicon ?? saved)?.representativeColor)
     .task(id: tab.iconPage) {
       guard tab.pageFavicon == nil else { return }
-      saved = await Autocomplete.favicon(space.profileID, space.isIncognito, tab.iconPage)
+      saved = await Autocomplete.favicon(profileID, isIncognito, tab.iconPage)
     }
   }
 }
 
-private struct TabRow: View {
+private struct TabRow: View, @MainActor Equatable {
   let tab: Tab
-  let space: Space
+  let profileID: UUID
+  let isIncognito: Bool
   let isSelected: Bool
   // The name being typed while the tab is renamed.
   let name: Binding<String>?
@@ -2368,6 +2378,12 @@ private struct TabRow: View {
   @State private var isIconHovered = false
   @State private var width: CGFloat = 0
   @FocusState private var isNameFocused: Bool
+
+  static func == (lhs: TabRow, rhs: TabRow) -> Bool {
+    lhs.tab == rhs.tab && lhs.profileID == rhs.profileID && lhs.isIncognito == rhs.isIncognito
+      && lhs.isSelected == rhs.isSelected && (lhs.name == nil) == (rhs.name == nil) && lhs.isLifted == rhs.isLifted
+      && lhs.splitHover == rhs.splitHover
+  }
 
   var body: some View {
     SidebarRow(isSelected: isSelected || isLifted, leadingInset: splitHalfEnd) {
@@ -2483,7 +2499,7 @@ private struct TabRow: View {
       if tab.isLoading, tab.icon == nil {
         RoundedRectangle(cornerRadius: 3).fill(Theme.fillHover).frame(width: 14, height: 14)
       } else {
-        TabIcon(tab: tab, space: space).engineMark(tab)
+        TabIcon(tab: tab, profileID: profileID, isIncognito: isIncognito).engineMark(tab)
       }
     }
     .frame(width: 16)
@@ -2495,13 +2511,14 @@ private struct TabRow: View {
 // The tab's own icon if it was given one, else its favicon.
 struct TabIcon: View {
   let tab: Tab
-  let space: Space
+  let profileID: UUID
+  let isIncognito: Bool
 
   var body: some View {
     if let icon = tab.icon {
       SpaceIcon(icon: icon, emojiSize: 15)
     } else {
-      TabFavicon(tab: tab, space: space)
+      TabFavicon(tab: tab, profileID: profileID, isIncognito: isIncognito)
     }
   }
 }
@@ -3059,12 +3076,15 @@ private struct EditPinnedURLDialog: View {
 // A favorite: its icon on a tile that lights on hover, and shows the selection when it is the current tab.
 private struct FavoriteTile: View {
   let tab: Tab
-  let space: Space
+  let isSelected: Bool
+  let theme: SpaceTheme
+  let profileID: UUID
+  let isIncognito: Bool
   @Environment(\.isDragging) private var isDragging
   @State private var isHovering = false
 
   var body: some View {
-    TabIcon(tab: tab, space: space).engineMark(tab)
+    TabIcon(tab: tab, profileID: profileID, isIncognito: isIncognito).engineMark(tab)
       .frame(maxWidth: .infinity)
       // The tile is 47 pt tall.
       .frame(height: 47)
@@ -3075,8 +3095,7 @@ private struct FavoriteTile: View {
   // The favorites tile: 12.05pt continuous, with no stroke. Selected, it is lit with the space's primary color. A
   // favicon with a color tints it, more strongly when selected.
   private func background(_ shape: RoundedRectangle, tint: Color?) -> some View {
-    let isSelected = tab.id == space.selectedTabID
-    return shape.fill(isSelected ? Theme.favoriteSelection(space.theme) : isHovering && !isDragging ? Theme.fillHover : Theme.fill)
+    shape.fill(isSelected ? Theme.favoriteSelection(theme) : isHovering && !isDragging ? Theme.fillHover : Theme.fill)
       .overlay(shape.fill(Theme.favoriteTint(tint ?? .clear, isSelected: isSelected)))
   }
 }

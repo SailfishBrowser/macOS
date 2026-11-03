@@ -211,7 +211,7 @@ private struct SpaceCard: View {
 
   // A click opens the tab in its space; a drag takes it to another card.
   private func tabRow(_ tab: Tab) -> some View {
-    row(tab.displayTitle, weight: .regular) { TabFavicon(tab: tab, space: space).frame(width: 16, height: 16) }
+    row(tab.displayTitle, weight: .regular) { TabFavicon(tab: tab, profileID: space.profileID, isIncognito: space.isIncognito).frame(width: 16, height: 16) }
       .onTapGesture { open(tab.id) }
       .gesture(
         DragGesture(minimumDistance: 4, coordinateSpace: .named("library-spaces"))
