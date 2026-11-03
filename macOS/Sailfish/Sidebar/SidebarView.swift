@@ -435,6 +435,7 @@ struct SidebarView: View {
 
   private func page(_ space: Space) -> some View {
     let items = listItems(space)
+    let selection = space.selection
     return VStack(alignment: .leading, spacing: 0) {
       if store.isIncognito {
         incognitoLabel.padding(.top, 10)
@@ -452,7 +453,7 @@ struct SidebarView: View {
       ScrollViewReader { proxy in
         ScrollView {
           VStack(spacing: 0) {
-            ForEach(items) { listItem($0, in: space) }
+            ForEach(items) { listItem($0, in: space, selection: selection) }
             // The empty sidebar below the last row: opens a new tab on a double click and shows the sidebar
             // menu on a right click; a drag moves the window, as the rest of the background does.
             Color.clear.frame(maxHeight: .infinity).contentShape(Rectangle())
@@ -943,12 +944,12 @@ struct SidebarView: View {
     return items
   }
 
-  @ViewBuilder private func listItem(_ item: ListItem, in space: Space) -> some View {
+  @ViewBuilder private func listItem(_ item: ListItem, in space: Space, selection: Set<Tab.ID>) -> some View {
     switch item {
     case let .tab(tab, depth, isFolded):
       let isShown = space.id == store.spaces.selectedID
         && space.split(of: tab.id)?.tabIDs.contains { $0 == space.selectedTabID } ?? (tab.id == space.selectedTabID)
-      tabRow(tab, in: space)
+      tabRow(tab, in: space, selection: selection)
         .background(keyRow == tab.id ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8))
         // Which edge of the list the selected row is scrolled past, if it is. Naming the row makes a newly
         // selected row report even when it is in view.
@@ -1691,7 +1692,7 @@ struct SidebarView: View {
     renamingFolder = folder.id
   }
 
-  private func tabRow(_ tab: Tab, in space: Space) -> some View {
+  private func tabRow(_ tab: Tab, in space: Space, selection: Set<Tab.ID>) -> some View {
     let panes = space.split(of: tab.id).map { $0.tabIDs.compactMap { space.tabs[id: $0] } }
     let hover = splitHover(on: tab.id, in: space)
     return Group {
@@ -1701,7 +1702,7 @@ struct SidebarView: View {
           .padding(.vertical, Self.rowGap)
           .zone(.tab(tab.id), $zones)
       } else {
-        plainTabRow(tab, in: space, splitHover: hover)
+        plainTabRow(tab, in: space, isSelected: tab.id == space.selectedTabID || selection.contains(tab.id), splitHover: hover)
       }
     }
   }
@@ -1713,10 +1714,10 @@ struct SidebarView: View {
     return SplitHover(index: index, count: (space.split(of: other)?.tabIDs.count ?? 1) + 1, phase: phase)
   }
 
-  private func plainTabRow(_ tab: Tab, in space: Space, splitHover: SplitHover?) -> some View {
+  private func plainTabRow(_ tab: Tab, in space: Space, isSelected: Bool, splitHover: SplitHover?) -> some View {
     // An unloaded pinned tab's X removes it; otherwise the button closes it.
     TabRow(
-      tab: tab, space: space, isSelected: tab.id == space.selectedTabID || space.selection.contains(tab.id),
+      tab: tab, space: space, isSelected: isSelected,
       name: renamingTab == tab.id ? $draftName : nil,
       endRename: { if $0 { finishRename(tab) } else { renamingTab = nil } },
       // ⌘-click keeps the page it moved on to, in a new Today tab.
