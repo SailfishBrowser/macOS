@@ -13,7 +13,7 @@ import WebKit
 // in the background.
 @MainActor enum ContentBlocker {
   // Part of the record's stamp; raising it when the converter's output changes converts the lists again.
-  nonisolated fileprivate static let converterVersion = 1
+  nonisolated fileprivate static let converterVersion = 2
   nonisolated private static let identifierPrefix = "ContentBlocker"
   // The lists compiled so far, on every live WebKit page while the setting is on.
   private(set) static var ruleLists: [WKContentRuleList] = [] {
@@ -146,11 +146,11 @@ import WebKit
   }
 
   nonisolated private static func encoded(
-    _ rules: (network: [[ContentRule]], cosmetic: [[ContentRule]])
+    _ chunks: [(name: String, rules: [ContentRule])]
   ) -> [(identifier: String, json: String)] {
-    (rules.network + rules.cosmetic).map { chunk in
-      let json = "[" + chunk.map(\.json).joined(separator: ",") + "]"
-      return ("\(identifierPrefix).\(digest(json))", json)
+    chunks.map { chunk in
+      let json = "[" + chunk.rules.map(\.json).joined(separator: ",") + "]"
+      return ("\(identifierPrefix).\(chunk.name).\(digest(json))", json)
     }
   }
 
@@ -158,16 +158,18 @@ import WebKit
     SHA256.hash(data: Data(json.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
   }
 
-  // Converts filter lists in uBlock Origin's syntax into chunks of content rules, network chunks and cosmetic chunks,
-  // each within WebKit's limit. A filter outside the subset WebKit can express is skipped whole.
-  nonisolated static func rules(from lists: [String]) -> (network: [[ContentRule]], cosmetic: [[ContentRule]]) {
-    let lines = lists.flatMap(FilterSet.activeLines)
-    let cancelled = Set(lines.compactMap(FilterSet.badfilterTarget))
-    var filters = FilterSet()
-    for line in lines where !cancelled.contains(line) {
-      filters.add(line)
+  // Converts filter lists in uBlock Origin's syntax into chunks of content rules, each named for its lists and within
+  // WebKit's limit. A filter outside the subset WebKit can express is skipped whole.
+  nonisolated static func rules(from lists: [(key: String, text: String)]) -> [(name: String, rules: [ContentRule])] {
+    let lines = lists.map { FilterSet.activeLines($0.text) }
+    let cancelled = Set(lines.joined().compactMap(FilterSet.badfilterTarget))
+    var filters = FilterSet(lists: lists.count)
+    for (index, lines) in lines.enumerated() {
+      for line in lines where !cancelled.contains(line) {
+        filters.add(line, list: index)
+      }
     }
-    return (filters.networkChunks, filters.cosmeticChunks)
+    return filters.chunks(names: lists.map(\.key))
   }
 }
 
@@ -309,8 +311,8 @@ private struct FilterLists: Sendable {
 
   var digests: [Data] { lists.map(\.digest) }
 
-  func texts() throws -> [String] {
-    try lists.map { try String(contentsOf: $0.file, encoding: .utf8) }
+  func texts() throws -> [(key: String, text: String)] {
+    try lists.map { ($0.key, try String(contentsOf: $0.file, encoding: .utf8)) }
   }
 
   // `root` is the bundled uBlock Origin, whose contentURL paths are relative to it.
@@ -448,9 +450,9 @@ private enum DomainScope: Equatable {
 
 // The filters of a set of lists, sorted into the parts WebKit's chunks are built from.
 private struct FilterSet {
-  // The rules of one chunk, under WebKit's limit of 150,000: smaller lists compile with half the memory at the peak,
-  // and the first one is ready sooner.
-  static let maxRules = 50_000
+  // The rules of one chunk, far under WebKit's limit of 150,000, so that WebKit's parse of its JSON, on the main
+  // thread before the compile, fits in a frame.
+  static let maxRules = 11_000
   // A host-anchored pattern's start: any scheme, then the host or a subdomain of it.
   static let hostAnchor = "^[^:]+://+([^:/]+\\.)?"
   // uBlock Origin's separator: any character but a letter, a digit or one of _ - . %.
@@ -473,19 +475,27 @@ private struct FilterSet {
     ":matches-media(", ":if(", ":if-not(", ":shadow(", ":contains(", ":nth-ancestor(", ":spath(",
   ]
 
-  // Network blocks, the exceptions to them, and the important blocks no exception lifts, in their chunks' order.
-  private var blocks = RuleList()
+  // Each list's network blocks, the exceptions to them, and the important blocks no exception lifts.
+  private var hostBlocks: [[(host: String, rule: ContentRule)]]
+  private var otherBlocks: [RuleList]
+  private var hostExceptions: [String: RuleList] = [:]
   private var exceptions = RuleList()
   private var important = RuleList()
   // Hosts whose pages are excepted from every filter.
   private var exceptedPages: [String] = []
-  // Element hiding filters, the domains each selector is unhidden on, and the selectors unhidden everywhere.
-  private var hides: [(selector: String, scope: DomainScope)] = []
+  // Each list's hiding filters, the domains each selector is unhidden on, and the selectors unhidden everywhere.
+  private var hides: [[(selector: String, scope: DomainScope)]]
   private var unhidden: [String: Set<String>] = [:]
   private var unhiddenEverywhere: Set<String> = []
   // Hosts excepted from generic hiding, and from all hiding.
   private var genericHidingOff: [String] = []
   private var hidingOff: [String] = []
+
+  init(lists: Int) {
+    hostBlocks = Array(repeating: [], count: lists)
+    otherBlocks = Array(repeating: RuleList(), count: lists)
+    hides = Array(repeating: [], count: lists)
+  }
 
   // Rules in order without repeats.
   private struct RuleList {
@@ -634,22 +644,22 @@ private struct FilterSet {
     return (filter[..<dollar], filter[filter.index(after: dollar)...].split(separator: ","))
   }
 
-  mutating func add(_ line: String) {
+  mutating func add(_ line: String, list: Int) {
     if let (marker, range) = Self.cosmeticMarker(line) {
       guard marker == "##" || marker == "#@#" else { return }
-      addHiding(line[range.upperBound...], on: line[..<range.lowerBound], exception: marker == "#@#")
+      addHiding(line[range.upperBound...], on: line[..<range.lowerBound], exception: marker == "#@#", list: list)
     } else if !line.contains("$$"), !line.contains("$@$") {
-      addNetwork(line)
+      addNetwork(line, list: list)
     }
   }
 
-  private mutating func addHiding(_ selector: Substring, on domains: Substring, exception: Bool) {
+  private mutating func addHiding(_ selector: Substring, on domains: Substring, exception: Bool, list: Int) {
     guard !selector.isEmpty, !selector.hasPrefix("+js("), !selector.hasPrefix("^"),
       !Self.proceduralOperators.contains(where: { selector.contains($0) }),
       let scope = DomainScope(domains, separator: ",")
     else { return }
     let selector = String(selector)
-    guard exception else { return hides.append((selector, scope)) }
+    guard exception else { return hides[list].append((selector, scope)) }
     switch scope {
     case .all: unhiddenEverywhere.insert(selector)
     case let .only(domains): unhidden[selector, default: []].formUnion(domains)
@@ -657,7 +667,7 @@ private struct FilterSet {
     }
   }
 
-  private mutating func addNetwork(_ line: String) {
+  private mutating func addNetwork(_ line: String, list: Int) {
     let exception = line.hasPrefix("@@")
     var (pattern, options) = Self.split(exception ? line.dropFirst(2) : line[...])
     if !exception, options.isEmpty {
@@ -686,7 +696,7 @@ private struct FilterSet {
       hidingOff.append(contentsOf: pages)
       return
     }
-    guard !(exception && parsed.isImportant), let (filters, isHost) = Self.urlFilters(pattern) else { return }
+    guard !(exception && parsed.isImportant), let (filters, isHost, host) = Self.urlFilters(pattern) else { return }
     var trigger = ContentRule.Trigger(isCaseSensitive: parsed.isCaseSensitive ? true : nil)
     switch parsed.scope {
     case .all: break
@@ -701,12 +711,16 @@ private struct FilterSet {
     }
     for trigger in triggers.flatMap({ Self.typed($0, parsed, wholeHost: isHost || exception) }) {
       let rule = ContentRule(trigger: trigger, action: .init(type: exception ? "ignore-previous-rules" : "block"))
-      if exception {
+      if exception, let host {
+        hostExceptions[host, default: RuleList()].append(rule)
+      } else if exception {
         exceptions.append(rule)
       } else if parsed.isImportant {
         important.append(rule)
+      } else if let host {
+        hostBlocks[list].append((host, rule))
       } else {
-        blocks.append(rule)
+        otherBlocks[list].append(rule)
       }
     }
   }
@@ -765,14 +779,14 @@ private struct FilterSet {
     }
   }
 
-  // A pattern as WebKit url-filters, and whether it names a whole host; nil for a regex WebKit cannot run or a pattern
-  // that is not ASCII. A final separator, which can also be the URL's end, gives two filters, one for each: as one
-  // filter with an optional group, a list of urlhaus's paths compiles twenty times slower.
-  static func urlFilters(_ pattern: Substring) -> (filters: [String], isHost: Bool)? {
+  // A pattern as WebKit url-filters, whether it names a whole host, and the host it names; nil for a regex WebKit
+  // cannot run or a pattern that is not ASCII. A final separator, which can also be the URL's end, gives two filters,
+  // one for each: as one filter with an optional group, a list of urlhaus's paths compiles twenty times slower.
+  static func urlFilters(_ pattern: Substring) -> (filters: [String], isHost: Bool, host: String?)? {
     guard pattern.allSatisfy({ $0.isASCII && !$0.isWhitespace }) else { return nil }
     if pattern.count > 2, pattern.hasPrefix("/"), pattern.hasSuffix("/") {
       let regex = pattern.dropFirst().dropLast()
-      return isWebKitRegex(regex) ? ([String(regex)], false) : nil
+      return isWebKitRegex(regex) ? ([String(regex)], false, nil) : nil
     }
     var source = pattern
     var filter = ""
@@ -795,7 +809,15 @@ private struct FilterSet {
       source = source.dropLast()
     }
     let host = source.hasSuffix("^") ? source.dropLast() : source
-    let isHost = hostAnchored && !host.isEmpty && host.allSatisfy { $0.isLetter || $0.isNumber || "._-".contains($0) }
+    let named = Substring(
+      source.unicodeScalars.prefix {
+        ("a"..."z").contains($0) || ("A"..."Z").contains($0) || ("0"..."9").contains($0)
+          || "._-".unicodeScalars.contains($0)
+      })
+    let isHost = hostAnchored && !host.isEmpty && named.endIndex == host.endIndex
+    let ended = source[named.endIndex...].first.map { "^/:".contains($0) } ?? endAnchored
+    let lowered = hostAnchored && ended ? named.lowercased() : ""
+    let requestHost = isHostname(lowered) ? lowered : nil
     // After a whole host the path always follows, so its separator cannot be the end.
     let endsInSeparator = source.hasSuffix("^") && !endAnchored && !isHost && source.count > 1
     if endsInSeparator {
@@ -812,8 +834,8 @@ private struct FilterSet {
     if endAnchored {
       filter += "$"
     }
-    guard !endsInSeparator else { return ([filter + separator, filter + "$"], isHost) }
-    return ([filter.isEmpty ? ".*" : filter], isHost)
+    guard !endsInSeparator else { return ([filter + separator, filter + "$"], isHost, requestHost) }
+    return ([filter.isEmpty ? ".*" : filter], isHost, requestHost)
   }
 
   // Whether WebKit's regex subset covers the regex: ASCII, no alternation, counted repetition, lookaround,
@@ -851,9 +873,9 @@ private struct FilterSet {
   // each starting with a letter or digit.
   static func isHostname(_ name: String) -> Bool {
     !name.isEmpty
-      && name.split(separator: ".", omittingEmptySubsequences: false).allSatisfy { label in
-        label.first.map { $0.isASCII && ($0.isLowercase || $0.isNumber) } == true
-          && label.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "_" || $0 == "-") }
+      && name.unicodeScalars.split(separator: ".", omittingEmptySubsequences: false).allSatisfy { label in
+        label.first.map { ("a"..."z").contains($0) || ("0"..."9").contains($0) } == true
+          && label.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "_" || $0 == "-" }
       }
   }
 
@@ -871,19 +893,87 @@ private struct FilterSet {
 
   // Splits rules into slices that leave room for the rules every chunk adds to its slice.
   private static func slices(_ rules: [ContentRule], leaving reserved: Int) -> [ArraySlice<ContentRule>] {
-    let size = maxRules - reserved
+    let size = max(maxRules - reserved, maxRules / 2)
     return stride(from: 0, to: rules.count, by: size).map { rules[$0..<min($0 + size, rules.count)] }
   }
 
-  // Each chunk holds a share of the blocks, then every exception, then every important block.
-  var networkChunks: [[ContentRule]] {
-    let tail = exceptions.rules + Self.pageException(exceptedPages) + important.rules
-    return Self.slices(blocks.rules, leaving: tail.count).map { Array($0) + tail }
+  private static func domains(of host: String) -> [String] {
+    var domains = [host]
+    var rest = host[...]
+    while let dot = rest.firstIndex(of: ".") {
+      rest = rest[rest.index(after: dot)...]
+      domains.append(String(rest))
+    }
+    return domains
   }
 
-  // Each chunk holds a share of the hiding rules: its generic ones, the exceptions from generic hiding, its specific
-  // ones, then the exceptions from all hiding.
-  var cosmeticChunks: [[ContentRule]] {
+  private static func groups(_ sizes: [Int]) -> [[Int]] {
+    let small = sizes.indices.filter { (1..<5_000).contains(sizes[$0]) }
+    return sizes.indices.filter { sizes[$0] >= 5_000 }.map { [$0] } + (small.isEmpty ? [] : [small])
+  }
+
+  // Each chunk holds a share of the blocks, then the exceptions that can lift them; the hiding chunks come last.
+  func chunks(names: [String]) -> [(name: String, rules: [ContentRule])] {
+    let anyHost = exceptions.rules + Self.pageException(exceptedPages)
+    var under: [String: Set<String>] = [:]
+    for host in hostExceptions.keys {
+      for domain in Self.domains(of: host) {
+        under[domain, default: []].insert(host)
+      }
+    }
+    let every = anyHost + hostExceptions.sorted { $0.key < $1.key }.flatMap(\.value.rules)
+    let network = Self.groups(hostBlocks.map(\.count)).flatMap { group in
+      hostChunks(group.flatMap { hostBlocks[$0] }, anyHost: anyHost, under: under).map {
+        (name: group.map { names[$0] }.joined(separator: "+"), rules: $0)
+      }
+    }
+    let anyHostBlocks = Self.slices(otherBlocks.flatMap(\.rules), leaving: every.count).map {
+      (name: "any-host", rules: Array($0) + every)
+    }
+    let importantBlocks = Self.slices(important.rules, leaving: 0).map { (name: "important", rules: Array($0)) }
+    let cosmetic = Self.groups(hides.map(\.count)).flatMap { group in
+      cosmeticChunks(group.flatMap { hides[$0] }).map {
+        (name: group.map { names[$0] }.joined(separator: "+"), rules: $0)
+      }
+    }
+    return network + anyHostBlocks + importantBlocks + cosmetic
+  }
+
+  private func hostChunks(
+    _ blocks: [(host: String, rule: ContentRule)], anyHost: [ContentRule], under: [String: Set<String>]
+  ) -> [[ContentRule]] {
+    var rest = blocks.sorted { $0.host.utf8.reversed().lexicographicallyPrecedes($1.host.utf8.reversed()) }[...]
+    var chunks: [[ContentRule]] = []
+    var rules: [ContentRule] = []
+    var matched: Set<String> = []
+    var count = anyHost.count
+    func close() {
+      chunks.append(rules + anyHost + matched.sorted().flatMap { hostExceptions[$0]!.rules })
+      (rules, matched, count) = ([], [], anyHost.count)
+    }
+    while let host = rest.first?.host {
+      let matching = under[host, default: []].union(Self.domains(of: host).filter { hostExceptions[$0] != nil })
+      let added = matching.subtracting(matched).reduce(0) { $0 + hostExceptions[$1]!.rules.count }
+      let room = Self.maxRules - count - added
+      if !rules.isEmpty, room <= 0 {
+        close()
+        continue
+      }
+      let taken = rest.prefix { $0.host == host }.prefix(rules.isEmpty ? max(room, Self.maxRules / 2) : room)
+      rules += taken.map(\.rule)
+      rest = rest.dropFirst(taken.count)
+      matched.formUnion(matching)
+      count += added + taken.count
+    }
+    if !rules.isEmpty {
+      close()
+    }
+    return chunks
+  }
+
+  // A list's hiding rules in chunks, each with a share of them: its generic ones, the exceptions from generic hiding,
+  // its specific ones, then the exceptions from all hiding.
+  private func cosmeticChunks(_ hides: [(selector: String, scope: DomainScope)]) -> [[ContentRule]] {
     var rules = RuleList()
     for (selector, scope) in hides where !unhiddenEverywhere.contains(selector) {
       let unhidden = self.unhidden[selector, default: []]
