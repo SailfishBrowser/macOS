@@ -36,22 +36,41 @@ struct CommandBarFeature {
 
   // An app command, listed among the results and run as its menu item would be.
   struct Command: Equatable, Sendable {
-    var title: String
+    var title: String { didSet { words = Self.words(title, keywords) } }
     var symbol: String
-    var shortcut = ""
+    var shortcut: String
     // The menu item's action and tag.
     var action: String
-    var tag = 0
+    var tag: Int
     // What the action takes besides: an extension's identifier for Run Extension.
-    var argument = ""
+    var argument: String
     // Other words that find it, as "close" finds Archive Tab.
-    var keywords = ""
+    let keywords: String
     // Listed after the search for the typed text, never first.
-    var isMinor = false
+    var isMinor: Bool
+    private(set) var words: [Substring]
 
-    func matches(_ query: String) -> Bool {
-      let words = (title + " " + keywords).lowercased().split { !$0.isLetter && !$0.isNumber }
-      return query.split(separator: " ").allSatisfy { part in words.contains { $0.hasPrefix(part) } }
+    init(
+      title: String, symbol: String, shortcut: String = "", action: String, tag: Int = 0, argument: String = "",
+      keywords: String = "", isMinor: Bool = false
+    ) {
+      self.title = title
+      self.symbol = symbol
+      self.shortcut = shortcut
+      self.action = action
+      self.tag = tag
+      self.argument = argument
+      self.keywords = keywords
+      self.isMinor = isMinor
+      words = Self.words(title, keywords)
+    }
+
+    private static func words(_ title: String, _ keywords: String) -> [Substring] {
+      (title + " " + keywords).lowercased().split { !$0.isLetter && !$0.isNumber }
+    }
+
+    func matches(_ parts: [Substring]) -> Bool {
+      parts.allSatisfy { part in words.contains { $0.hasPrefix(part) } }
     }
   }
 
@@ -178,7 +197,8 @@ struct CommandBarFeature {
         return Array(([.tab(editedTab)] + history.map(Suggestion.match) + recent).prefix(5))
       }
       let query = query.trimmingCharacters(in: .whitespaces).lowercased()
-      let commands = commands.filter { $0.matches(query) }
+      let parts = query.split(separator: " ")
+      let commands = commands.filter { $0.matches(parts) }
       if isActions { return Array(commands.prefix(5).map(Suggestion.command)) }
       let others = tabs.filter { $0.id != editing }
       // The empty ⌘T: the space's open tabs alone.
