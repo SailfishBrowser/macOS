@@ -1,9 +1,10 @@
 import ComposableArchitecture
 import Foundation
+import SwiftUI
 
 extension SharedKey where Self == AppStorageKey<Double>.Default {
   // The docked sidebar's width, which the user drags its trailing edge to set; one width for every window.
-  static var sidebarWidth: Self { Self[.appStorage("sidebarWidth"), default: 219] }
+  static var sidebarWidth: Self { Self[.appStorage("sidebarWidth"), default: 200] }
 }
 
 @Reducer
@@ -21,9 +22,12 @@ struct SidebarFeature {
     var spaceEditorRequest: Bool?
     // How far a two-finger swipe has moved the spaces' strip; positive moves toward the previous space.
     var swipe: CGFloat?
+    // How many of the sidebar's own popovers are open. While one is, a floating sidebar stays out, so the
+    // pointer can move into the popover without the card sliding away under it.
+    var openPopovers = 0
     @Shared(.sidebarWidth) var width
 
-    static let widths = 180.0...400
+    static let widths = 160.0...400
     // Counts Reveal Tab in Sidebar requests; each scrolls the selected tab into view.
     var reveals = 0
     // Counts ⌘. requests to move the keyboard focus into the sidebar's list.
@@ -50,6 +54,8 @@ struct SidebarFeature {
     // ⌘.: a hidden sidebar slides out and its list takes the arrow keys.
     case focusList
     case peek(Bool)
+    // A sidebar popover opened or closed; while any is open the floating card stays out.
+    case popover(Bool)
     case resize(Double)
     // Reveal Tab in Sidebar: a hidden sidebar slides out, and the list scrolls to the selected tab.
     case reveal
@@ -83,7 +89,12 @@ struct SidebarFeature {
           state.hidesAfterDrag = !isPeeking
           return .none
         }
+        // A popover hanging off the sidebar keeps a floating card out while the pointer visits it.
+        if !isPeeking, state.openPopovers > 0 { return .none }
         state.isPeeking = isPeeking && state.isFloating
+      case let .popover(isOpen):
+        state.openPopovers = max(0, state.openPopovers + (isOpen ? 1 : -1))
+        if isOpen, state.isFloating { state.isPeeking = true }
       case let .resize(width):
         state.$width.withLock { $0 = min(max(width, State.widths.lowerBound), State.widths.upperBound) }
       case .reveal:
@@ -100,5 +111,54 @@ struct SidebarFeature {
       }
       return .none
     }
+  }
+}
+
+// Where a sidebar popover reports that it opened or closed. While one is open a floating sidebar stays out, so
+// the pointer can travel into the popover without the card sliding away underneath it.
+private struct SidebarPopoverReporterKey: EnvironmentKey {
+  static let defaultValue: @MainActor @Sendable (Bool) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+  var sidebarPopoverReporter: @MainActor @Sendable (Bool) -> Void {
+    get { self[SidebarPopoverReporterKey.self] }
+    set { self[SidebarPopoverReporterKey.self] = newValue }
+  }
+}
+
+extension View {
+  // A popover hanging off the sidebar, reported while it shows. Away from the sidebar, where no reporter is
+  // set, it is an ordinary popover.
+  func sidebarPopover<PopoverContent: View>(
+    isPresented: Binding<Bool>, arrowEdge: Edge = .bottom,
+    @ViewBuilder content: @escaping () -> PopoverContent
+  ) -> some View {
+    popover(isPresented: isPresented, arrowEdge: arrowEdge) {
+      content().sidebarPopoverReported()
+    }
+  }
+
+  func sidebarPopover<Item: Identifiable, PopoverContent: View>(
+    item: Binding<Item?>, arrowEdge: Edge = .bottom,
+    @ViewBuilder content: @escaping (Item) -> PopoverContent
+  ) -> some View {
+    popover(item: item, arrowEdge: arrowEdge) {
+      content($0).sidebarPopoverReported()
+    }
+  }
+}
+
+private extension View {
+  func sidebarPopoverReported() -> some View { modifier(SidebarPopoverReport()) }
+}
+
+private struct SidebarPopoverReport: ViewModifier {
+  @Environment(\.sidebarPopoverReporter) private var report
+
+  func body(content: Content) -> some View {
+    content
+      .onAppear { report(true) }
+      .onDisappear { report(false) }
   }
 }

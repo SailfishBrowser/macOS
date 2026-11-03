@@ -227,7 +227,7 @@ struct PillControls: View {
         if isSidebarHovered || isOpen {
           icon("slider.horizontal.2.square") { isOpen = true }
             .help("Site Controls")
-            .popover(isPresented: $isOpen, arrowEdge: .bottom) {
+            .sidebarPopover(isPresented: $isOpen, arrowEdge: .bottom) {
               SiteControls(space: space, tab: tab, url: url, open: open)
             }
         }

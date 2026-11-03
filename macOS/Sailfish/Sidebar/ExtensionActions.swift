@@ -103,7 +103,7 @@ struct ExtensionButton<Label: View>: View {
     }
     .disabled(!action.isEnabled)
     .opacity(action.isEnabled ? 1 : 0.45)
-    .popover(isPresented: Binding(get: { popup?.isOpen == true }, set: { if !$0 { popup?.close() } }), arrowEdge: .bottom) {
+    .sidebarPopover(isPresented: Binding(get: { popup?.isOpen == true }, set: { if !$0 { popup?.close() } }), arrowEdge: .bottom) {
       if let popup {
         WebView(view: popup.popup.view).frame(width: popup.size.width, height: popup.size.height)
       }

@@ -268,6 +268,15 @@ struct SidebarView: View {
       }
     }
     .animation(Motion.menu, value: isMenuOpen)
+    // Every popover hanging off the sidebar reports here: while one is open the floating card stays out, and
+    // closing it with the pointer away lets the card go, since no hover change reaches it from there.
+    .environment(\.sidebarPopoverReporter) { isOpen in
+      store.send(.sidebar(.popover(isOpen)))
+      guard !isOpen, store.sidebar.isFloating, let window = NSApp.keyWindow else { return }
+      if NSEvent.mouseLocation.x - window.frame.minX > store.sidebar.width + 12 {
+        store.send(.sidebar(.peek(false)))
+      }
+    }
   }
 
   // The Auto Archive banner, from the first idle archive until it is closed.
@@ -622,7 +631,7 @@ struct SidebarView: View {
       commandPopup = Engine.shared.runExtensionAction(id, tab, in: space).map(ExtensionPopup.init)
       store.send(.extensionRan)
     }
-    .popover(isPresented: Binding(get: { commandPopup?.isOpen == true }, set: { if !$0 { commandPopup?.close() } }), arrowEdge: .bottom) {
+    .sidebarPopover(isPresented: Binding(get: { commandPopup?.isOpen == true }, set: { if !$0 { commandPopup?.close() } }), arrowEdge: .bottom) {
       if let commandPopup {
         WebView(view: commandPopup.popup.view).frame(width: commandPopup.size.width, height: commandPopup.size.height)
       }
@@ -641,11 +650,11 @@ struct SidebarView: View {
     }
     .overlay(alignment: .trailing) {
       Color.clear.frame(width: 16, height: 16).padding(.trailing, 11)
-        .popover(item: permissionRequest, arrowEdge: .bottom) { PermissionPrompt(request: $0) }
+        .sidebarPopover(item: permissionRequest, arrowEdge: .bottom) { PermissionPrompt(request: $0) }
     }
     .overlay(alignment: .trailing) {
       Color.clear.frame(width: 16, height: 16).padding(.trailing, 11)
-        .popover(item: engineOffer, arrowEdge: .bottom) { EngineOfferPrompt(offer: $0) }
+        .sidebarPopover(item: engineOffer, arrowEdge: .bottom) { EngineOfferPrompt(offer: $0) }
     }
   }
 
@@ -695,7 +704,7 @@ struct SidebarView: View {
             .pressDown(scale: 0.99) { send(.select(tab.id)) }
             .favoritePreview(tab) { send(.preload(tab.id)) } open: { openPreview($0, of: tab) }
             .contextMenu { tabMenu(tab) }
-            .popover(isPresented: isPresented($renamingTab, tab.id), arrowEdge: .bottom) {
+            .sidebarPopover(isPresented: isPresented($renamingTab, tab.id), arrowEdge: .bottom) {
               TextField("Name", text: $draftName).textFieldStyle(.roundedBorder).frame(width: 180).padding(10)
                 .onSubmit { finishRename(tab) }
             }
@@ -821,7 +830,7 @@ struct SidebarView: View {
       withAnimation(Motion.row) { send(.togglePinnedSection) }
     }
     .contextMenu { spaceMenu }
-    .popover(
+    .sidebarPopover(
       isPresented: Binding(
         get: { pickingIconFor == space.id }, set: { if !$0, pickingIconFor == space.id { pickingIconFor = nil } }),
       arrowEdge: .bottom
@@ -1050,7 +1059,7 @@ struct SidebarView: View {
       .onTapGesture { withAnimation(Motion.row) { send(.toggleFolder(folder.id)) } }
       .contextMenu { folderMenu(folder) }
       .onHover { hoveredFolder = $0 ? folder.id : hoveredFolder == folder.id ? nil : hoveredFolder }
-      .popover(isPresented: isPresented($peekFolder, folder.id), arrowEdge: .trailing) {
+      .sidebarPopover(isPresented: isPresented($peekFolder, folder.id), arrowEdge: .trailing) {
         FolderSearch(folder: folder, tabs: folderTabs(folder.id, in: space)) {
           peekFolder = nil
           send(.select($0))
@@ -2525,7 +2534,7 @@ extension View {
 private extension View {
   // Change Icon…: the space icon picker, with Remove Icon going back to the favicon.
   func tabIconPicker(_ icon: String?, isPresented: Binding<Bool>, set: @escaping (String?) -> Void) -> some View {
-    popover(isPresented: isPresented, arrowEdge: .trailing) {
+    sidebarPopover(isPresented: isPresented, arrowEdge: .trailing) {
       IconPicker(icon: Binding { icon ?? "" } set: { set($0.isEmpty ? nil : $0) })
     }
   }
@@ -2889,7 +2898,7 @@ private struct SpaceDots: View {
             newFolder: { newFolder(item.id) }, shareAnchor: { zones.frames[.dot(item.id)] })
         }
         // The icon picker opens over the dot, without switching to its space.
-        .popover(
+        .sidebarPopover(
           isPresented: Binding { pickingIcon == item.id } set: { if !$0 { pickingIcon = nil } }, arrowEdge: .top
         ) {
           IconPicker(icon: Binding { item.icon } set: { icon in

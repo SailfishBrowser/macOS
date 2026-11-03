@@ -628,6 +628,7 @@ struct WindowFeature {
         }
         if index < 0 {
           state.isLibraryOpen = crossesLibrary
+          if crossesLibrary { state.sidebar.isPeeking = false }
           return .none
         }
         // The swipe lands on the neighbor on the slightest gesture: fingers still moving its way as they lift, however
@@ -747,6 +748,8 @@ struct WindowFeature {
       case let .showLibrary(pane):
         state.library = LibraryFeature.State(pane: pane)
         state.isLibraryOpen = true
+        // The Library takes the window over from a floating sidebar.
+        state.sidebar.isPeeking = false
         return .none
 
       case .toggleLibrary:
@@ -754,6 +757,7 @@ struct WindowFeature {
           state.library = LibraryFeature.State(pane: .media)
         }
         state.isLibraryOpen.toggle()
+        if state.isLibraryOpen { state.sidebar.isPeeking = false }
         return .none
 
       case let .openFromLibrary(space, tab):

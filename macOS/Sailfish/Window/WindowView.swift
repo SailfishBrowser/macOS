@@ -220,12 +220,14 @@ struct WindowView: View {
         // The card shows its first frame 2.6-3.4 frames after the pointer reaches the edge, which the hover and the
         // first frame take on their own, so there is no dwell.
         .onHover { isAtEdge in
-          if isAtEdge { store.send(.sidebar(.peek(true))) }
+          if isAtEdge, !store.isLibraryOpen { store.send(.sidebar(.peek(true))) }
         }
       // A permission prompt or a "Play in WebKit" offer hangs off the URL pill, so it brings the sidebar out.
-      if store.sidebar.isPeeking
-        || store.spaces.selected.selectedTabID.flatMap({ Engine.shared.permissionRequests[$0] }) != nil
-        || store.spaces.selected.selectedTabID.flatMap({ Engine.shared.engineOffers[$0] }) != nil
+      // The Library and the floating sidebar take turns: while the Library shows, the card stays away.
+      if !store.isLibraryOpen,
+        store.sidebar.isPeeking
+          || store.spaces.selected.selectedTabID.flatMap({ Engine.shared.permissionRequests[$0] }) != nil
+          || store.spaces.selected.selectedTabID.flatMap({ Engine.shared.engineOffers[$0] }) != nil
       {
         SidebarView(store: store)
           .frame(width: store.sidebar.visibleWidth)
