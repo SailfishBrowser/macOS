@@ -12,9 +12,9 @@ import WebKit
 // the lists up from the store in milliseconds, and only the first launch after an install or a list change compiles,
 // in the background.
 @MainActor enum ContentBlocker {
-  // Part of every compiled list's identifier; raising it when the converter's output changes compiles the lists again.
+  // Part of the record's stamp; raising it when the converter's output changes converts the lists again.
   nonisolated fileprivate static let converterVersion = 1
-  private static let identifierPrefix = "ContentBlocker"
+  nonisolated private static let identifierPrefix = "ContentBlocker"
   // The lists compiled so far, on every live WebKit page while the setting is on.
   private(set) static var ruleLists: [WKContentRuleList] = [] {
     didSet { applyToLivePages() }
@@ -42,10 +42,7 @@ import WebKit
     guard isOn, isWebKitInUse, task == nil else { return }
     let root = URL(filePath: Engine.adBlocker)
     task = Task {
-      let store = WKContentRuleListStore.default()!
-      if let prefix = await compiledPrefix(root: root),
-        let lists = await lookUp(await stored(in: store)[prefix, default: []], prefix: prefix, in: store)
-      {
+      if let lists = await recordedLists(root: root) {
         ruleLists = lists
       } else {
         do {
@@ -92,95 +89,73 @@ import WebKit
     }
   }
 
-  // The stored lists by the identifier prefix of the compile that made them.
-  private static func stored(in store: WKContentRuleListStore) async -> [String: [String]] {
-    Dictionary(
-      grouping: (await store.availableIdentifiers() ?? []).filter { $0.hasPrefix(identifierPrefix + ".") }
-    ) { $0.split(separator: ".").prefix(2).joined(separator: ".") + "." }
-  }
-
-  // The prefix of the stored lists compiled from the current filter list files, when the record names it and all of
-  // its lists are in the store.
-  private static func compiledPrefix(root: URL) async -> String? {
+  // The stored lists compiled from the current filter list files, when the record names them and all of them are in
+  // the store.
+  private static func recordedLists(root: URL) async -> [WKContentRuleList]? {
     let stamp = try? await Task.detached(priority: .utility) { try FilterLists.stamp(root: root) }.value
-    guard let stamp, let prefix = FilterLists.compiled(for: stamp) else { return nil }
-    let identifiers = await stored(in: WKContentRuleListStore.default()!)[prefix, default: []]
-    return isComplete(identifiers, prefix: prefix) ? prefix : nil
-  }
-
-  // Looks up the lists compiled from these filter lists, or compiles them, and removes every other stored list.
-  private static func compile(_ lists: FilterLists) async {
+    guard let stamp, let identifiers = FilterLists.compiled(for: stamp) else { return nil }
     let store = WKContentRuleListStore.default()!
-    let prefix = "\(identifierPrefix).\(digest(lists.digests))."
-    let stored = await stored(in: store)
-    // The lists this compile keeps.
-    let current: Set<String>
-    if let lists = await lookUp(stored[prefix, default: []], prefix: prefix, in: store) {
-      if lists.map(\.identifier) != ruleLists.map(\.identifier) {
-        ruleLists = lists
-      }
-      current = Set(stored[prefix, default: []])
-    } else {
-      // While these compile, pages keep the lists they have.
-      let chunks: [String]
-      do {
-        chunks = try await Task.detached(priority: .utility) { encoded(rules(from: try lists.texts())) }.value
-      } catch {
-        return Logger().error("Filter lists not read: \(error)")
-      }
-      // A first compile gives pages each list as it is ready; a recompile replaces the old lists at once.
-      let replacing = !ruleLists.isEmpty
-      current = Set(chunks.indices.map { "\(prefix)\($0).\(chunks.count)" })
-      var compiled: [WKContentRuleList] = []
-      do {
-        for (index, chunk) in chunks.enumerated() {
-          let id = "\(prefix)\(index).\(chunks.count)"
-          if let list = try await store.compileContentRuleList(forIdentifier: id, encodedContentRuleList: chunk) {
-            compiled.append(list)
-          }
-          if !replacing {
-            ruleLists = compiled
-          }
-        }
-      } catch {
-        return Logger().error("Content rules not compiled: \(error)")
-      }
-      ruleLists = compiled
-    }
-    for identifier in stored.values.joined() where !current.contains(identifier) {
-      try? await store.removeContentRuleList(forIdentifier: identifier)
-    }
-    lists.record(prefix: prefix)
-  }
-
-  // The stored lists of one compile, in order, when all of them are there and this WebKit can read them.
-  private static func lookUp(
-    _ identifiers: [String], prefix: String, in store: WKContentRuleListStore
-  ) async -> [WKContentRuleList]? {
-    guard isComplete(identifiers, prefix: prefix) else { return nil }
-    let ordered = identifiers.indices.map { "\(prefix)\($0).\(identifiers.count)" }
     var lists: [WKContentRuleList] = []
-    for identifier in ordered {
+    for identifier in identifiers {
       guard let list = try? await store.contentRuleList(forIdentifier: identifier) else { return nil }
       lists.append(list)
     }
     return lists
   }
 
-  // Whether these identifiers are every list of one compile.
-  private static func isComplete(_ identifiers: [String], prefix: String) -> Bool {
-    !identifiers.isEmpty && Set(identifiers.indices.map { "\(prefix)\($0).\(identifiers.count)" }) == Set(identifiers)
+  // Gives pages the content rule lists of these filter lists, each looked up from the store when a compile made it
+  // before and compiled when its rules are new, and removes every other stored list.
+  private static func compile(_ lists: FilterLists) async {
+    let store = WKContentRuleListStore.default()!
+    let chunks: [(identifier: String, json: String)]
+    do {
+      chunks = try await Task.detached(priority: .utility) { encoded(rules(from: try lists.texts())) }.value
+    } catch {
+      return Logger().error("Filter lists not read: \(error)")
+    }
+    let stored = await store.availableIdentifiers() ?? []
+    // A first compile gives pages each list as it is ready; a recompile replaces the old lists at once.
+    let replacing = !ruleLists.isEmpty
+    var compiled: [WKContentRuleList] = []
+    do {
+      for chunk in chunks {
+        if stored.contains(chunk.identifier),
+          let list = try? await store.contentRuleList(forIdentifier: chunk.identifier)
+        {
+          compiled.append(list)
+        } else if let list = try await store.compileContentRuleList(
+          forIdentifier: chunk.identifier, encodedContentRuleList: chunk.json)
+        {
+          compiled.append(list)
+        }
+        if !replacing {
+          ruleLists = compiled
+        }
+      }
+    } catch {
+      return Logger().error("Content rules not compiled: \(error)")
+    }
+    if compiled.map(\.identifier) != ruleLists.map(\.identifier) {
+      ruleLists = compiled
+    }
+    let kept = Set(chunks.map(\.identifier))
+    for identifier in stored where identifier.hasPrefix(identifierPrefix + ".") && !kept.contains(identifier) {
+      try? await store.removeContentRuleList(forIdentifier: identifier)
+    }
+    lists.record(identifiers: chunks.map(\.identifier))
   }
 
-  nonisolated private static func digest(_ digests: [Data]) -> String {
-    var hash = SHA256()
-    hash.update(data: Data("\(converterVersion)".utf8))
-    digests.forEach { hash.update(data: $0) }
-    return hash.finalize().prefix(8).map { String(format: "%02x", $0) }.joined()
+  nonisolated private static func encoded(
+    _ rules: (network: [[ContentRule]], cosmetic: [[ContentRule]])
+  ) -> [(identifier: String, json: String)] {
+    (rules.network + rules.cosmetic).map { chunk in
+      let json = "[" + chunk.map(\.json).joined(separator: ",") + "]"
+      return ("\(identifierPrefix).\(digest(json))", json)
+    }
   }
 
-  nonisolated private static func encoded(_ rules: (network: [[ContentRule]], cosmetic: [[ContentRule]])) -> [String] {
-    (rules.network + rules.cosmetic).map { "[" + $0.map(\.json).joined(separator: ",") + "]" }
+  nonisolated private static func digest(_ json: String) -> String {
+    SHA256.hash(data: Data(json.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
   }
 
   // Converts filter lists in uBlock Origin's syntax into chunks of content rules, network chunks and cosmetic chunks,
@@ -386,19 +361,22 @@ private struct FilterLists: Sendable {
 
   private struct Record: Codable {
     let stamp: String
-    let prefix: String
+    let identifiers: [String]
   }
 
-  // The identifier prefix of the stored lists compiled from the copies with this stamp.
-  static func compiled(for stamp: String) -> String? {
-    (try? JSONDecoder().decode(Record.self, from: Data(contentsOf: record))).flatMap { $0.stamp == stamp ? $0.prefix : nil }
+  // The identifiers of the stored lists compiled from the copies with this stamp.
+  static func compiled(for stamp: String) -> [String]? {
+    (try? JSONDecoder().decode(Record.self, from: Data(contentsOf: record))).flatMap {
+      $0.stamp == stamp ? $0.identifiers : nil
+    }
   }
 
-  // Records that the stored lists with this prefix are compiled from these copies.
-  func record(prefix: String) {
+  // Records that the stored lists with these identifiers are compiled from these copies.
+  func record(identifiers: [String]) {
     do {
       try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
-      try JSONEncoder().encode(Record(stamp: Self.stamp(of: lists.map(\.file)), prefix: prefix)).write(to: Self.record)
+      let entry = Record(stamp: try Self.stamp(of: lists.map(\.file)), identifiers: identifiers)
+      try JSONEncoder().encode(entry).write(to: Self.record)
     } catch {
       Logger().error("Compiled lists not recorded: \(error)")
     }
