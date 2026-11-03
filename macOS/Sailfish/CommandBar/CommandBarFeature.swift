@@ -237,8 +237,7 @@ struct CommandBarFeature {
     case faviconLoaded(URL, NSImage)
     case leaveKeyword
     case delegate(Delegate)
-    case matchesFinished(Int)
-    case matchesUpdated(Int, String, [AutocompleteMatch])
+    case matchesUpdated(Int, String, [AutocompleteMatch], done: Bool)
     case moveSelection(Int)
     case queryChanged(String)
     // The row's hover X or ⌘⌥Delete: the page leaves the suggestions.
@@ -291,16 +290,11 @@ struct CommandBarFeature {
         state.isActions = false
         return clear(&state)
 
-      case let .matchesFinished(id):
-        guard id == state.queryID else { return .none }
-        state.staleRows = []
-        state.refreshSuggestions()
-        return .none
-
-      case let .matchesUpdated(id, query, matches):
+      case let .matchesUpdated(id, query, matches, done):
         guard id == state.queryID else { return .none }
         state.matches = state.keeping(matches)
         state.matchesQuery = query
+        if done { state.staleRows = [] }
         state.refreshSuggestions()
         state.selection = min(state.selection, max(state.suggestions.count - 1, 0))
         let effects = Effect.merge(loadFavicons(state), warmWebKit(state))
@@ -423,10 +417,9 @@ struct CommandBarFeature {
         id = state.queryID, profile = state.profile, incognito = state.isIncognito, keyword = state.keyword?.keyword,
         now = ContinuousClock.now
       ] send in
-      for await matches in await autocomplete.query(profile, incognito, typed, keyword, now) {
-        await send(.matchesUpdated(id, text, matches))
+      for await (matches, done) in await autocomplete.query(profile, incognito, typed, keyword, now) {
+        await send(.matchesUpdated(id, text, matches, done: done))
       }
-      await send(.matchesFinished(id))
     }
   }
 
