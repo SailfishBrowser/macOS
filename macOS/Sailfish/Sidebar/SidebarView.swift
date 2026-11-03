@@ -543,11 +543,10 @@ struct SidebarView: View {
       headerRow(tab, toggle: nil, plate: 25, showsReload: false, showsMenu: true)
     }
     .background {
-      // The header's background moves the window, and a double click does what the title bar's would.
+      // The header's background moves the window.
       Color.clear.contentShape(Rectangle())
         .gesture(WindowDragGesture())
         .allowsWindowActivationEvents(true)
-        .onTapGesture(count: 2) { NSApp.keyWindow?.performTitleBarDoubleClick() }
     }
     .frame(height: 46)
     .offset(y: 1)
