@@ -8,13 +8,9 @@ struct SidebarView: View {
   @State private var isMenuOpen = false
   // The "+" menu opens with New Tab highlighted; hovering moves the highlight.
   @State private var menuHighlight = "New Tab"
-  @State private var isPillHovered = false
-  @State private var isClearHovered = false
-  @State private var isTidyHovered = false
-  @State private var isHovered = false
+  @State private var hover = SidebarHover()
   // Read only by the Library button and the download stack, so download ticks do not redraw the sidebar.
   @State private var libraryHover = LibraryHover()
-  @State private var isTitleHovered = false
   @State private var isCreatingSpace = false
   // Create Space was pressed: the panel fades over the new space instead of sliding back out.
   @State private var spaceCreated = false
@@ -30,7 +26,6 @@ struct SidebarView: View {
   @State private var newFolderID: Folder.ID?
   @State private var renamingTab: Tab.ID?
   @State private var renamingGroup: TabGroup.ID?
-  @State private var hoveredGroup: TabGroup.ID?
   // The tab or folder whose icon is being picked.
   @State private var iconTab: UUID?
   // Lists a collapsed folder's tabs, with a search field, while the pointer rests on it.
@@ -158,7 +153,7 @@ struct SidebarView: View {
       guard let tab = space.selectedTab else { return }
       rename(tab)
     }
-    .onHover { isHovered = $0 }
+    .onHover { hover.isSidebar = $0 }
     .onChange(of: store.sidebar.spaceEditorRequest, initial: true) {
       guard let creating = store.sidebar.spaceEditorRequest else { return }
       isCreatingSpace = creating
@@ -277,7 +272,7 @@ struct SidebarView: View {
   private var content: some View {
     ZStack(alignment: .topLeading) {
       VStack(alignment: .leading, spacing: 0) {
-        searchPill.padding(.horizontal, 8)
+        Isolated { searchPill }.padding(.horizontal, 8)
         if !store.isIncognito {
           favoritesStrip
         }
@@ -434,7 +429,7 @@ struct SidebarView: View {
       } else {
         if !space.isHeaderHidden {
           // Centers the title 26 pt below the favorites.
-          spaceTitle(space).zone(.title, $zones).padding(.top, 8)
+          SpacePage(store: store, id: space.id) { spaceTitle($0) }.zone(.title, $zones).padding(.top, 8)
         }
         // The hint in a space with nothing pinned yet.
         if space.rows(in: .pinned).isEmpty, showsPinnedHint {
@@ -589,7 +584,7 @@ struct SidebarView: View {
         }
         Spacer()
         if let url {
-          PillControls(space: space, url: url, isHovered: isPillHovered, isSidebarHovered: isHovered, copied: { store.send(.showToast("Copied Current URL")) }) {
+          PillControls(space: space, url: url, isHovered: hover.isPill, isSidebarHovered: hover.isSidebar, copied: { store.send(.showToast("Copied Current URL")) }) {
             send(.open($0))
           }
         }
@@ -601,13 +596,13 @@ struct SidebarView: View {
       .padding(.trailing, 11)
       .frame(height: 36)
       .background(
-        store.isIncognito ? Theme.incognitoPill : isPillHovered ? Theme.fillHover : Theme.fill,
+        store.isIncognito ? Theme.incognitoPill : hover.isPill ? Theme.fillHover : Theme.fill,
         in: RoundedRectangle(cornerRadius: 12)
       )
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .onHover { isPillHovered = $0 }
+    .onHover { hover.isPill = $0 }
     .onChange(of: store.extensionToRun) { _, id in
       guard let id, let tab = space.selectedTabID else { return }
       commandPopup = Engine.shared.runExtensionAction(id, tab, in: space).map(ExtensionPopup.init)
@@ -768,7 +763,7 @@ struct SidebarView: View {
     let hasPinned = !space.rows(in: .pinned).isEmpty
     return HStack(spacing: 8) {
       // The chevron shows on hover, and stays while the pinned section is collapsed.
-      if hasPinned, isTitleHovered || space.isPinnedCollapsed {
+      if hasPinned, hover.isTitle || space.isPinnedCollapsed {
         Image(systemName: "chevron.right")
           .font(.system(size: 11, weight: .bold))
           .rotationEffect(.degrees(space.isPinnedCollapsed ? 0 : 90))
@@ -778,7 +773,7 @@ struct SidebarView: View {
       }
       Text(space.name)
       Spacer(minLength: 0)
-      if isTitleHovered {
+      if hover.isTitle {
         // The edit button beside the menu opens the space's theme.
         if !store.isIncognito {
           Button { isEditingSpace = true } label: {
@@ -804,9 +799,9 @@ struct SidebarView: View {
     // The … sits 18 pt in from the hover fill's trailing edge.
     .padding(.trailing, 6)
     .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-    .background(isTitleHovered ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8))
+    .background(hover.isTitle ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8))
     .contentShape(Rectangle())
-    .onHover { isTitleHovered = $0 }
+    .onHover { hover.isTitle = $0 }
     // Like a folder's row, the title shows or hides the pinned section; a double click renames the space.
     // Simultaneous, so that a single click toggles at once rather than after the double-click interval.
     .simultaneousGesture(TapGesture(count: 2).onEnded { SpaceMenu.rename(space, store) })
@@ -976,7 +971,7 @@ struct SidebarView: View {
         .transition(.asymmetric(insertion: .identity, removal: .opacity))
         .geometryGroup()
     case let .group(group):
-      groupItem(group, in: space)
+      SpacePage(store: store, id: space.id) { groupItem(group, in: $0) }
         .background(keyRow == group.id ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8))
         .transition(.asymmetric(insertion: .identity, removal: .opacity))
         .geometryGroup()
@@ -1013,23 +1008,23 @@ struct SidebarView: View {
       TidyDividerLine(isTidying: space.isTidying, color: showsDivider ? Theme.divider : .clear, lineWidth: 1 / displayScale)
       // Shows Clear only while the pointer is over the sidebar, and only while it has something to archive, and
       // Tidy before it once Today has several tabs to sort.
-      if !today.isEmpty, isHovered {
+      if !today.isEmpty, hover.isSidebar {
         if space.isTidying || space.tidyCandidates.count >= TabsFeature.tidyMinimum {
-          TidyButton(isTidying: space.isTidying, isHovered: $isTidyHovered) { send(.tidy(.start)) }
+          TidyButton(isTidying: space.isTidying, isHovered: $hover.isTidy) { send(.tidy(.start)) }
           Rectangle().fill(Theme.divider).frame(width: 1, height: 12)
         }
         Button { send(.clearToday) } label: {
           // The label is 26.5 pt wide and 8 pt tall at cap height: 10 pt semibold.
-          Text(isClearHovered ? "↓ Clear" : "Clear").font(.system(size: 10, weight: .semibold))
+          Text(hover.isClear ? "↓ Clear" : "Clear").font(.system(size: 10, weight: .semibold))
             .foregroundStyle(Theme.clearLabel)
-            .opacity(isTidyHovered ? 0.5 : 1)
+            .opacity(hover.isTidy ? 0.5 : 1)
         }
         .buttonStyle(.plain)
-        .onHover { isClearHovered = $0 }
+        .onHover { hover.isClear = $0 }
         .transition(.opacity)
       }
     }
-    .animation(Motion.layout, value: isHovered)
+    .animation(Motion.layout, value: hover.isSidebar)
     .padding(.horizontal, 10)
     // The divider is 29 pt below the title's center and 28.75 pt above New Tab's.
     .frame(height: showsDivider ? 16 : 0)
@@ -1111,7 +1106,7 @@ struct SidebarView: View {
         Text(group.name).fontWeight(.semibold)
         Spacer(minLength: 0)
         // Hover buttons on a Tidy header: its tabs into a pinned folder, and closing them.
-        if hoveredGroup == group.id, drag == nil {
+        if hover.group == group.id, drag == nil {
           groupButton("folder", "Turn into Folder") {
             withAnimation(Motion.row) { send(.newFolder(group.name, in: .pinned, with: space.members(of: group.id).map(\.id))) }
           }
@@ -1125,7 +1120,7 @@ struct SidebarView: View {
       }
     }
     .padding(.vertical, Self.rowGap)
-    .onHover { hoveredGroup = $0 ? group.id : hoveredGroup == group.id ? nil : hoveredGroup }
+    .onHover { hover.group = $0 ? group.id : hover.group == group.id ? nil : hover.group }
     .simultaneousGesture(TapGesture(count: 2).onEnded { rename(group) })
     .onTapGesture { withAnimation(Motion.row) { send(.toggleGroup(group.id)) } }
     .contextMenu { groupMenu(group) }
@@ -2725,6 +2720,23 @@ private struct SpaceDot: View {
 @Observable private final class LibraryHover {
   var isOnButton = false
   var isOnStack = false
+}
+
+@Observable private final class SidebarHover {
+  var isSidebar = false
+  var isPill = false
+  var isTitle = false
+  var isClear = false
+  var isTidy = false
+  var group: TabGroup.ID?
+}
+
+private struct Isolated<Content: View>: View {
+  @ViewBuilder let content: () -> Content
+
+  var body: some View {
+    content()
+  }
 }
 
 // The footer's Library button: a box glyph, with the badge of a running download over its top right, or for half
