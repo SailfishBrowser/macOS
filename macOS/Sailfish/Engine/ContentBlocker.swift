@@ -17,7 +17,13 @@ import WebKit
   nonisolated private static let identifierPrefix = "ContentBlocker"
   // The lists compiled so far, on every live WebKit page while the setting is on.
   private(set) static var ruleLists: [WKContentRuleList] = [] {
-    didSet { applyToLivePages() }
+    didSet {
+      if ruleLists.starts(with: oldValue, by: ===) {
+        addToLivePages(ruleLists.dropFirst(oldValue.count))
+      } else {
+        applyToLivePages()
+      }
+    }
   }
   private static var task: Task<Void, Never>?
   private static var isOn = false
@@ -86,6 +92,14 @@ import WebKit
   static func applyToLivePages() {
     for case let page as WebKitPage in Engine.shared.livePages.values {
       apply(to: page.webView.configuration.userContentController)
+    }
+  }
+
+  private static func addToLivePages(_ lists: ArraySlice<WKContentRuleList>) {
+    @Shared(.blocksAds) var blocksAds
+    guard blocksAds else { return }
+    for case let page as WebKitPage in Engine.shared.livePages.values {
+      lists.forEach(page.webView.configuration.userContentController.add)
     }
   }
 
