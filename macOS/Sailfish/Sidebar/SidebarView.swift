@@ -695,7 +695,7 @@ struct SidebarView: View {
             .landing(isLanding(.tab(tab.id)))
             .pressDown(scale: 0.99) { send(.select(tab.id)) }
             .favoritePreview(tab) { send(.preload(tab.id)) } open: { openPreview($0, of: tab) }
-            .contextMenu { tabMenu(tab) }
+            .contextMenu { TabMenu(store: store, spaceID: space.id, tabID: tab.id) { _, tab in tabMenu(tab) } }
             .popover(isPresented: isPresented($renamingTab, tab.id), arrowEdge: .bottom) {
               TextField("Name", text: $draftName).textFieldStyle(.roundedBorder).frame(width: 180).padding(10)
                 .onSubmit { finishRename(tab) }
@@ -1704,7 +1704,7 @@ struct SidebarView: View {
         SplitRow(
           split: split.id, tabs: split.tabIDs.compactMap { space.tabs[id: $0] }, selectedTabID: space.selectedTabID,
           theme: space.theme, profileID: space.profileID, isIncognito: space.isIncognito, act: { send($0) }
-        ) { tabMenu($0) }
+        ) { pane in TabMenu(store: store, spaceID: space.id, tabID: pane.id) { _, tab in tabMenu(tab) } }
           .splitHalf(hover)
           .padding(.vertical, Self.rowGap)
           .zone(.tab(tab.id), $zones)
@@ -1753,10 +1753,12 @@ struct SidebarView: View {
       }
       .simultaneousGesture(TapGesture(count: 2).onEnded { rename(tab) })
       .contextMenu {
-        if space.hasSelection, space.selection.contains(tab.id) {
-          selectionMenu
-        } else {
-          tabMenu(tab)
+        TabMenu(store: store, spaceID: space.id, tabID: tab.id) { space, tab in
+          if space.hasSelection, space.selection.contains(tab.id) {
+            selectionMenu
+          } else {
+            tabMenu(tab)
+          }
         }
       }
       .tabIconPicker(tab.icon, isPresented: isPresented($iconTab, tab.id)) { send(.setIcon(tab.id, $0)) }
@@ -2086,6 +2088,19 @@ private struct SpacePage<Content: View>: View {
   var body: some View {
     if let space = store.spaces.spaces[id: id] {
       content(space).environment(\.spaceTheme, space.theme)
+    }
+  }
+}
+
+private struct TabMenu<Content: View>: View {
+  let store: StoreOf<WindowFeature>
+  let spaceID: Space.ID
+  let tabID: Tab.ID
+  @ViewBuilder let content: (Space, Tab) -> Content
+
+  var body: some View {
+    if let space = store.spaces.spaces[id: spaceID], let tab = space.tabs[id: tabID] {
+      content(space, tab)
     }
   }
 }
