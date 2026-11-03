@@ -7,10 +7,10 @@ import WebKit
 // Ad blocking in WebKit pages: uBlock Origin's default filter lists, converted into WebKit content rule lists and
 // given to every WebKit page while "Block ads and trackers with uBlock Origin" is on. The lists start as the bundled
 // uBlock Origin's copies and are fetched again on uBlock's schedule. Compiled lists stay in WebKit's content rule list
-// store, with a record of the filter list files they were compiled from. A launch whose files match the record does
-// nothing more until the session's first WebKit view, warm or for a page, which looks the lists up from the store in
-// milliseconds; only the first launch after an install or a list change compiles, in the background at launch. The
-// first WebKit view also starts the fetching.
+// store, with a record of the filter list files they were compiled from. Nothing is read, looked up, compiled or
+// fetched until the session's first WebKit view, warm or for a page; then a launch whose files match the record looks
+// the lists up from the store in milliseconds, and only the first launch after an install or a list change compiles,
+// in the background.
 @MainActor enum ContentBlocker {
   // Part of every compiled list's identifier; raising it when the converter's output changes compiles the lists again.
   nonisolated fileprivate static let converterVersion = 1
@@ -19,50 +19,40 @@ import WebKit
   private(set) static var ruleLists: [WKContentRuleList] = [] {
     didSet { applyToLivePages() }
   }
-  // The launch's check of the store, or its compile, and the fetching that starts with the first WebKit view.
-  private static var preparing: Task<Void, Never>?
-  private static var fetching: Task<Void, Never>?
-  // The identifier prefix of the stored lists the check found for the current filter lists.
-  private static var storedPrefix: String?
+  private static var task: Task<Void, Never>?
+  private static var isOn = false
   private static var isWebKitInUse = false
 
   // The setting is on: at launch, or switched on.
   static func start() {
-    guard preparing == nil else { return }
+    isOn = true
+    load()
+  }
+
+  // A WebKit view is made, warm or for a page.
+  static func webKitDidStart() {
+    isWebKitInUse = true
+    load()
+  }
+
+  // Once the setting is on and a WebKit view exists: the lists compiled from the current filter list files, from the
+  // store or compiled, then each filter list fetched on uBlock Origin's schedule, checked 37 seconds in and every hour
+  // after that, each list fetched once its copy has expired.
+  private static func load() {
+    guard isOn, isWebKitInUse, task == nil else { return }
     let root = URL(filePath: Engine.adBlocker)
-    preparing = Task {
-      if let prefix = await compiledPrefix(root: root) {
-        storedPrefix = prefix
+    task = Task {
+      let store = WKContentRuleListStore.default()!
+      if let prefix = await compiledPrefix(root: root),
+        let lists = await lookUp(await stored(in: store)[prefix, default: []], prefix: prefix, in: store)
+      {
+        ruleLists = lists
       } else {
         do {
           await compile(try await Task.detached(priority: .utility) { try FilterLists(root: root) }.value)
         } catch {
           Logger().error("Filter lists not read: \(error)")
         }
-      }
-    }
-    fetch()
-  }
-
-  // A WebKit view is made, warm or for a page.
-  static func webKitDidStart() {
-    isWebKitInUse = true
-    fetch()
-  }
-
-  // Once the setting is on and a WebKit view exists: the stored lists for pages, then each filter list fetched on
-  // uBlock Origin's schedule, checked 37 seconds in and every hour after that, each list fetched once its copy has
-  // expired.
-  private static func fetch() {
-    guard let preparing, isWebKitInUse, fetching == nil else { return }
-    let root = URL(filePath: Engine.adBlocker)
-    fetching = Task {
-      await preparing.value
-      let store = WKContentRuleListStore.default()!
-      if ruleLists.isEmpty, let prefix = storedPrefix,
-        let lists = await lookUp(await stored(in: store)[prefix, default: []], prefix: prefix, in: store)
-      {
-        ruleLists = lists
       }
       guard (try? await Task.sleep(for: .seconds(37))) != nil else { return }
       var lists: FilterLists
@@ -82,10 +72,9 @@ import WebKit
   }
 
   static func stop() {
-    preparing?.cancel()
-    fetching?.cancel()
-    preparing = nil
-    fetching = nil
+    isOn = false
+    task?.cancel()
+    task = nil
   }
 
   // Gives the controller the compiled lists while the setting is on and takes them away while it is off; its page
