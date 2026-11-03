@@ -241,8 +241,6 @@ struct WindowFeature {
     case strip
     // The open Library, which the swipe can only close.
     case library
-    // The floating sidebar card, which a swipe to the left puts away.
-    case card
   }
   static let libraryGain: CGFloat = 2
 

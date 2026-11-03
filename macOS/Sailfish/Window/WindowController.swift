@@ -26,11 +26,9 @@ final class WindowController: NSWindowController, NSWindowDelegate {
   private var mouseButtonMonitor: Any?
   // Whether the current scroll gesture swipes between spaces; nil until its first few points of travel decide.
   private var isSwiping: Bool? = false
-  // What the current gesture moves, fixed as it begins: a swipe that starts on the Library or the floating card
-  // closes it and never reaches the strip, through its momentum too.
+  // What the current gesture moves, fixed as it begins: a swipe that starts on the Library closes it and never
+  // reaches the strip, through its momentum too.
   private var surface: WindowFeature.SwipeSurface?
-  // The floating card goes once per gesture.
-  private var isCardDismissed = false
   // The gesture's events while its direction is undecided, replayed to the sidebar if it turns out to scroll.
   private var held: [NSEvent] = []
   private static let lockTravel: CGFloat = 6
@@ -180,10 +178,11 @@ final class WindowController: NSWindowController, NSWindowDelegate {
       let x = event.locationInWindow.x
       surface =
         if store.isLibraryOpen { x < WindowFeature.libraryWidth ? .library : nil }
-        else if store.sidebar.isFloating { store.sidebar.isPeeking && x < store.sidebar.width + 3 ? .card : nil }
+        // A revealed floating sidebar swipes its spaces like the docked one; it no longer treats the gesture
+        // as a way to put the card away, so a swipe switches spaces instead of only hiding.
+        else if store.sidebar.isFloating { store.sidebar.isPeeking && x < store.sidebar.width + 3 ? .strip : nil }
         else { x < store.sidebar.width + 3 ? .strip : nil }
       isSwiping = surface == nil ? false : nil
-      isCardDismissed = false
       swipeSamples = []
       held = []
     }
@@ -206,16 +205,8 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     return nil
   }
 
-  // One event of a swipe: the strip, or the Library over it, follows the fingers, and their lift settles it. On the
-  // floating card a swipe to the left puts the card away; nothing else of it moves anything.
+  // One event of a swipe: the strip, or the Library over it, follows the fingers, and their lift settles it.
   private func track(_ event: NSEvent) {
-    if surface == .card {
-      if !isCardDismissed, event.momentumPhase.isEmpty, event.scrollingDeltaX < 0 {
-        isCardDismissed = true
-        store.send(.sidebar(.peek(false)))
-      }
-      return
-    }
     if !event.momentumPhase.isEmpty {
       // Momentum after a slow lift says which way the fingers were still going; the strip follows it.
       if store.sidebar.swipe != nil, event.scrollingDeltaX != 0 {
