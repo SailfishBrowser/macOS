@@ -13,7 +13,7 @@ import WebKit
 // in the background.
 @MainActor enum ContentBlocker {
   // Part of the record's stamp; raising it when the converter's output changes converts the lists again.
-  nonisolated fileprivate static let converterVersion = 3
+  nonisolated fileprivate static let converterVersion = 4
   nonisolated private static let identifierPrefix = "ContentBlocker"
   // The lists compiled so far, on every live WebKit page while the setting is on.
   private(set) static var ruleLists: [WKContentRuleList] = [] {
@@ -1010,16 +1010,20 @@ private struct FilterSet {
       case let .except(domains):
         trigger.unlessDomain = (domains + unhidden.sorted()).map { "*" + $0 }
       case let .only(domains):
-        let kept = domains.filter { !unhidden.contains($0) }
-        guard !kept.isEmpty else { continue }
-        trigger.ifDomain = kept.map { "*" + $0 }
+        for domain in domains where !unhidden.contains(domain) {
+          let page = ContentRule.Trigger(
+            urlFilter: Self.hostAnchor + domain.replacingOccurrences(of: ".", with: "\\.") + "[:/]",
+            resourceType: ["document"])
+          rules.append(ContentRule(trigger: page, action: .init(type: "css-display-none", selector: selector)))
+        }
+        continue
       }
       rules.append(ContentRule(trigger: trigger, action: .init(type: "css-display-none", selector: selector)))
     }
     let genericOff = Self.pageException(genericHidingOff)
     let allOff = Self.pageException(hidingOff)
     return Self.slices(rules.rules, leaving: genericOff.count + allOff.count).map { slice in
-      slice.filter { $0.trigger.ifDomain == nil } + genericOff + slice.filter { $0.trigger.ifDomain != nil } + allOff
+      slice.filter { $0.trigger.urlFilter == ".*" } + genericOff + slice.filter { $0.trigger.urlFilter != ".*" } + allOff
     }
   }
 }
