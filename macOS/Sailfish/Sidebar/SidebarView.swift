@@ -253,7 +253,7 @@ struct SidebarView: View {
       if isMenuOpen {
         ZStack(alignment: .bottomLeading) {
           Color.black.opacity(0.001).onTapGesture { isMenuOpen = false }
-          newItemMenu.padding(.leading, 6).padding(.bottom, 54).environment(\.colorScheme, .dark)
+          newItemMenu.coversPage().padding(.leading, 6).padding(.bottom, 54).environment(\.colorScheme, .dark)
             // The menu scales in from its corner.
             .transition(.scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity))
         }

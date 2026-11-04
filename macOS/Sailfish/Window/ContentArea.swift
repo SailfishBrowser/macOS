@@ -32,7 +32,7 @@ struct ContentArea: View {
     }
     .overlay {
       if let peek {
-        PeekOverlay(store: store, peek: peek, progress: peekProgress, showsPage: showsPeekPage)
+        PeekOverlay(store: store, peek: peek, progress: peekProgress, showsPage: showsPeekPage).coversPage()
       }
     }
     // In the strip above the card.
@@ -198,6 +198,7 @@ private struct Pane: View {
             UnevenRoundedRectangle(
               topLeadingRadius: hasBar ? 0 : 6, bottomLeadingRadius: 6, bottomTrailingRadius: 6,
               topTrailingRadius: hasBar ? 0 : 6))
+          .coversPage()
       }
       if let tab {
         ReaderOverlay(tab: tab.id, url: tab.url)
@@ -278,7 +279,7 @@ private struct PageDialogOverlay: View {
 
   var body: some View {
     if let dialog = Engine.shared.dialogs[tab] {
-      PageDialogView(dialog: dialog).id(dialog.id).clipShape(RoundedRectangle(cornerRadius: 6))
+      PageDialogView(dialog: dialog).id(dialog.id).clipShape(RoundedRectangle(cornerRadius: 6)).coversPage()
     }
   }
 }

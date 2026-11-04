@@ -32,6 +32,7 @@ struct WindowView: View {
               store: commandBar,
               accent: store.isIncognito ? Theme.accent : Theme.CommandBar.accent(store.spaces.selected.theme)
             ) { store.send(.commandBar(.dismiss)) }
+              .coversWindow()
               // The five-row panel centers in the window, 7 pt above the middle: within 2 pt of two
               // measurements, 176 pt from the top of a 696 pt window and 233 of 804.
               .padding(.top, max((proxy.size.height - Theme.CommandBar.fiveRowHeight) / 2 - 7, 0))
@@ -65,6 +66,7 @@ struct WindowView: View {
         // The corner toast sits 4 pt from the window's top and right edges.
         .padding(.top, toast.placement == .corner ? 4 : toast.placement.isTop ? 20 : 0)
         .padding(.trailing, toast.placement == .corner ? 4 : toast.placement.isTop ? 28 : 0)
+        .coversWindow()
         .transition(toast.placement.isTop ? .opacity : .move(edge: .bottom).combined(with: .opacity))
         .id(toast.id)
       }
@@ -87,6 +89,7 @@ struct WindowView: View {
             .shadow(color: .black.opacity(0.4), radius: 20, y: 8)
             .environment(\.colorScheme, .dark)
         }
+        .coversWindow()
         .transition(.opacity)
       }
     }
@@ -103,6 +106,7 @@ struct WindowView: View {
         } end: {
           store.send(.importer(.presented(.introEnded)))
         }
+        .coversWindow()
       }
     }
     .sheet(item: $store.scope(state: \.importer, action: \.importer)) { ImportView(store: $0) }
@@ -112,7 +116,7 @@ struct WindowView: View {
 
   @ViewBuilder private var switcher: some View {
     if let cycle = store.recentCycle {
-      TabSwitcher(cycle: cycle, spaces: store.spaces.spaces).transition(.opacity)
+      TabSwitcher(cycle: cycle, spaces: store.spaces.spaces).coversWindow().transition(.opacity)
     }
   }
 
@@ -139,6 +143,7 @@ struct WindowView: View {
       LibraryView(store: library, window: store)
         .frame(width: open, height: size.height)
         .background { covering(background, window: size, at: x) }
+        .coversWindow()
         .offset(x: x)
         .allowsHitTesting(shown > 0)
         // Off the window it would still take focus, and its search field then gets what is typed for the command bar.
@@ -196,7 +201,7 @@ struct WindowView: View {
         .overlay(alignment: .topTrailing) {
           if let percent = store.zoomIndicator {
             // Flush with the card's corner.
-            ZoomIndicator(percent: percent, theme: theme, isIncognito: store.isIncognito)
+            ZoomIndicator(percent: percent, theme: theme, isIncognito: store.isIncognito).coversPage()
           }
         }
         .overlay(alignment: .topTrailing) {
@@ -207,7 +212,7 @@ struct WindowView: View {
               space.split(of: tab.id) != nil
                 ? nil : tab.url.isDeveloperPage ? DeveloperBar.height : store.showsURLToolbar ? URLToolbar.height : nil
             }
-            FindBar(store: find).padding(10).padding(.top, toolbar ?? 0)
+            FindBar(store: find).coversPage().padding(10).padding(.top, toolbar ?? 0)
           }
         }
         .padding([.top, .bottom, .trailing], isPageFullScreen ? 0 : 10)
@@ -238,6 +243,7 @@ struct WindowView: View {
           .background(.regularMaterial.shadow(.drop(color: .black.opacity(0.4), radius: 12)), in: RoundedRectangle(cornerRadius: 10))
           .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.floatingRim))
           .padding(6)
+          .coversPage()
           // Entering matters too: a drag that left the sidebar and came back keeps it out. A pointer resting at
           // the window's edge is uncovered while the card overshoots past rest, and that is no exit.
           .onHover { over in
@@ -415,6 +421,7 @@ final class WebContainer: NSView {
     monitor.map(NSEvent.removeMonitor)
     monitor = nil
     guard window != nil else { return }
+    (window as? BrowserWindow)?.pages.add(self)
     monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
       // Only a click that reaches the page, not one on a Peek or button over it.
       if let self, event.window == window, let frame = window?.contentView?.superview,
