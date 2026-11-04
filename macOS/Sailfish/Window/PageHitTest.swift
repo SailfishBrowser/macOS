@@ -2,6 +2,13 @@ import AppKit
 import SwiftUI
 
 final class WindowHostingView<Content: View>: NSHostingView<Content> {
+  override func cursorUpdate(with event: NSEvent) {
+    guard (window as? BrowserWindow)?.isOnColumnResizeArea(event.locationInWindow) == true else {
+      return super.cursorUpdate(with: event)
+    }
+    NSCursor.columnResize.set()
+  }
+
   override func hitTest(_ point: NSPoint) -> NSView? {
     guard NSApp.currentEvent?.type == .scrollWheel, let superview,
       let container = (window as? BrowserWindow)?.page(at: superview.convert(point, to: nil)),

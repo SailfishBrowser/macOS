@@ -267,7 +267,7 @@ struct WindowView: View {
     Color.clear
       .frame(width: 5)
       .contentShape(Rectangle())
-      .pointerStyle(.columnResize)
+      .background(ColumnResizeArea())
       .gesture(
         DragGesture(minimumDistance: 0, coordinateSpace: .global)
           .onChanged { value in
@@ -277,6 +277,29 @@ struct WindowView: View {
           }
           .onEnded { _ in resizeStart = nil }
       )
+  }
+}
+
+private struct ColumnResizeArea: NSViewRepresentable {
+  func makeNSView(context: Context) -> AreaView { AreaView() }
+
+  func updateNSView(_ view: AreaView, context: Context) {}
+
+  final class AreaView: NSView {
+    override init(frame: NSRect) {
+      super.init(frame: frame)
+      addTrackingArea(NSTrackingArea(rect: .zero, options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+
+    required init?(coder: NSCoder) {
+      fatalError("init(coder:) is not supported")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+      (window as? BrowserWindow)?.columnResizeAreas.add(self)
+    }
   }
 }
 

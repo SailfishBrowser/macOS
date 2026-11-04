@@ -110,7 +110,9 @@ struct HoverTrackingArea: NSViewRepresentable {
 
     private func report(_ event: NSEvent) {
       let isInside = bounds.contains(convert(event.locationInWindow, from: nil))
-      let isCovered = (window as? BrowserWindow)?.isCovered(event.locationInWindow, sidebar: true) == true
+      let isCovered = (window as? BrowserWindow).map {
+        $0.isCovered(event.locationInWindow, sidebar: true) || $0.isOnColumnResizeArea(event.locationInWindow)
+      } == true
       tracker.move(self, to: isInside && !isCovered ? window?.contentView?.convert(event.locationInWindow, from: nil) : nil)
     }
   }

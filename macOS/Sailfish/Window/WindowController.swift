@@ -6,6 +6,7 @@ import SwiftUI
 final class BrowserWindow: NSWindow {
   let pages = NSHashTable<NSView>.weakObjects()
   let covers = NSHashTable<CoverView>.weakObjects()
+  let columnResizeAreas = NSHashTable<NSView>.weakObjects()
 
   // AppKit leaves full screen on one Esc that nothing handled; the controller's monitor does a two-step instead.
   override func cancelOperation(_ sender: Any?) {}
@@ -13,6 +14,10 @@ final class BrowserWindow: NSWindow {
   func page(at point: NSPoint) -> NSView? {
     guard !isCovered(point, sidebar: false) else { return nil }
     return pages.allObjects.first { contains($0, point) }
+  }
+
+  func isOnColumnResizeArea(_ point: NSPoint) -> Bool {
+    !isCovered(point, sidebar: true) && columnResizeAreas.allObjects.contains { contains($0, point) }
   }
 
   func isCovered(_ point: NSPoint, sidebar: Bool) -> Bool {
