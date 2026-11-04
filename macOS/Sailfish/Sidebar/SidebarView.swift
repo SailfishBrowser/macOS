@@ -2381,7 +2381,7 @@ struct TabFavicon: View {
         Image(systemName: "globe").font(.system(size: 13)).foregroundStyle(Theme.icon)
       }
     }
-    .preference(key: FaviconColor.self, value: (tab.pageFavicon ?? saved)?.representativeColor)
+    .preference(key: FaviconColor.self, value: (tab.pageFavicon ?? saved)?.dominantColors ?? [])
     .task(id: tab.iconPage) {
       guard tab.pageFavicon == nil else { return }
       saved = await Autocomplete.favicon(profileID, isIncognito, tab.iconPage)
@@ -3136,15 +3136,26 @@ private struct FavoriteTile: View {
       .frame(maxWidth: .infinity)
       // The tile is 47 pt tall.
       .frame(height: 47)
-      .backgroundPreferenceValue(FaviconColor.self) { background(RoundedRectangle(cornerRadius: 12), tint: $0) }
+      .backgroundPreferenceValue(FaviconColor.self) { background(RoundedRectangle(cornerRadius: 12), colors: $0) }
       .onHover { isHovering = $0 }
   }
 
-  // The favorites tile: 12.05pt continuous, with no stroke. Selected, it is lit with the space's primary color. A
-  // favicon with a color tints it, more strongly when selected.
-  private func background(_ shape: RoundedRectangle, tint: Color?) -> some View {
-    shape.fill(isSelected ? Theme.favoriteSelection(theme) : isHovering && !isDragging ? Theme.fillHover : Theme.fill)
-      .overlay(shape.fill(Theme.favoriteTint(tint ?? .clear, isSelected: isSelected)))
+  // The favorites tile: 12.05pt continuous. Selected, it is washed with its favicon's colors, which also run around it
+  // in a one-point border; a favicon with no color takes the space's primary color.
+  @ViewBuilder private func background(_ shape: RoundedRectangle, colors: [Color]) -> some View {
+    if isSelected {
+      let colors = colors.isEmpty ? [Theme.favoriteFallback(theme)] : colors
+      shape.fill(Theme.favoriteSelection)
+        .overlay(
+          shape.fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)).opacity(0.12))
+        .overlay(
+          shape.strokeBorder(
+            AngularGradient(
+              colors: colors + colors.prefix(1), center: .center, startAngle: .degrees(180), endAngle: .degrees(540)),
+            lineWidth: 1))
+    } else {
+      shape.fill(isHovering && !isDragging ? Theme.fillHover : Theme.fill)
+    }
   }
 }
 
