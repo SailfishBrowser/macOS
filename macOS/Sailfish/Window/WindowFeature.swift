@@ -565,8 +565,9 @@ struct WindowFeature {
         return .none
 
       case .closeMiniPlayer:
+        guard let tab = state.miniPlayer else { return .none }
         state.miniPlayer = nil
-        return .none
+        return .run { _ in await engine.media(tab, .pause) }
 
       case .restartToUpdate:
         return .run { _ in await updates.install() }
