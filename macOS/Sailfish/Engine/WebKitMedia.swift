@@ -145,6 +145,22 @@ extension WebKitPage {
     }
   }
 
+  func mediaVolume(_ done: @escaping @MainActor (Double) -> Void) {
+    let frame = mediaState.nowPlayingFrame.flatMap { mediaState.frames[$0] }
+    webView.evaluateJavaScript(
+      MediaVolume.read, in: frame?.isMainFrame == false ? frame : nil, in: WebKitPageScript.world
+    ) { result in
+      (try? result.get() as? String).flatMap(Double.init).map(done)
+    }
+  }
+
+  func setMediaVolume(_ volume: Double) {
+    run(MediaVolume.set(volume), in: nil)
+    for frame in mediaState.frames.values where !frame.isMainFrame {
+      run(MediaVolume.set(volume), in: frame)
+    }
+  }
+
   // Runs a script in Sailfish's content world in the frame, or in the main frame for none.
   private func run(_ script: String, in frame: WKFrameInfo?) {
     webView.evaluateJavaScript(script, in: frame?.isMainFrame == false ? frame : nil, in: WebKitPageScript.world)
