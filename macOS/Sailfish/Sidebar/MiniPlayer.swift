@@ -2,8 +2,8 @@ import ComposableArchitecture
 import SwiftUI
 
 extension WindowFeature {
-  // Leaving a tab whose video plays moves the video into Picture in Picture, and leaving one that plays
-  // only sound shows its controls at the foot of the sidebar. Showing the tab again ends either.
+  // Leaving a tab that plays, video or sound, shows its controls at the foot of the sidebar. Showing the tab again
+  // hides them and brings back its video from Picture in Picture.
   func miniPlayerFollows(_ state: inout State, shown: Tab.ID?, selected: Tab.ID?) -> Effect<Action> {
     func media(_ id: Tab.ID) -> PageMedia? {
       state.spaces.spaces.lazy.compactMap { $0.tabs[id: id] }.first?.media
@@ -15,12 +15,8 @@ extension WindowFeature {
     if let selected, media(selected)?.isInPictureInPicture == true {
       effects.append(.run { _ in await engine.media(selected, .exitPictureInPicture) })
     }
-    if let shown, shown != selected, let left = media(shown), left.isPlaying {
-      if !left.hasVideo {
-        state.miniPlayer = shown
-      } else if !left.isInPictureInPicture {
-        effects.append(.run { _ in await engine.media(shown, .enterPictureInPicture) })
-      }
+    if let shown, shown != selected, media(shown)?.isPlaying == true {
+      state.miniPlayer = shown
     }
     return .merge(effects)
   }
