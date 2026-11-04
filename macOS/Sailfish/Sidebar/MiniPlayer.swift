@@ -23,7 +23,7 @@ extension WindowFeature {
 }
 
 // The mini player, on the favorites tile's fill and radius: a tab's favicon (back to the tab), previous, play or pause,
-// next and the tab's volume. Hovering it shows the tab's title and a close button above; the
+// next and the tab's volume. Hovering it shows the tab's title, Picture in Picture and a close button above; the
 // speaker opens a volume slider below until the pointer leaves. It goes once the page has no media.
 struct MiniPlayer: View {
   let store: StoreOf<WindowFeature>
@@ -40,6 +40,15 @@ struct MiniPlayer: View {
           HStack(spacing: 0) {
             Text(tab.displayTitle).font(.system(size: 13)).foregroundStyle(Theme.rowText).lineLimit(1)
             Spacer(minLength: 8)
+            control(
+              media.isInPictureInPicture ? "pip.exit" : "pip.enter",
+              media.isInPictureInPicture ? "Exit Picture in Picture" : "Picture in Picture",
+              isSelected: media.isInPictureInPicture
+            ) {
+              PictureInPicture.perform(
+                media.isInPictureInPicture ? .exitPictureInPicture : .enterPictureInPicture, on: id)
+            }
+            .frame(width: 26)
             control("xmark", "Close Mini Player") { store.send(.closeMiniPlayer) }
               .frame(width: 26)
           }
