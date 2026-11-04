@@ -44,7 +44,7 @@ struct SplitRow<Menu: View>: View {
           !isSelected ? .clear : tab.id == selectedTabID ? Theme.selection : Theme.fill,
           in: RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
-        .onHover { hoveredChip = $0 ? tab.id : hoveredChip == tab.id ? nil : hoveredChip }
+        .hoverRegion { hoveredChip = $0 ? tab.id : hoveredChip == tab.id ? nil : hoveredChip }
         .onTapGesture { act(.select(tab.id)) }
         .contextMenu {
           menu(tab)
@@ -61,6 +61,6 @@ struct SplitRow<Menu: View>: View {
       (isSelected ? Theme.rowSelection(theme) : isHovering ? Theme.rowHover : .clear)
         .shadow(.drop(color: .black.opacity(isSelected ? 0.08 : 0), radius: 2, y: 1)),
       in: RoundedRectangle(cornerRadius: 8))
-    .onHover { isHovering = $0 }
+    .hoverRegion { isHovering = $0 }
   }
 }

@@ -9,6 +9,7 @@ struct SidebarView: View {
   // The "+" menu opens with New Tab highlighted; hovering moves the highlight.
   @State private var menuHighlight = "New Tab"
   @State private var hover = SidebarHover()
+  @State private var tracker = HoverTracker()
   // Read only by the Library button and the download stack, so download ticks do not redraw the sidebar.
   @State private var libraryHover = LibraryHover()
   @State private var isCreatingSpace = false
@@ -134,7 +135,7 @@ struct SidebarView: View {
           .opacity(0.65)
           .frame(width: frame.width, height: frame.height)
           .offset(x: dotDrag.x - frame.width / 2, y: frame.minY)
-          .allowsHitTesting(false)
+          .hitTesting(false)
       }
     }
     .overlay(alignment: .trailing) {
@@ -153,7 +154,7 @@ struct SidebarView: View {
       guard let tab = space.selectedTab else { return }
       rename(tab)
     }
-    .onHover { hover.isSidebar = $0 }
+    .hoverRegion { hover.isSidebar = $0 }
     .onChange(of: store.sidebar.spaceEditorRequest, initial: true) {
       guard let creating = store.sidebar.spaceEditorRequest else { return }
       isCreatingSpace = creating
@@ -214,7 +215,7 @@ struct SidebarView: View {
         .onChanged(dragChanged)
         .onEnded { drop(at: $0.location) }
     )
-    .overlay(alignment: .bottomLeading) { DownloadStack(hover: libraryHover) }
+    .overlay(alignment: .bottomLeading) { DownloadStack(hover: libraryHover).environment(\.hoverLayer, 1) }
     .overlay(alignment: .topLeading) {
       // Outside the sidebar's clip, so the copy follows the pointer over the page and a rejected drop flies back from
       // there. On drop it turns opaque in the same frame and settles into the row's new slot; a drop on a split
@@ -240,7 +241,7 @@ struct SidebarView: View {
           .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
           .offset(x: -drag.grab.x * size.width, y: -drag.grab.y * size.height)
           .offset(x: anchor.x, y: anchor.y)
-          .allowsHitTesting(false)
+          .hitTesting(false)
       }
     }
     .overlay(alignment: .bottomLeading) {
@@ -252,14 +253,17 @@ struct SidebarView: View {
     .overlay {
       if isMenuOpen {
         ZStack(alignment: .bottomLeading) {
-          Color.black.opacity(0.001).onTapGesture { isMenuOpen = false }
-          newItemMenu.coversPage().padding(.leading, 6).padding(.bottom, 54).environment(\.colorScheme, .dark)
+          Color.black.opacity(0.001).onTapGesture { isMenuOpen = false }.hoverRegion { _ in }
+          newItemMenu.hoverRegion { _ in }.background(HoverTrackingArea(tracker: tracker)).coversPage().padding(.leading, 6).padding(.bottom, 54).environment(\.colorScheme, .dark)
             // The menu scales in from its corner.
             .transition(.scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity))
         }
+        .environment(\.hoverLayer, 1)
       }
     }
     .animation(Motion.menu, value: isMenuOpen)
+    .background(HoverTrackingArea(tracker: tracker))
+    .environment(\.hoverTracker, tracker)
   }
 
   // The Auto Archive banner, from the first idle archive until it is closed.
@@ -286,7 +290,7 @@ struct SidebarView: View {
               .environment(\.isSelectedSpace, space.id == store.spaces.selectedID)
               // Only the space on screen takes clicks: a row of the one sliding out is not a row of the shown
               // space.
-              .allowsHitTesting(space.id == store.spaces.selectedID)
+              .hitTesting(space.id == store.spaces.selectedID)
           }
         }
         // The strip follows the fingers during a swipe and settles with the switch's curve once they lift.
@@ -381,7 +385,7 @@ struct SidebarView: View {
           .frame(height: isSelected ? nil : 0, alignment: .top)
           .environment(\.isSelectedSpace, isSelected)
           // Only the grid on screen takes clicks, so a tile of a profile sliding out never takes one.
-          .allowsHitTesting(isSelected)
+          .hitTesting(isSelected)
       }
     }
     .offset(x: -CGFloat(index) * width + (follows ? stripSwipe : 0))
@@ -508,7 +512,7 @@ struct SidebarView: View {
   private var header: some View {
     let tab = space.selectedTab
     return HStack(spacing: 0) {
-      TrafficLights().frame(width: 73, alignment: .leading)
+      SidebarTrafficLights().frame(width: 73, alignment: .leading)
       IconButton(systemName: "sidebar.left") { store.send(.sidebar(.toggle)) }
       Spacer(minLength: 0)
       // Back, forward and reload sit at the right; a narrow sidebar drops reload first, then forward.
@@ -602,7 +606,7 @@ struct SidebarView: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .onHover { hover.isPill = $0 }
+    .hoverRegion { hover.isPill = $0 }
     .onChange(of: store.extensionToRun) { _, id in
       guard let id, let tab = space.selectedTabID else { return }
       commandPopup = Engine.shared.runExtensionAction(id, tab, in: space).map(ExtensionPopup.init)
@@ -802,7 +806,7 @@ struct SidebarView: View {
     .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
     .background(hover.isTitle ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8))
     .contentShape(Rectangle())
-    .onHover { hover.isTitle = $0 }
+    .hoverRegion { hover.isTitle = $0 }
     // Like a folder's row, the title shows or hides the pinned section; a double click renames the space.
     // Simultaneous, so that a single click toggles at once rather than after the double-click interval.
     .simultaneousGesture(TapGesture(count: 2).onEnded { SpaceMenu.rename(space, store) })
@@ -1021,7 +1025,7 @@ struct SidebarView: View {
             .opacity(hover.isTidy ? 0.5 : 1)
         }
         .buttonStyle(.plain)
-        .onHover { hover.isClear = $0 }
+        .hoverRegion { hover.isClear = $0 }
         .transition(.opacity)
       }
     }
@@ -1040,7 +1044,7 @@ struct SidebarView: View {
       .simultaneousGesture(TapGesture(count: 2).onEnded { rename(folder) })
       .onTapGesture { withAnimation(Motion.row) { send(.toggleFolder(folder.id)) } }
       .contextMenu { folderMenu(folder) }
-      .onHover { hoveredFolder = $0 ? folder.id : hoveredFolder == folder.id ? nil : hoveredFolder }
+      .hoverRegion { hoveredFolder = $0 ? folder.id : hoveredFolder == folder.id ? nil : hoveredFolder }
       .popover(isPresented: isPresented($peekFolder, folder.id), arrowEdge: .trailing) {
         FolderSearch(folder: folder, tabs: folderTabs(folder.id, in: space)) {
           peekFolder = nil
@@ -1121,7 +1125,7 @@ struct SidebarView: View {
       }
     }
     .padding(.vertical, Self.rowGap)
-    .onHover { hover.group = $0 ? group.id : hover.group == group.id ? nil : hover.group }
+    .hoverRegion { hover.group = $0 ? group.id : hover.group == group.id ? nil : hover.group }
     .simultaneousGesture(TapGesture(count: 2).onEnded { rename(group) })
     .onTapGesture { withAnimation(Motion.row) { send(.toggleGroup(group.id)) } }
     .contextMenu { groupMenu(group) }
@@ -1279,7 +1283,7 @@ struct SidebarView: View {
               .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
-          .onHover { isFolderMinusHovered = $0 }
+          .hoverRegion { isFolderMinusHovered = $0 }
           .padding(.trailing, -3.5)
         }
       }
@@ -1925,7 +1929,7 @@ struct SidebarView: View {
           Button("Clear Archive") { clearArchive() }.disabled(archive.isEmpty)
         }
         .opacity(isCreatingSpace ? 0 : 1)
-        .allowsHitTesting(!isCreatingSpace)
+        .hitTesting(!isCreatingSpace)
       SpaceDots(
         store: store, hover: dotHover, dots: dots, isCreatingSpace: isCreatingSpace,
         editedIcon: isCreatingSpace || isEditingSpace ? iconPreview : nil, dropTarget: drag?.shownTarget,
@@ -1947,7 +1951,7 @@ struct SidebarView: View {
         isMenuOpen.toggle()
       }
       .opacity(isCreatingSpace ? 0 : 1)
-      .allowsHitTesting(!isCreatingSpace)
+      .hitTesting(!isCreatingSpace)
     }
     .padding(.horizontal, 10)
     .frame(height: 50)
@@ -2104,6 +2108,7 @@ private struct RowList<Content: View>: View {
     ScrollView {
       content.frame(maxWidth: .infinity, minHeight: height, alignment: .top)
     }
+    .hoverClip()
     .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { height = $1 }
   }
 }
@@ -2225,7 +2230,7 @@ private extension View {
     frame(height: isFolded ? 0 : nil, alignment: .bottom)
       .clipShape(Rectangle().inset(by: isFolded ? 0 : -40))
       .opacity(isFolded ? 0 : 1)
-      .allowsHitTesting(!isFolded)
+      .hitTesting(!isFolded)
   }
 
   func zone(_ zone: Zone, _ zones: Binding<Zones>) -> some View {
@@ -2295,7 +2300,7 @@ private struct IconButton: View {
     .buttonStyle(PressBounce())
     .disabled(!isEnabled)
     .opacity(isEnabled ? 1 : 0.6)
-    .onHover { isHovering = $0 }
+    .hoverRegion { isHovering = $0 }
   }
 }
 
@@ -2362,7 +2367,7 @@ private struct SidebarRow<Content: View>: View {
         .animation(nil, value: isSelected)
     }
     .contentShape(Rectangle())
-    .onHover { isHovering = $0 }
+    .hoverRegion { isHovering = $0 }
   }
 }
 
@@ -2430,7 +2435,7 @@ private struct TabRow: View, @MainActor Equatable {
                 .fill(isIconHovered ? Theme.rowHover : .clear)
                 .frame(width: 36, height: 36)
             }
-            .onHover { isIconHovered = $0 }
+            .hoverRegion { isIconHovered = $0 }
           Text("/").font(.system(size: 16)).foregroundStyle(Theme.secondaryText).frame(width: 3.5)
             .opacity(isIconHovered ? 0 : 1)
         }
@@ -2501,7 +2506,7 @@ private struct TabRow: View, @MainActor Equatable {
       }
     }
     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-    .onHover { isHovering = $0 }
+    .hoverRegion { isHovering = $0 }
     .hoverTooltip(tab.displayTitle, isEnabled: name == nil)
   }
 
@@ -2585,13 +2590,31 @@ struct TrafficLights: View {
   @State private var isHovering = false
 
   var body: some View {
+    TrafficLightButtons(isHovering: isHovering)
+      .padding(.leading, 14)
+      .onHover { isHovering = $0 }
+  }
+}
+
+private struct SidebarTrafficLights: View {
+  @State private var isHovering = false
+
+  var body: some View {
+    TrafficLightButtons(isHovering: isHovering)
+      .padding(.leading, 14)
+      .hoverRegion { isHovering = $0 }
+  }
+}
+
+private struct TrafficLightButtons: View {
+  let isHovering: Bool
+
+  var body: some View {
     HStack(spacing: 8) {
       light(0xFF5F57, "xmark", #selector(NSWindow.performClose(_:)))
       light(0xFEBC2E, "minus", #selector(NSWindow.performMiniaturize(_:)))
       light(0x28C840, "arrow.up.left.and.arrow.down.right", #selector(NSWindow.toggleFullScreen(_:)))
     }
-    .padding(.leading, 14)
-    .onHover { isHovering = $0 }
   }
 
   private func light(_ color: UInt32, _ glyph: String, _ action: Selector) -> some View {
@@ -2712,7 +2735,7 @@ private struct SpaceDot: View {
       isLifted ? Theme.spaceDot.opacity(0.6) : isSelected || isHovering && !isDragging ? Theme.spaceDot : Theme.spaceDotOther)
     .frame(maxWidth: .infinity, minHeight: 20)
     .contentShape(Rectangle())
-    .onHover { isHovering = $0 }
+    .hoverRegion { isHovering = $0 }
     .animation(.easeOut(duration: 0.15), value: isHovering)
   }
 }
@@ -2792,7 +2815,7 @@ private struct LibraryButton: View {
       .offset(x: 3, y: -4.5)
       .allowsHitTesting(false)
     }
-    .onHover {
+    .hoverRegion {
       isHovering = $0
       hover.isOnButton = $0
     }
@@ -2828,7 +2851,7 @@ private struct DownloadStack: View {
         // Bridges the gap down to the button's top, so the pointer can reach the rows without the stack closing.
         .padding(.bottom, 5)
         .contentShape(Rectangle())
-        .onHover { hover.isOnStack = $0 }
+        .hoverRegion { hover.isOnStack = $0 }
         // The bottom row's centre sits 42 pt above the button's, which is 25 pt above the bottom.
         .padding(.bottom, 34)
     }
@@ -2948,7 +2971,7 @@ private struct SpaceDots: View {
           hide()
           store.send(.spaces(.select(item.id)))
         }
-        .onHover { hover.hovered = $0 ? item.id : hover.hovered == item.id ? nil : hover.hovered }
+        .hoverRegion { hover.hovered = $0 ? item.id : hover.hovered == item.id ? nil : hover.hovered }
         .contextMenu {
           SpaceMenu(
             store: store, space: item, changeIcon: { pickingIcon = item.id }, editTheme: { editTheme(item.id) },
@@ -3061,7 +3084,7 @@ private struct MenuRow: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .onHover { if $0 { highlight = title } }
+    .hoverRegion { if $0 { highlight = title } }
   }
 }
 
@@ -3137,7 +3160,7 @@ private struct FavoriteTile: View {
       // The tile is 47 pt tall.
       .frame(height: 47)
       .backgroundPreferenceValue(FaviconColor.self) { background(RoundedRectangle(cornerRadius: 12), colors: $0) }
-      .onHover { isHovering = $0 }
+      .hoverRegion { isHovering = $0 }
   }
 
   // The favorites tile: 12.05pt continuous. Selected, it is washed with its favicon's colors, which also run around it

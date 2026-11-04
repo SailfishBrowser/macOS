@@ -388,7 +388,7 @@ private struct FavoritePreviewModifier: ViewModifier {
           Circle().fill(Color(hex: 0xD95140)).frame(width: 5, height: 5).padding(8)
         }
       }
-      .onHover { isTileHovered = $0; hoverChanged() }
+      .hoverRegion { isTileHovered = $0; hoverChanged() }
       .simultaneousGesture(TapGesture().onEnded { dismiss() })
       .onDisappear { dismiss() }
       .task(id: tab.isLive) {

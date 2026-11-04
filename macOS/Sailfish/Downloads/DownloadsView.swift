@@ -153,7 +153,7 @@ struct DownloadRow: View {
     .padding(.vertical, 8)
     .background(isHovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8))
     .contentShape(Rectangle())
-    .onHover { isHovering = $0 }
+    .hoverRegion { isHovering = $0 }
     .draggableFile(download)
     .onTapGesture {
       guard download.state == .complete, let file = download.fileURL else { return }

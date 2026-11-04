@@ -21,7 +21,7 @@ struct TidyButton: View {
     }
     .buttonStyle(.plain)
     .disabled(isTidying)
-    .onHover { isHovered = $0 }
+    .hoverRegion { isHovered = $0 }
     .hoverTooltip("Organize Today Tabs", isEnabled: !isTidying)
   }
 }
