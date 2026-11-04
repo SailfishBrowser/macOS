@@ -176,6 +176,7 @@ struct AppFeature {
   // The tabs whose saved history is kept, through the same kind of writer, so a late save never drops the
   // history of a tab that a newer state refers to.
   let sessionWriter = SnapshotWriter<Set<UUID>>.sessions
+  let sentMacTabs = LockIsolated<MacTabs?>(nil)
 
   @Dependency(\.continuousClock) var clock
   @Dependency(\.date.now) var now
@@ -648,12 +649,13 @@ struct AppFeature {
       }
     }
     // A newer state's update replaces one still resolving icons, so the publisher gets the states in order.
-    .onChange(of: \.macTabs) { _, value in
-      Reduce { _, _ in
-        guard let value else { return .none }
-        return .run { _ in await macTabs.update(value) }
-          .cancellable(id: CancelID.macTabs, cancelInFlight: true)
-      }
+    Reduce { state, _ in
+      let value = state.macTabs
+      guard value != sentMacTabs.value else { return .none }
+      sentMacTabs.setValue(value)
+      guard let value else { return .none }
+      return .run { _ in await macTabs.update(value) }
+        .cancellable(id: CancelID.macTabs, cancelInFlight: true)
     }
   }
 

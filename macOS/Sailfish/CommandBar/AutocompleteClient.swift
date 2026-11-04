@@ -15,11 +15,11 @@ struct AutocompleteMatch: Equatable, Sendable {
 
 @DependencyClient
 struct AutocompleteClient: Sendable {
-  // The matches for `text`, best first, until Chrome is done with it or a newer query starts. One requested
-  // before the last started finishes at once, since effects can start out of order.
+  // The matches for `text`, best first, and whether Chrome is done with it, until it is or a newer query starts.
+  // One requested before the last started finishes at once, since effects can start out of order.
   var query: @Sendable (
     _ profile: UUID, _ incognito: Bool, _ text: String, _ keyword: String?, _ requested: ContinuousClock.Instant
-  ) async -> AsyncStream<[AutocompleteMatch]> = { _, _, _, _, _ in .finished }
+  ) async -> AsyncStream<([AutocompleteMatch], done: Bool)> = { _, _, _, _, _ in .finished }
   var select: @Sendable (_ profile: UUID, _ incognito: Bool, _ url: URL) async -> Void
   // The favicon history keeps for a page, or else the one imported with it, nil for none.
   var favicon: @Sendable (_ profile: UUID, _ incognito: Bool, _ url: URL) async -> NSImage?
@@ -49,7 +49,7 @@ final class Autocomplete: NSObject, @preconcurrency ECAutocompleteDelegate {
   private static var all: [ECBrowserContext: Autocomplete] = [:]
   private let autocomplete: ECAutocomplete
   private var matches: [ECAutocompleteMatch] = []
-  private var continuation: AsyncStream<[AutocompleteMatch]>.Continuation?
+  private var continuation: AsyncStream<([AutocompleteMatch], done: Bool)>.Continuation?
   private var generation = 0
   private var started: ContinuousClock.Instant?
 
@@ -84,9 +84,13 @@ final class Autocomplete: NSObject, @preconcurrency ECAutocompleteDelegate {
     autocomplete.delegate = self
   }
 
-  func query(_ text: String, keyword: String?, requested: ContinuousClock.Instant) -> AsyncStream<[AutocompleteMatch]> {
-    let (stream, continuation) = AsyncStream.makeStream(of: [AutocompleteMatch].self)
+  func query(
+    _ text: String, keyword: String?, requested: ContinuousClock.Instant
+  ) -> AsyncStream<([AutocompleteMatch], done: Bool)> {
+    let (stream, continuation) = AsyncStream.makeStream(
+      of: ([AutocompleteMatch], done: Bool).self, bufferingPolicy: .bufferingNewest(1))
     guard started.map({ requested > $0 }) ?? true else {
+      continuation.yield(([], done: true))
       continuation.finish()
       return stream
     }
@@ -98,6 +102,7 @@ final class Autocomplete: NSObject, @preconcurrency ECAutocompleteDelegate {
         if self.generation == generation { self.autocomplete.stop() }
       }
     }
+    self.continuation?.yield((Self.bridged(matches), done: true))
     self.continuation?.finish()
     self.continuation = continuation
     autocomplete.start(withText: text, keyword: keyword)
@@ -110,13 +115,16 @@ final class Autocomplete: NSObject, @preconcurrency ECAutocompleteDelegate {
 
   func autocomplete(_ autocomplete: ECAutocomplete, didUpdateMatches matches: [ECAutocompleteMatch], done: Bool) {
     self.matches = matches
-    continuation?.yield(
-      matches.map {
-        AutocompleteMatch(
-          contents: $0.contents, description: $0.matchDescription, url: $0.destinationURL, type: $0.type,
-          inlineAutocompletion: $0.inlineAutocompletion, keyword: $0.associatedKeyword,
-          keywordName: $0.associatedKeywordName)
-      })
+    continuation?.yield((Self.bridged(matches), done: done))
     if done { continuation?.finish() }
+  }
+
+  private static func bridged(_ matches: [ECAutocompleteMatch]) -> [AutocompleteMatch] {
+    matches.map {
+      AutocompleteMatch(
+        contents: $0.contents, description: $0.matchDescription, url: $0.destinationURL, type: $0.type,
+        inlineAutocompletion: $0.inlineAutocompletion, keyword: $0.associatedKeyword,
+        keywordName: $0.associatedKeywordName)
+    }
   }
 }
