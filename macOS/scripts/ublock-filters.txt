@@ -1,0 +1,4 @@
+! CNN video: these manifests carry the ads that uBlock's own xml-prune filter for cnn.com removes, and blocking them
+! held each video 6 s while CNN's player retried them and fell back.
+||prd.media.cnn.com/global/*/dash.mpd$domain=cnn.com,badfilter
+||media.max.com/*/dash.mpd^$domain=cnn.com,badfilter

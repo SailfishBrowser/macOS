@@ -15,7 +15,9 @@ and are under its license.
 
 The app bundles uBlock Origin 1.75.0, downloaded by `macOS/scripts/fetch-ublock.sh` from its official release.
 Copyright Raymond Hill and contributors. GNU General Public License v3.0. It is a separate program, distributed
-unchanged except for an added manifest `key`; its license is `LICENSE.txt` in
+with three changes made by that script: an added manifest `key`, Sailfish's filters in `assets/sailfish/filters.txt`
+with three lines in `js/storage.js` that compile them after the selected lists, and a startup snapshot version in
+`js/background.js` that includes their digest. Its license is `LICENSE.txt` in
 `Sailfish.app/Contents/Resources/uBlock0.chromium`. Source: https://github.com/gorhill/uBlock/tree/1.75.0
 
 ## Filter lists
