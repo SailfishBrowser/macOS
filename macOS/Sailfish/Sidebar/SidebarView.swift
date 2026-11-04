@@ -8,13 +8,9 @@ struct SidebarView: View {
   @State private var isMenuOpen = false
   // The "+" menu opens with New Tab highlighted; hovering moves the highlight.
   @State private var menuHighlight = "New Tab"
-  @State private var isPillHovered = false
-  @State private var isClearHovered = false
-  @State private var isTidyHovered = false
-  @State private var isHovered = false
+  @State private var hover = SidebarHover()
   // Read only by the Library button and the download stack, so download ticks do not redraw the sidebar.
   @State private var libraryHover = LibraryHover()
-  @State private var isTitleHovered = false
   @State private var isCreatingSpace = false
   // Create Space was pressed: the panel fades over the new space instead of sliding back out.
   @State private var spaceCreated = false
@@ -30,7 +26,6 @@ struct SidebarView: View {
   @State private var newFolderID: Folder.ID?
   @State private var renamingTab: Tab.ID?
   @State private var renamingGroup: TabGroup.ID?
-  @State private var hoveredGroup: TabGroup.ID?
   // The tab or folder whose icon is being picked.
   @State private var iconTab: UUID?
   // Lists a collapsed folder's tabs, with a search field, while the pointer rests on it.
@@ -67,8 +62,6 @@ struct SidebarView: View {
   @FocusState private var isListFocused: Bool
   // The edge of the list past which the selected tab is scrolled, where an indicator shows.
   @State private var selectedOffscreen: VerticalEdge?
-  // The list's visible height, which its empty area below the rows fills.
-  @State private var listHeight: CGFloat = 0
   // Text, a link or files from outside the app are over the sidebar, bound for the top of Today.
   @State private var isDropTargeted = false
   // A space created in this window, whose New Tab label pulses until its first tab.
@@ -76,9 +69,8 @@ struct SidebarView: View {
   @Shared(.showsPinnedHint) private var showsPinnedHint
   @Shared(.autoArchiveBanner) private var autoArchiveBanner
   @Shared(.readyUpdate) private var readyUpdate
-  // The sidebar's width, which each page of the favorites strip takes. It starts at the width the sidebar is
-  // about to have: a sidebar sliding in is a fresh view, and a strip laid out at 0 until the first measurement
-  // drew the tiles bunched at the edge and moving apart while the sidebar was still on its way.
+  // The sidebar's width, the distance between neighboring pages of the strips. It starts at the width the sidebar
+  // is about to have, since a sidebar sliding in is a fresh view.
   @State private var width: CGFloat
 
   init(store: StoreOf<WindowFeature>) {
@@ -161,7 +153,7 @@ struct SidebarView: View {
       guard let tab = space.selectedTab else { return }
       rename(tab)
     }
-    .onHover { isHovered = $0 }
+    .onHover { hover.isSidebar = $0 }
     .onChange(of: store.sidebar.spaceEditorRequest, initial: true) {
       guard let creating = store.sidebar.spaceEditorRequest else { return }
       isCreatingSpace = creating
@@ -278,49 +270,45 @@ struct SidebarView: View {
   }
 
   private var content: some View {
-    GeometryReader { outer in
-      ZStack(alignment: .topLeading) {
-        VStack(alignment: .leading, spacing: 0) {
-          searchPill.padding(.horizontal, 8)
-          if !store.isIncognito {
-            favoritesStrip
-          }
-          // Keeps the pill and the favorites still and slides the spaces' own sections side by side, each
-          // from the same top.
-          GeometryReader { proxy in
-            let index = store.spaces.spaces.index(id: store.spaces.selectedID) ?? 0
-            HStack(spacing: 0) {
-              ForEach(store.spaces.spaces) { space in
-                SpacePage(store: store, id: space.id) { page($0) }
-                  .frame(width: proxy.size.width, height: proxy.size.height)
-                  .environment(\.isSelectedSpace, space.id == store.spaces.selectedID)
-                  // Only the space on screen takes clicks: a row of the one sliding out is not a row of the shown
-                  // space.
-                  .allowsHitTesting(space.id == store.spaces.selectedID)
-              }
-            }
-            // The strip follows the fingers during a swipe and settles with the switch's curve once they lift.
-            .offset(x: -CGFloat(index) * proxy.size.width + stripSwipe)
-            .animation(store.sidebar.swipe == nil ? Motion.swipeSettle : Motion.swipeTrack, value: store.sidebar.swipe)
-            .animation(spaceCreated ? nil : Motion.layout, value: index)
-          }
-          .clipped()
+    ZStack(alignment: .topLeading) {
+      VStack(alignment: .leading, spacing: 0) {
+        Isolated { searchPill }.padding(.horizontal, 8)
+        if !store.isIncognito {
+          favoritesStrip
         }
-        .frame(width: outer.size.width, height: outer.size.height, alignment: .top)
-        // The Create a Space panel is the page after the last space: it comes in from the right and pushes the
-        // space's section out to the left with the switch's spring. Cancelled, it goes back the same way;
-        // created, it fades over the new space, which is already in place.
-        .offset(x: isCreatingSpace ? -outer.size.width : 0)
-        .animation(spaceCreated ? nil : Motion.layout, value: isCreatingSpace)
-        if isCreatingSpace {
-          createPanel
-            .frame(width: outer.size.width, height: outer.size.height)
-            .transition(spaceCreated ? .opacity : .move(edge: .trailing))
+        // Keeps the pill and the favorites still and slides the spaces' own sections side by side, each
+        // from the same top.
+        let index = store.spaces.spaces.index(id: store.spaces.selectedID) ?? 0
+        PageStrip {
+          ForEach(store.spaces.spaces) { space in
+            SpacePage(store: store, id: space.id) { page($0) }
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
+              .environment(\.isSelectedSpace, space.id == store.spaces.selectedID)
+              // Only the space on screen takes clicks: a row of the one sliding out is not a row of the shown
+              // space.
+              .allowsHitTesting(space.id == store.spaces.selectedID)
+          }
         }
+        // The strip follows the fingers during a swipe and settles with the switch's curve once they lift.
+        .offset(x: -CGFloat(index) * width + stripSwipe)
+        .animation(store.sidebar.swipe == nil ? Motion.swipeSettle : Motion.swipeTrack, value: store.sidebar.swipe)
+        .animation(spaceCreated ? nil : Motion.layout, value: index)
+        .clipped()
       }
-      .animation(Motion.layout, value: isCreatingSpace)
-      .clipped()
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+      // The Create a Space panel is the page after the last space: it comes in from the right and pushes the
+      // space's section out to the left with the switch's spring. Cancelled, it goes back the same way;
+      // created, it fades over the new space, which is already in place.
+      .offset(x: isCreatingSpace ? -width : 0)
+      .animation(spaceCreated ? nil : Motion.layout, value: isCreatingSpace)
+      if isCreatingSpace {
+        createPanel
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .transition(spaceCreated ? .opacity : .move(edge: .trailing))
+      }
     }
+    .animation(Motion.layout, value: isCreatingSpace)
+    .clipped()
     // Dropped text, links and files open at the top of Today, where the line shows while they are over the sidebar.
     .sidebarDrop(isTargeted: $isDropTargeted) { urls in
       // Each opens at the top, so the last goes first to keep the dropped order.
@@ -380,7 +368,7 @@ struct SidebarView: View {
     let neighbor = spaces.index(id: store.spaces.selectedID).map { $0 + (swipe > 0 ? -1 : 1) }
       .flatMap { spaces.indices.contains($0) ? spaces[$0] : nil }
     let follows = swipe != 0 && neighbor.map { $0.profileID != space.profileID } ?? true
-    return HStack(alignment: .top, spacing: 0) {
+    return PageStrip {
       ForEach(runs, id: \.[0].id) { run in
         let isSelected = run.contains { $0.id == store.spaces.selectedID }
         favorites(run.first { $0.id == store.spaces.selectedID } ?? run[0])
@@ -388,7 +376,7 @@ struct SidebarView: View {
           .padding(.horizontal, 8)
           // Tiles close up under a dropped one with the row motion, otherwise with the layout move.
           .animation(drag?.isDropped == true ? Motion.row : Motion.layout, value: space.favoriteGrid.joined().map(\.id))
-          .frame(width: width, alignment: .top)
+          .frame(maxWidth: .infinity, alignment: .top)
           // The strip is as tall as the grid on screen; another profile's grid shows past its frame while it slides.
           .frame(height: isSelected ? nil : 0, alignment: .top)
           .environment(\.isSelectedSpace, isSelected)
@@ -399,7 +387,6 @@ struct SidebarView: View {
     .offset(x: -CGFloat(index) * width + (follows ? stripSwipe : 0))
     .animation(store.sidebar.swipe == nil ? Motion.swipeSettle : Motion.swipeTrack, value: store.sidebar.swipe)
     .animation(spaceCreated ? nil : Motion.layout, value: index)
-    .frame(width: width, alignment: .leading)
     .clipped()
   }
 
@@ -435,13 +422,14 @@ struct SidebarView: View {
 
   private func page(_ space: Space) -> some View {
     let items = listItems(space)
+    let selection = space.selection
     return VStack(alignment: .leading, spacing: 0) {
       if store.isIncognito {
         incognitoLabel.padding(.top, 10)
       } else {
         if !space.isHeaderHidden {
           // Centers the title 26 pt below the favorites.
-          spaceTitle(space).zone(.title, $zones).padding(.top, 8)
+          SpacePage(store: store, id: space.id) { spaceTitle($0) }.zone(.title, $zones).padding(.top, 8)
         }
         // The hint in a space with nothing pinned yet.
         if space.rows(in: .pinned).isEmpty, showsPinnedHint {
@@ -450,9 +438,9 @@ struct SidebarView: View {
         }
       }
       ScrollViewReader { proxy in
-        ScrollView {
+        RowList {
           VStack(spacing: 0) {
-            ForEach(items) { listItem($0, in: space) }
+            ForEach(items) { listItem($0, in: space, selection: selection) }
             // The empty sidebar below the last row: opens a new tab on a double click and shows the sidebar
             // menu on a right click; a drag moves the window, as the rest of the background does.
             Color.clear.frame(maxHeight: .infinity).contentShape(Rectangle())
@@ -461,9 +449,7 @@ struct SidebarView: View {
               .onTapGesture(count: 2) { store.send(.showCommandBar) }
               .contextMenu { emptySidebarMenu }
           }
-          .frame(maxWidth: .infinity, minHeight: listHeight, alignment: .top)
         }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { listHeight = $1 }
         .overlay(alignment: selectedOffscreen == .top ? .top : .bottom) { overflowIndicator(space) }
         .onChange(of: store.sidebar.reveals) {
           // A split's row goes by its first pane.
@@ -598,7 +584,7 @@ struct SidebarView: View {
         }
         Spacer()
         if let url {
-          PillControls(space: space, url: url, isHovered: isPillHovered, isSidebarHovered: isHovered, copied: { store.send(.showToast("Copied Current URL")) }) {
+          PillControls(space: space, url: url, isHovered: hover.isPill, isSidebarHovered: hover.isSidebar, copied: { store.send(.showToast("Copied Current URL")) }) {
             send(.open($0))
           }
         }
@@ -610,13 +596,13 @@ struct SidebarView: View {
       .padding(.trailing, 11)
       .frame(height: 36)
       .background(
-        store.isIncognito ? Theme.incognitoPill : isPillHovered ? Theme.fillHover : Theme.fill,
+        store.isIncognito ? Theme.incognitoPill : hover.isPill ? Theme.fillHover : Theme.fill,
         in: RoundedRectangle(cornerRadius: 12)
       )
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .onHover { isPillHovered = $0 }
+    .onHover { hover.isPill = $0 }
     .onChange(of: store.extensionToRun) { _, id in
       guard let id, let tab = space.selectedTabID else { return }
       commandPopup = Engine.shared.runExtensionAction(id, tab, in: space).map(ExtensionPopup.init)
@@ -694,7 +680,7 @@ struct SidebarView: View {
             .landing(isLanding(.tab(tab.id)))
             .pressDown(scale: 0.99) { send(.select(tab.id)) }
             .favoritePreview(tab) { send(.preload(tab.id)) } open: { openPreview($0, of: tab) }
-            .contextMenu { tabMenu(tab) }
+            .contextMenu { TabMenu(store: store, spaceID: space.id, tabID: tab.id) { _, tab in tabMenu(tab) } }
             .popover(isPresented: isPresented($renamingTab, tab.id), arrowEdge: .bottom) {
               TextField("Name", text: $draftName).textFieldStyle(.roundedBorder).frame(width: 180).padding(10)
                 .onSubmit { finishRename(tab) }
@@ -762,7 +748,10 @@ struct SidebarView: View {
   }
 
   private func favoriteTile(_ tab: Tab, in space: Space) -> some View {
-    FavoriteTile(tab: tab, space: space)
+    FavoriteTile(
+      tab: tab, isSelected: tab.id == space.selectedTabID, theme: space.theme, profileID: space.profileID,
+      isIncognito: space.isIncognito
+    )
       .overlay {
         if keyRow == tab.id {
           RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.primaryText.opacity(0.4), lineWidth: 1.5)
@@ -774,7 +763,7 @@ struct SidebarView: View {
     let hasPinned = !space.rows(in: .pinned).isEmpty
     return HStack(spacing: 8) {
       // The chevron shows on hover, and stays while the pinned section is collapsed.
-      if hasPinned, isTitleHovered || space.isPinnedCollapsed {
+      if hasPinned, hover.isTitle || space.isPinnedCollapsed {
         Image(systemName: "chevron.right")
           .font(.system(size: 11, weight: .bold))
           .rotationEffect(.degrees(space.isPinnedCollapsed ? 0 : 90))
@@ -784,7 +773,7 @@ struct SidebarView: View {
       }
       Text(space.name)
       Spacer(minLength: 0)
-      if isTitleHovered {
+      if hover.isTitle {
         // The edit button beside the menu opens the space's theme.
         if !store.isIncognito {
           Button { isEditingSpace = true } label: {
@@ -810,9 +799,9 @@ struct SidebarView: View {
     // The … sits 18 pt in from the hover fill's trailing edge.
     .padding(.trailing, 6)
     .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-    .background(isTitleHovered ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8))
+    .background(hover.isTitle ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8))
     .contentShape(Rectangle())
-    .onHover { isTitleHovered = $0 }
+    .onHover { hover.isTitle = $0 }
     // Like a folder's row, the title shows or hides the pinned section; a double click renames the space.
     // Simultaneous, so that a single click toggles at once rather than after the double-click interval.
     .simultaneousGesture(TapGesture(count: 2).onEnded { SpaceMenu.rename(space, store) })
@@ -864,7 +853,7 @@ struct SidebarView: View {
       Button { store.send(.sidebar(.reveal)) } label: {
         HStack(spacing: 6) {
           Image(systemName: edge == .top ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold))
-          TabFavicon(tab: tab, space: space).frame(width: 16, height: 16)
+          TabFavicon(tab: tab, profileID: space.profileID, isIncognito: space.isIncognito).frame(width: 16, height: 16)
         }
         .foregroundStyle(Theme.primaryText)
         .padding(.horizontal, 9)
@@ -943,19 +932,20 @@ struct SidebarView: View {
     return items
   }
 
-  @ViewBuilder private func listItem(_ item: ListItem, in space: Space) -> some View {
+  @ViewBuilder private func listItem(_ item: ListItem, in space: Space, selection: Set<Tab.ID>) -> some View {
     switch item {
     case let .tab(tab, depth, isFolded):
       let isShown = space.id == store.spaces.selectedID
         && space.split(of: tab.id)?.tabIDs.contains { $0 == space.selectedTabID } ?? (tab.id == space.selectedTabID)
-      tabRow(tab, in: space)
+      tabRow(tab, in: space, selection: selection)
         .background(keyRow == tab.id ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8))
         // Which edge of the list the selected row is scrolled past, if it is. Naming the row makes a newly
         // selected row report even when it is in view.
         .onGeometryChange(for: ShownRowEdge?.self) { proxy in
           guard isShown else { return nil }
           let frame = proxy.frame(in: .scrollView)
-          return ShownRowEdge(tab: tab.id, edge: frame.midY < 0 ? .top : frame.midY > listHeight ? .bottom : nil)
+          let height = proxy.bounds(of: .scrollView)!.height
+          return ShownRowEdge(tab: tab.id, edge: frame.midY < 0 ? .top : frame.midY > height ? .bottom : nil)
         } action: { shown in
           if let shown { selectedOffscreen = shown.edge }
         }
@@ -981,7 +971,7 @@ struct SidebarView: View {
         .transition(.asymmetric(insertion: .identity, removal: .opacity))
         .geometryGroup()
     case let .group(group):
-      groupItem(group, in: space)
+      SpacePage(store: store, id: space.id) { groupItem(group, in: $0) }
         .background(keyRow == group.id ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8))
         .transition(.asymmetric(insertion: .identity, removal: .opacity))
         .geometryGroup()
@@ -991,7 +981,7 @@ struct SidebarView: View {
         .transition(.identity)
         .zIndex(2)
     case .divider:
-      divider(space)
+      SpacePage(store: store, id: space.id) { divider($0) }
     case .newTab:
       // Lights the row while the command bar is open for a new tab (white at 19% over a dark theme), and pulses
       // its label in a space just created until its first tab.
@@ -1018,23 +1008,23 @@ struct SidebarView: View {
       TidyDividerLine(isTidying: space.isTidying, color: showsDivider ? Theme.divider : .clear, lineWidth: 1 / displayScale)
       // Shows Clear only while the pointer is over the sidebar, and only while it has something to archive, and
       // Tidy before it once Today has several tabs to sort.
-      if !today.isEmpty, isHovered {
+      if !today.isEmpty, hover.isSidebar {
         if space.isTidying || space.tidyCandidates.count >= TabsFeature.tidyMinimum {
-          TidyButton(isTidying: space.isTidying, isHovered: $isTidyHovered) { send(.tidy(.start)) }
+          TidyButton(isTidying: space.isTidying, isHovered: $hover.isTidy) { send(.tidy(.start)) }
           Rectangle().fill(Theme.divider).frame(width: 1, height: 12)
         }
         Button { send(.clearToday) } label: {
           // The label is 26.5 pt wide and 8 pt tall at cap height: 10 pt semibold.
-          Text(isClearHovered ? "↓ Clear" : "Clear").font(.system(size: 10, weight: .semibold))
+          Text(hover.isClear ? "↓ Clear" : "Clear").font(.system(size: 10, weight: .semibold))
             .foregroundStyle(Theme.clearLabel)
-            .opacity(isTidyHovered ? 0.5 : 1)
+            .opacity(hover.isTidy ? 0.5 : 1)
         }
         .buttonStyle(.plain)
-        .onHover { isClearHovered = $0 }
+        .onHover { hover.isClear = $0 }
         .transition(.opacity)
       }
     }
-    .animation(Motion.layout, value: isHovered)
+    .animation(Motion.layout, value: hover.isSidebar)
     .padding(.horizontal, 10)
     // The divider is 29 pt below the title's center and 28.75 pt above New Tab's.
     .frame(height: showsDivider ? 16 : 0)
@@ -1116,7 +1106,7 @@ struct SidebarView: View {
         Text(group.name).fontWeight(.semibold)
         Spacer(minLength: 0)
         // Hover buttons on a Tidy header: its tabs into a pinned folder, and closing them.
-        if hoveredGroup == group.id, drag == nil {
+        if hover.group == group.id, drag == nil {
           groupButton("folder", "Turn into Folder") {
             withAnimation(Motion.row) { send(.newFolder(group.name, in: .pinned, with: space.members(of: group.id).map(\.id))) }
           }
@@ -1130,7 +1120,7 @@ struct SidebarView: View {
       }
     }
     .padding(.vertical, Self.rowGap)
-    .onHover { hoveredGroup = $0 ? group.id : hoveredGroup == group.id ? nil : hoveredGroup }
+    .onHover { hover.group = $0 ? group.id : hover.group == group.id ? nil : hover.group }
     .simultaneousGesture(TapGesture(count: 2).onEnded { rename(group) })
     .onTapGesture { withAnimation(Motion.row) { send(.toggleGroup(group.id)) } }
     .contextMenu { groupMenu(group) }
@@ -1642,7 +1632,7 @@ struct SidebarView: View {
   // The Favorites placeholder: the dragged favicon on a light tile with a white outline.
   @ViewBuilder private func placeholder(_ slot: FavoriteSlot) -> some View {
     if let drag, !drag.isLanding, drag.shownTarget == .favorite(slot), let tab = dragged(drag) {
-      TabFavicon(tab: tab, space: space)
+      TabFavicon(tab: tab, profileID: space.profileID, isIncognito: space.isIncognito)
         .frame(maxWidth: .infinity)
         .frame(height: 46)
         .background(.white.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
@@ -1666,9 +1656,10 @@ struct SidebarView: View {
           favoriteTile(tab, in: space)
         } else {
           TabRow(
-            tab: tab, space: space, isSelected: tab.id == space.selectedTabID, name: nil, endRename: { _ in },
-            backToPinnedURL: {}, isLifted: true
+            tab: tab, profileID: space.profileID, isIncognito: space.isIncognito, isSelected: tab.id == space.selectedTabID,
+            name: nil, endRename: { _ in }, backToPinnedURL: {}, isLifted: true
           ) {}
+          .equatable()
           .padding(.vertical, Self.rowGap)
         }
       }
@@ -1691,17 +1682,20 @@ struct SidebarView: View {
     renamingFolder = folder.id
   }
 
-  private func tabRow(_ tab: Tab, in space: Space) -> some View {
-    let panes = space.split(of: tab.id).map { $0.tabIDs.compactMap { space.tabs[id: $0] } }
+  private func tabRow(_ tab: Tab, in space: Space, selection: Set<Tab.ID>) -> some View {
+    let split = space.split(of: tab.id)
     let hover = splitHover(on: tab.id, in: space)
     return Group {
-      if let panes {
-        SplitRow(tabs: panes, space: space, act: { send($0) }) { tabMenu($0) }
+      if let split {
+        SplitRow(
+          split: split.id, tabs: split.tabIDs.compactMap { space.tabs[id: $0] }, selectedTabID: space.selectedTabID,
+          theme: space.theme, profileID: space.profileID, isIncognito: space.isIncognito, act: { send($0) }
+        ) { pane in TabMenu(store: store, spaceID: space.id, tabID: pane.id) { _, tab in tabMenu(tab) } }
           .splitHalf(hover)
           .padding(.vertical, Self.rowGap)
           .zone(.tab(tab.id), $zones)
       } else {
-        plainTabRow(tab, in: space, splitHover: hover)
+        plainTabRow(tab, in: space, isSelected: tab.id == space.selectedTabID || selection.contains(tab.id), splitHover: hover)
       }
     }
   }
@@ -1713,10 +1707,10 @@ struct SidebarView: View {
     return SplitHover(index: index, count: (space.split(of: other)?.tabIDs.count ?? 1) + 1, phase: phase)
   }
 
-  private func plainTabRow(_ tab: Tab, in space: Space, splitHover: SplitHover?) -> some View {
+  private func plainTabRow(_ tab: Tab, in space: Space, isSelected: Bool, splitHover: SplitHover?) -> some View {
     // An unloaded pinned tab's X removes it; otherwise the button closes it.
     TabRow(
-      tab: tab, space: space, isSelected: tab.id == space.selectedTabID || space.selection.contains(tab.id),
+      tab: tab, profileID: space.profileID, isIncognito: space.isIncognito, isSelected: isSelected,
       name: renamingTab == tab.id ? $draftName : nil,
       endRename: { if $0 { finishRename(tab) } else { renamingTab = nil } },
       // ⌘-click keeps the page it moved on to, in a new Today tab.
@@ -1730,6 +1724,7 @@ struct SidebarView: View {
     ) {
       send(tab.pinnedURL != nil && !tab.isLive ? .archive([tab.id]) : .close(tab.id))
     }
+      .equatable()
       .splitHalf(splitHover)
       // ⌘-click and ⇧-click gather a multi-selection; a plain click selects the one tab.
       .pressDown(scale: 0.992) {
@@ -1744,10 +1739,12 @@ struct SidebarView: View {
       }
       .simultaneousGesture(TapGesture(count: 2).onEnded { rename(tab) })
       .contextMenu {
-        if space.hasSelection, space.selection.contains(tab.id) {
-          selectionMenu
-        } else {
-          tabMenu(tab)
+        TabMenu(store: store, spaceID: space.id, tabID: tab.id) { space, tab in
+          if space.hasSelection, space.selection.contains(tab.id) {
+            selectionMenu
+          } else {
+            tabMenu(tab)
+          }
         }
       }
       .tabIconPicker(tab.icon, isPresented: isPresented($iconTab, tab.id)) { send(.setIcon(tab.id, $0)) }
@@ -2081,6 +2078,48 @@ private struct SpacePage<Content: View>: View {
   }
 }
 
+private struct PageStrip: Layout {
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    let width = proposal.replacingUnspecifiedDimensions().width
+    let height = subviews.reduce(0) { max($0, $1.sizeThatFits(ProposedViewSize(width: width, height: proposal.height)).height) }
+    return CGSize(width: width, height: height)
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    for (index, subview) in subviews.enumerated() {
+      subview.place(
+        at: CGPoint(x: bounds.minX + CGFloat(index) * bounds.width, y: bounds.minY), anchor: .topLeading,
+        proposal: ProposedViewSize(width: bounds.width, height: proposal.height)
+      )
+    }
+  }
+}
+
+private struct RowList<Content: View>: View {
+  @ViewBuilder let content: Content
+  @State private var height: CGFloat = 0
+
+  var body: some View {
+    ScrollView {
+      content.frame(maxWidth: .infinity, minHeight: height, alignment: .top)
+    }
+    .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { height = $1 }
+  }
+}
+
+private struct TabMenu<Content: View>: View {
+  let store: StoreOf<WindowFeature>
+  let spaceID: Space.ID
+  let tabID: Tab.ID
+  @ViewBuilder let content: (Space, Tab) -> Content
+
+  var body: some View {
+    if let space = store.spaces.spaces[id: spaceID], let tab = space.tabs[id: tabID] {
+      content(space, tab)
+    }
+  }
+}
+
 // A region of the sidebar that takes a drag, measured in the sidebar's coordinates.
 private enum Zone: Hashable {
   static let space = "sidebar"
@@ -2329,7 +2368,8 @@ private struct SidebarRow<Content: View>: View {
 // A tab's favicon; before its page loads, the one history keeps for it.
 struct TabFavicon: View {
   let tab: Tab
-  let space: Space
+  let profileID: UUID
+  let isIncognito: Bool
   @State private var saved: NSImage?
 
   var body: some View {
@@ -2343,14 +2383,15 @@ struct TabFavicon: View {
     .preference(key: FaviconColor.self, value: (tab.pageFavicon ?? saved)?.representativeColor)
     .task(id: tab.iconPage) {
       guard tab.pageFavicon == nil else { return }
-      saved = await Autocomplete.favicon(space.profileID, space.isIncognito, tab.iconPage)
+      saved = await Autocomplete.favicon(profileID, isIncognito, tab.iconPage)
     }
   }
 }
 
-private struct TabRow: View {
+private struct TabRow: View, @MainActor Equatable {
   let tab: Tab
-  let space: Space
+  let profileID: UUID
+  let isIncognito: Bool
   let isSelected: Bool
   // The name being typed while the tab is renamed.
   let name: Binding<String>?
@@ -2367,6 +2408,12 @@ private struct TabRow: View {
   @State private var isIconHovered = false
   @State private var width: CGFloat = 0
   @FocusState private var isNameFocused: Bool
+
+  static func == (lhs: TabRow, rhs: TabRow) -> Bool {
+    lhs.tab == rhs.tab && lhs.profileID == rhs.profileID && lhs.isIncognito == rhs.isIncognito
+      && lhs.isSelected == rhs.isSelected && (lhs.name == nil) == (rhs.name == nil) && lhs.isLifted == rhs.isLifted
+      && lhs.splitHover == rhs.splitHover
+  }
 
   var body: some View {
     SidebarRow(isSelected: isSelected || isLifted, leadingInset: splitHalfEnd) {
@@ -2482,7 +2529,7 @@ private struct TabRow: View {
       if tab.isLoading, tab.icon == nil {
         RoundedRectangle(cornerRadius: 3).fill(Theme.fillHover).frame(width: 14, height: 14)
       } else {
-        TabIcon(tab: tab, space: space).engineMark(tab)
+        TabIcon(tab: tab, profileID: profileID, isIncognito: isIncognito).engineMark(tab)
       }
     }
     .frame(width: 16)
@@ -2494,13 +2541,14 @@ private struct TabRow: View {
 // The tab's own icon if it was given one, else its favicon.
 struct TabIcon: View {
   let tab: Tab
-  let space: Space
+  let profileID: UUID
+  let isIncognito: Bool
 
   var body: some View {
     if let icon = tab.icon {
       SpaceIcon(icon: icon, emojiSize: 15)
     } else {
-      TabFavicon(tab: tab, space: space)
+      TabFavicon(tab: tab, profileID: profileID, isIncognito: isIncognito)
     }
   }
 }
@@ -2672,6 +2720,23 @@ private struct SpaceDot: View {
 @Observable private final class LibraryHover {
   var isOnButton = false
   var isOnStack = false
+}
+
+@Observable private final class SidebarHover {
+  var isSidebar = false
+  var isPill = false
+  var isTitle = false
+  var isClear = false
+  var isTidy = false
+  var group: TabGroup.ID?
+}
+
+private struct Isolated<Content: View>: View {
+  @ViewBuilder let content: () -> Content
+
+  var body: some View {
+    content()
+  }
 }
 
 // The footer's Library button: a box glyph, with the badge of a running download over its top right, or for half
@@ -3058,12 +3123,15 @@ private struct EditPinnedURLDialog: View {
 // A favorite: its icon on a tile that lights on hover, and shows the selection when it is the current tab.
 private struct FavoriteTile: View {
   let tab: Tab
-  let space: Space
+  let isSelected: Bool
+  let theme: SpaceTheme
+  let profileID: UUID
+  let isIncognito: Bool
   @Environment(\.isDragging) private var isDragging
   @State private var isHovering = false
 
   var body: some View {
-    TabIcon(tab: tab, space: space).engineMark(tab)
+    TabIcon(tab: tab, profileID: profileID, isIncognito: isIncognito).engineMark(tab)
       .frame(maxWidth: .infinity)
       // The tile is 47 pt tall.
       .frame(height: 47)
@@ -3074,8 +3142,7 @@ private struct FavoriteTile: View {
   // The favorites tile: 12.05pt continuous, with no stroke. Selected, it is lit with the space's primary color. A
   // favicon with a color tints it, more strongly when selected.
   private func background(_ shape: RoundedRectangle, tint: Color?) -> some View {
-    let isSelected = tab.id == space.selectedTabID
-    return shape.fill(isSelected ? Theme.favoriteSelection(space.theme) : isHovering && !isDragging ? Theme.fillHover : Theme.fill)
+    shape.fill(isSelected ? Theme.favoriteSelection(theme) : isHovering && !isDragging ? Theme.fillHover : Theme.fill)
       .overlay(shape.fill(Theme.favoriteTint(tint ?? .clear, isSelected: isSelected)))
   }
 }

@@ -506,6 +506,12 @@ final class WindowController: NSWindowController, NSWindowDelegate {
   }
 
   func windowDidResize(_ notification: Notification) {
+    if !window!.inLiveResize {
+      store.send(.frameChanged(window!.frame))
+    }
+  }
+
+  func windowDidEndLiveResize(_ notification: Notification) {
     store.send(.frameChanged(window!.frame))
   }
 

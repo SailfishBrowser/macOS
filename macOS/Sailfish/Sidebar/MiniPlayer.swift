@@ -53,7 +53,7 @@ struct MiniPlayer: View {
         }
         HStack(spacing: 0) {
           Button { store.send(.openFromLibrary(space.id, tab: id)) } label: {
-            TabFavicon(tab: tab, space: space).frame(width: 24, height: 24).contentShape(Rectangle())
+            TabFavicon(tab: tab, profileID: space.profileID, isIncognito: space.isIncognito).frame(width: 24, height: 24).contentShape(Rectangle())
           }
           .buttonStyle(MiniPlayerButtonStyle())
           .hoverTooltip("Back to Tab")
