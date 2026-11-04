@@ -102,6 +102,7 @@ struct HoverTrackingArea: NSViewRepresentable {
       dragMonitor.map(NSEvent.removeMonitor)
       dragMonitor = nil
       guard window != nil else { return tracker.move(self, to: nil) }
+      (window as? BrowserWindow)?.pointerTrackers.add(self)
       dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] event in
         if let self, event.window === window { report(event) }
         return event

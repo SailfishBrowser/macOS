@@ -2,6 +2,15 @@ import AppKit
 import SwiftUI
 
 final class WindowHostingView<Content: View>: NSHostingView<Content> {
+  private var wasTrackedByAppKit = false
+
+  override func mouseMoved(with event: NSEvent) {
+    let isTrackedByAppKit = (window as? BrowserWindow)?.tracksPointer(at: event.locationInWindow) == true
+    defer { wasTrackedByAppKit = isTrackedByAppKit }
+    guard !isTrackedByAppKit || !wasTrackedByAppKit else { return }
+    super.mouseMoved(with: event)
+  }
+
   override func cursorUpdate(with event: NSEvent) {
     guard (window as? BrowserWindow)?.isOnColumnResizeArea(event.locationInWindow) == true else {
       return super.cursorUpdate(with: event)
