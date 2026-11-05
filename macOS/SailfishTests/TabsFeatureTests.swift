@@ -94,6 +94,7 @@ final class TabsFeatureTests: XCTestCase {
       TabsFeature()
     } withDependencies: {
       $0.webEngine.discard = { _ in }
+      $0.date = .constant(now)
     }
     await store.send(.close(UUID(50))) {
       $0.tabs[id: UUID(50)] = Tab(

@@ -132,6 +132,9 @@ struct AppFeature {
     case archiveIdleTabs
     // Every space refreshes the live folders whose time has come.
     case refreshLiveFolders
+    case sleepIdleTabs
+    // A tab action for a space of the closed last window, whose pages stay alive until the next window.
+    case closedWindowTab(TabsFeature.Action, in: Space.ID)
     // Adds a profile and moves the spaces to it; their tabs start fresh in it.
     case createProfile(name: String, spaces: Set<Space.ID>)
     case deleteProfile(Profile.ID)
@@ -332,6 +335,28 @@ struct AppFeature {
             window.spaces.spaces.map { .send(.windows(.element(id: window.id, action: .tab(.refreshLiveFolders, in: $0.id)))) }
           }
         )
+
+      case .sleepIdleTabs:
+        @Shared(.sleepTabsAfter) var after
+        guard let after else { return .none }
+        // Downloads name no tab, so a profile's tabs stay awake while one of its downloads runs.
+        let downloading = Set(state.downloads.downloads.filter { $0.state == .inProgress }.compactMap(\.profileID))
+        let closed = state.closedWindow?.spaces.spaces.filter { !downloading.contains($0.profileID) } ?? []
+        return .merge(
+          state.windows.flatMap { window -> [Effect<Action>] in
+            let keeping = Set([window.miniPlayer].compactMap { $0 })
+            return window.spaces.spaces.filter { !downloading.contains($0.profileID) }.map {
+              .send(.windows(.element(id: window.id, action: .tab(.sleepIdle(after: after, keeping: keeping), in: $0.id))))
+            }
+          } + closed.map { .send(.closedWindowTab(.sleepIdle(after: after, keeping: []), in: $0.id)) }
+        )
+
+      case let .closedWindowTab(action, space):
+        // The tabs reducer runs on the kept space as it does in a window, so its tabs sleep by the same rules.
+        guard var tabs = state.closedWindow?.spaces.spaces[id: space] else { return .none }
+        let effect = TabsFeature().reduce(into: &tabs, action: action)
+        state.closedWindow?.spaces.spaces[id: space] = tabs
+        return effect.map { .closedWindowTab($0, in: space) }
 
       case let .createProfile(name, spaces):
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)

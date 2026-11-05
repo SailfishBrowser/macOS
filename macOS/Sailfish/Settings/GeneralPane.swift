@@ -6,6 +6,11 @@ extension SharedKey where Self == AppStorageKey<Bool>.Default {
   static var warnBeforeQuitting: Self { Self[.appStorage("warnBeforeQuitting"), default: true] }
 }
 
+extension SharedKey where Self == AppStorageKey<TimeInterval?> {
+  // How long a tab goes unshown before its page closes, in seconds; nil never.
+  static var sleepTabsAfter: Self { .appStorage("sleepTabsAfter") }
+}
+
 struct GeneralPane: View {
   let showProfiles: () -> Void
   let importData: () -> Void
@@ -14,6 +19,7 @@ struct GeneralPane: View {
   @Shared(.fingerprintingProtection) private var fingerprintingProtection
   @Shared(.httpsOnly) private var httpsOnly
   @Shared(.tidyDownloads) private var tidyDownloads
+  @Shared(.sleepTabsAfter) private var sleepTabsAfter
   @State private var isDefaultBrowser = Shell.isDefaultBrowser
 
   var body: some View {
@@ -37,6 +43,18 @@ struct GeneralPane: View {
             Button("Set as Default", action: makeDefault)
           }
         }
+      }
+      .settingsCard()
+      SettingsRow("Sleep tabs after") {
+        Picker("", selection: Binding { sleepTabsAfter } set: { value in $sleepTabsAfter.withLock { $0 = value } }) {
+          ForEach([15.0, 30, 60, 120, 360, 720], id: \.self) { minutes in
+            Text(minutes < 60 ? "\(Int(minutes)) minutes" : minutes == 60 ? "1 hour" : "\(Int(minutes / 60)) hours")
+              .tag(Optional(minutes * 60))
+          }
+          Text("Never").tag(TimeInterval?.none)
+        }
+        .labelsHidden()
+        .frame(width: 180)
       }
       .settingsCard()
       VStack(spacing: 0) {

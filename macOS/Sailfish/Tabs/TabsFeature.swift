@@ -405,6 +405,10 @@ struct TabsFeature {
     case archive([Tab.ID])
     // Archives Today tabs not shown for the profile's "Archive tabs after".
     case archiveIdle
+    // Closes the pages of tabs not shown for Settings' "Sleep tabs after" once the engine finds them waiting on
+    // nothing; the tabs stay, and load their saved history when shown again. The window's mini player keeps its tab.
+    case sleepIdle(after: TimeInterval, keeping: Set<Tab.ID>)
+    case sleep(Tab.ID, after: TimeInterval, keeping: Set<Tab.ID>)
     case close(Tab.ID)
     // Clear (⇧⌘K): archives every Today tab, the shown one too.
     case clearToday
@@ -610,6 +614,25 @@ struct TabsFeature {
         }
         guard !idle.isEmpty else { return .none }
         return .merge(archive(idle.map(\.id), undoable: false, &state), .send(.delegate(.autoArchived(idle.count))))
+
+      case let .sleepIdle(after, keeping):
+        // Each page is asked on its own, so one that never answers, hung or crashed, holds up no other.
+        return .merge(sleepable(after, keeping, state).map { id in
+          .run { send in
+            if await engine.canSleep(id) {
+              await send(.sleep(id, after: after, keeping: keeping))
+            }
+          }
+        })
+
+      case let .sleep(id, after, keeping):
+        // A tab shown, playing or moved away while its page was asked stays awake. One that sleeps is left as a
+        // relaunch leaves it, with no page state.
+        guard sleepable(after, keeping, state).contains(id) else { return .none }
+        state.ownTabs[id: id]?.isLive = false
+        state.ownTabs[id: id]?.isLoading = false
+        state.ownTabs[id: id]?.media = nil
+        return .run { _ in await engine.close(id) }
 
       case .clearToday:
         let (closed, effect) = remove(state.clearableTabs.map(\.id), &state)
@@ -1159,6 +1182,15 @@ struct TabsFeature {
         return archive(state.members(of: id).map(\.id), &state)
       }
     }
+    // A tab's last shown time counts until it stops being shown, by whatever action, for archiving and sleeping.
+    .onChange(of: \.shownTabIDs) { shown, _ in
+      Reduce { state, _ in
+        for id in shown.subtracting(state.shownTabIDs) {
+          state.tabs[id: id]?.lastActiveAt = now
+        }
+        return .none
+      }
+    }
     // Runs after every change but a page's, which never touches a group.
     Reduce { state, action in
       if case .pageUpdated = action {} else {
@@ -1380,6 +1412,16 @@ struct TabsFeature {
     return (closed, .merge(.run { _ in for tab in live { await engine.close(tab) } }, activate(&state)))
   }
 
+  // The space's own tabs whose pages may sleep: live, not shown for `after`, and silent. A favorite keeps its page,
+  // which its preview reads.
+  private func sleepable(_ after: TimeInterval, _ keeping: Set<Tab.ID>, _ state: State) -> [Tab.ID] {
+    let awake = state.shownTabIDs.union(keeping)
+    return state.ownTabs.filter {
+      $0.isLive && !awake.contains($0.id) && now.timeIntervalSince($0.lastActiveAt) >= after && !$0.isAudible
+        && $0.media.map { !$0.isPlaying && !$0.isInPictureInPicture } ?? true
+    }.map(\.id)
+  }
+
   // Goes back to the tab this one was opened from, else the row above, else the row below.
   private func nextSelection(after tab: Tab, skipping removed: Set<Tab.ID>, _ state: State) -> Tab.ID? {
     if let opener = tab.openerID, !removed.contains(opener), state.tabs[id: opener] != nil { return opener }
@@ -1389,8 +1431,6 @@ struct TabsFeature {
   }
 
   private func select(_ id: Tab.ID, _ state: inout State) -> Effect<Action> {
-    // A tab's last shown time counts until it is switched away from, for archiving.
-    state.selectedTabID.map { state.tabs[id: $0]?.lastActiveAt = now }
     state.selectedTabID = id
     state.selection = []
     state.tabs[id: id]?.lastActiveAt = now

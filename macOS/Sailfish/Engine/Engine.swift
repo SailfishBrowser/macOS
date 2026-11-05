@@ -415,6 +415,7 @@ extension WebEngineClient: DependencyKey {
     setMuted: { tab, muted in await Engine.shared.setMuted(tab, muted) },
     media: { tab, command in await PictureInPicture.perform(command, on: tab) },
     close: { await Engine.shared.close($0) },
+    canSleep: { await Engine.shared.canSleep($0) },
     discard: { await Engine.shared.discard($0) },
     closeIncognito: { await Engine.shared.closeIncognito($0) },
     deleteProfile: { await Engine.shared.deleteProfile($0) },

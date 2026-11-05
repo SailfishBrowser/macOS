@@ -94,11 +94,12 @@ final class Shell: NSObject, NSMenuDelegate {
     quitWarning.install()
     applyAppIcon()
     store.send(.launched)
-    // Checks each minute for Today tabs to archive and live folders to refresh.
+    // Checks each minute for Today tabs to archive, live folders to refresh and tabs to sleep.
     Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
       MainActor.assumeIsolated {
         _ = self?.store.send(.archiveIdleTabs)
         _ = self?.store.send(.refreshLiveFolders)
+        _ = self?.store.send(.sleepIdleTabs)
       }
     }
     NSApp.activate()
