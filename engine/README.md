@@ -271,6 +271,12 @@ list leaves Google out. This also replaces DuckDuckGo, which earlier builds
 made the default. Google's search and suggest URLs need no API keys.
 Incognito contexts use their profile's engines.
 
+## Secure connections
+
+`httpsOnlyModeEnabled` reads and writes the profile's
+`prefs::kHttpsOnlyModeEnabled`, Chrome's "Always use secure connections"
+(strict HTTPS-First Mode), which an incognito context reads from its profile.
+
 ## Extensions
 
 Chrome's extension system runs unchanged: installs, updates, content

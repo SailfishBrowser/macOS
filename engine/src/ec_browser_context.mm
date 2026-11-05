@@ -290,6 +290,14 @@ class SiteSearchActivator : public TemplateURLServiceObserver {
   _profile->GetPrefs()->SetBoolean(prefs::kSearchSuggestEnabled, enabled);
 }
 
+- (BOOL)httpsOnlyModeEnabled {
+  return _profile->GetPrefs()->GetBoolean(prefs::kHttpsOnlyModeEnabled);
+}
+
+- (void)setHttpsOnlyModeEnabled:(BOOL)enabled {
+  _profile->GetPrefs()->SetBoolean(prefs::kHttpsOnlyModeEnabled, enabled);
+}
+
 - (ECBrowserContext*)offTheRecordContext {
   if (!_offTheRecordContext.profile) {
     _offTheRecordContext = [[ECBrowserContext alloc]
