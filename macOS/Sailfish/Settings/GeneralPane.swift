@@ -82,7 +82,9 @@ struct GeneralPane: View {
 
 // With "Warn before quitting" on, quitting first asks "Quit Sailfish?" over the last focused window: Return, the
 // Quit button or a second quit quits, and Escape or Cancel closes it; other keys do nothing while it shows. Quit chosen
-// from the menu bar counts as the keys. AppleScript and the Dock quit at once, as does a quit with no window to ask in.
+// from the menu bar counts as the keys. AppleScript, the Dock and a logout ask as well: AppKit runs terminate(_:) for a
+// quit Apple event on a later turn of the run loop, when the event is no longer current, so its sender and reason go
+// unread, and the AppleScript call returns before the answer. Only a quit with no window to ask in quits at once.
 // While files download it asks about those instead, as quitting cancels them. Every route to quitting, the menu, the
 // Dock, AppleScript and logout included, comes through NSApp.terminate(_:), which the engine's application class owns,
 // so the warning wraps that method rather than the app delegate.
@@ -90,6 +92,7 @@ struct GeneralPane: View {
 final class QuitWarning {
   enum Prompt: Equatable { case none, downloads, confirm }
 
+  private static var shared: QuitWarning!
   @Shared(.warnBeforeQuitting) private var isEnabled
   // Set when Sparkle quits to install an update and relaunch.
   var bypass = false
@@ -108,7 +111,14 @@ final class QuitWarning {
     return isEnabled ? .confirm : .none
   }
 
+  static func addKeyMonitor(_ handler: @escaping @MainActor (NSEvent) -> NSEvent?) -> Any? {
+    NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+      shared.confirmingWindow == nil ? handler(event) : event
+    }
+  }
+
   func install() {
+    Self.shared = self
     let selector = #selector(NSApplication.terminate(_:))
     let method = class_getInstanceMethod(object_getClass(NSApp), selector)!
     typealias Terminate = @convention(c) (NSApplication, Selector, Any?) -> Void

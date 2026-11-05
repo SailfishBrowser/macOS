@@ -192,7 +192,7 @@ struct CommandBarView: View {
       }
       // The field editor takes Backspace and ⌘Return before onKeyPress. Backspace at the start leaves keyword mode,
       // with ⌘⌥ it removes the selected suggestion, and ⌘Return opens the row in a Little Sailfish.
-      backspaceMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+      backspaceMonitor = QuitWarning.addKeyMonitor { event in
         // Typing goes to the bar whatever took the keys since it opened.
         if event.window == window, event.modifierFlags.isDisjoint(with: [.command, .control]) { focusField(in: window) }
         if event.keyCode == 36, event.modifierFlags.contains(.command) {
