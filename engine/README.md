@@ -53,6 +53,28 @@ Upstream changes (`patches/`):
    `MacNotificationProviderImpl::BindNotificationService` at launch in the app
    and in "Chromium Helper (Alerts)", and usernoted asked for permission at
    that first connection, once for every new bundle id.
+9. Keep the key for saved passwords and cookies in a keychain item named
+   for this app, not the shared "Chromium Safe Storage", so differently
+   signed builds stop asking for it at every launch; the key of an existing
+   Chromium item is carried over once.
+10. Cancel a passkey (WebAuthn) request that reaches a dialog step without a
+    web-modal host, so the page gets NotAllowedError instead of crashing the
+    browser.
+11. Present macOS's passkey sheet on the tab's own window, which has no
+    views widget.
+12. Replace the "Open <app>?" external protocol dialog with a callback that
+    asks the embedder (see Page UI).
+13. Run EngineCore's main-world scripts and message objects in every frame,
+    through `components/js_injection` (see Main-world scripts).
+14. Let `chrome.tabs.captureVisibleTab` find the active tab through a window
+    controller without a browser.
+15. Hand a local save card offer to the embedder through a callback in place
+    of Chrome's save card bubble (see Page UI).
+16. Offer no "Save card for faster checkout" entry without a tab, since its
+    dialog needs one.
+17. Open autofill settings (payment methods, addresses) in a new tab when
+    there is no browser window.
+18. Register "Save security codes" off by default.
 
 ## Tabs
 
