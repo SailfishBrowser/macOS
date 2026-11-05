@@ -209,7 +209,7 @@ struct WindowView: View {
             // Shot 51: 10 pt below the developer toolbar, not over it. The same below the URL toolbar.
             let space = store.spaces.selected
             let toolbar = space.selectedTab.flatMap { tab in
-              space.split(of: tab.id) != nil
+              space.split(of: tab.id) != nil || isPageFullScreen
                 ? nil : tab.url.isDeveloperPage ? DeveloperBar.height : store.showsURLToolbar ? URLToolbar.height : nil
             }
             FindBar(store: find).coversPage().padding(10).padding(.top, toolbar ?? 0)
