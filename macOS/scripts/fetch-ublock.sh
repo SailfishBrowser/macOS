@@ -3,12 +3,15 @@
 # Chromium build of the release below (https://github.com/gorhill/uBlock/releases), checked against its
 # SHA-256. The engine loads it as a component extension, whose ID comes from the manifest's "key", so this
 # adds one: the public half of a key made for Sailfish, giving ID hlmfmdnmdkgbnjgefkahmafaefinjolo.
+# It also adds Sailfish's own filters, ublock-filters.txt, which uBlock compiles after the lists it has selected, and
+# stamps uBlock's startup snapshot with their digest, so a profile whose snapshot predates them compiles again.
 # To update, change VERSION and SHA256 (the release asset's digest).
 set -eu
 VERSION=1.75.0
 SHA256=393cf95709d1074d4022970e9014e434395c53a822387f1e25f43be97cf4b582
 KEY=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxKsec6ja7fc/87pMw5Eo+gmHsJ0IdlRz/sUOr+ZJo5lE3c+zdeMaZUmSbrWT9OT3uJrbm07yT3UypEi0xya+88EPjs63zq5Y0wzkoYEqX/CgW6ft0IEM7z84vLVpznBa405LRuRi83Pk8L/VRkjQYvcsVC3kOn+ObHbQXb7mpbHd7COn0UmX6r8O8YrhECYaEXqQfXG9SUFDcsZCX0+Z4zJJyLSLt5WLcCOa7FWMezeV/9elqoVslToc8Q56czrwBRWmJVxxpuMJo7Goof75qNgriN0g7/dWPhHXtuxlwv8q7q6Rsh/+hCsiyDDpNpvfgz3inE6jiW/WtgaDbAfgzQIDAQAB
 OUT="$(cd "$(dirname "$0")/.." && pwd)/Extensions"
+FILTERS="$(cd "$(dirname "$0")" && pwd)/ublock-filters.txt"
 ZIP="$(mktemp -d)/uBlock0.zip"
 
 curl -fsSL -o "$ZIP" "https://github.com/gorhill/uBlock/releases/download/$VERSION/uBlock0_$VERSION.chromium.zip"
@@ -17,4 +20,9 @@ rm -rf "$OUT/uBlock0.chromium"
 mkdir -p "$OUT"
 unzip -q "$ZIP" -d "$OUT"
 plutil -insert key -string "$KEY" "$OUT/uBlock0.chromium/manifest.json"
+mkdir "$OUT/uBlock0.chromium/assets/sailfish"
+cp "$FILTERS" "$OUT/uBlock0.chromium/assets/sailfish/filters.txt"
+DIGEST="$(shasum -a 256 "$FILTERS" | cut -c1-12)"
+perl -0pi -e 's/^(        if \( µb\.inMemoryFilters\.length !== 0 \) \{\n)/        toLoad.push(io.fetchText("assets\/sailfish\/filters.txt").then(details => {\n            µb.applyCompiledFilters(µb.compileFilters(details.content, { assetKey: "sailfish" }), false);\n        }));\n$1/m or die "storage.js anchor not found\n"' "$OUT/uBlock0.chromium/js/storage.js"
+perl -0pi -e "s/(selfieMagic: )(\d+),/\$1'\$2-$DIGEST',/ or die \"background.js anchor not found\\n\"" "$OUT/uBlock0.chromium/js/background.js"
 rm -r "$(dirname "$ZIP")"
