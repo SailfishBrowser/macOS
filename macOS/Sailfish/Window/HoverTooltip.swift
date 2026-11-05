@@ -71,28 +71,30 @@ private struct HoverTooltip: ViewModifier {
   let isEnabled: Bool
   // Set from the pointer's arrival until it leaves, so a tooltip shows at most once per hover.
   @State private var pending: Task<Void, Never>?
+  @State private var isHovered = false
 
   func body(content: Content) -> some View {
     content
-      .onContinuousHover { phase in
-        switch phase {
-        case .active:
-          guard isEnabled, pending == nil else { return }
-          TooltipPanel.arm()
-          let generation = TooltipPanel.generation
-          pending = Task {
-            try? await Task.sleep(for: .seconds(1))
-            // Not over another window a click just brought up, such as Settings from Tidy.
-            guard !Task.isCancelled, TooltipPanel.generation == generation, let window = NSApp.keyWindow,
-              window.frame.contains(NSEvent.mouseLocation), NSEvent.pressedMouseButtons == 0
-            else { return }
-            TooltipPanel.show(label, at: NSEvent.mouseLocation, over: window)
-          }
-        case .ended:
-          leave()
-        }
+      .hoverRegion { isHovered in
+        self.isHovered = isHovered
+        if isHovered { arm() } else { leave() }
       }
+      .onChange(of: isEnabled) { if isHovered { arm() } }
       .onDisappear { leave() }
+  }
+
+  private func arm() {
+    guard isEnabled, pending == nil else { return }
+    TooltipPanel.arm()
+    let generation = TooltipPanel.generation
+    pending = Task {
+      try? await Task.sleep(for: .seconds(1))
+      // Not over another window a click just brought up, such as Settings from Tidy.
+      guard !Task.isCancelled, TooltipPanel.generation == generation, let window = NSApp.keyWindow,
+        window.frame.contains(NSEvent.mouseLocation), NSEvent.pressedMouseButtons == 0
+      else { return }
+      TooltipPanel.show(label, at: NSEvent.mouseLocation, over: window)
+    }
   }
 
   private func leave() {

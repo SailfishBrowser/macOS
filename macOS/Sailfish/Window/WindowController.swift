@@ -3,9 +3,35 @@ import ComposableArchitecture
 @preconcurrency import EngineCore
 import SwiftUI
 
-// AppKit leaves full screen on one Esc that nothing handled; the controller's monitor does a two-step instead.
-private final class BrowserWindow: NSWindow {
+final class BrowserWindow: NSWindow {
+  let pages = NSHashTable<NSView>.weakObjects()
+  let covers = NSHashTable<CoverView>.weakObjects()
+  let columnResizeAreas = NSHashTable<NSView>.weakObjects()
+  let pointerTrackers = NSHashTable<NSView>.weakObjects()
+
+  // AppKit leaves full screen on one Esc that nothing handled; the controller's monitor does a two-step instead.
   override func cancelOperation(_ sender: Any?) {}
+
+  func page(at point: NSPoint) -> NSView? {
+    guard !isCovered(point, sidebar: false) else { return nil }
+    return pages.allObjects.first { contains($0, point) }
+  }
+
+  func isOnColumnResizeArea(_ point: NSPoint) -> Bool {
+    !isCovered(point, sidebar: true) && columnResizeAreas.allObjects.contains { contains($0, point) }
+  }
+
+  func tracksPointer(at point: NSPoint) -> Bool {
+    !isCovered(point, sidebar: false) && (pages.allObjects + pointerTrackers.allObjects).contains { contains($0, point) }
+  }
+
+  func isCovered(_ point: NSPoint, sidebar: Bool) -> Bool {
+    covers.allObjects.contains { (!sidebar || $0.isOverSidebar) && contains($0, point) }
+  }
+
+  private func contains(_ view: NSView, _ point: NSPoint) -> Bool {
+    view.window === self && view.convert(view.bounds, to: nil).contains(point)
+  }
 }
 
 final class WindowController: NSWindowController, NSWindowDelegate {
@@ -58,7 +84,7 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     window.titleVisibility = .hidden
     window.isReleasedWhenClosed = false
     window.minSize = NSSize(width: 640, height: 400)
-    let hostingView = NSHostingView(rootView: WindowView(store: store).environment(downloads))
+    let hostingView = WindowHostingView(rootView: WindowView(store: store).environment(downloads))
     hostingView.sizingOptions = []
     window.contentView = hostingView
     if let frame = store.frame {

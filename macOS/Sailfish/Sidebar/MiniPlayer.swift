@@ -86,7 +86,7 @@ struct MiniPlayer: View {
       .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: 0x050627)))
       .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(hex: 0x1E1F3D), lineWidth: 0.5))
       .padding(.horizontal, 8)
-      .onHover { hovering in
+      .hoverRegion { hovering in
         withAnimation(Motion.row) {
           isHovering = hovering
           if !hovering { showsVolume = false }
@@ -123,7 +123,7 @@ private struct MiniPlayerButtonStyle: ButtonStyle {
     configuration.label
       .background(
         RoundedRectangle(cornerRadius: 6).fill(.white.opacity((isHovering || isSelected) && isEnabled ? 0.08 : 0)))
-      .onHover { isHovering = $0 }
+      .hoverRegion { isHovering = $0 }
   }
 }
 

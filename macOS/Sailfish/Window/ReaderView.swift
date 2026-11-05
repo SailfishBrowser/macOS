@@ -81,6 +81,7 @@ struct ReaderOverlay: View {
         .background(settings.theme.background)
         .overlay(alignment: .topTrailing) { controls(settings).padding(10) }
         .clipShape(RoundedRectangle(cornerRadius: 6))
+        .coversPage()
     }
   }
 
