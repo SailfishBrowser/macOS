@@ -98,6 +98,9 @@ prerelease publishes a prerelease, which neither the download link nor the updat
 `macOS/scripts/release.sh` does the same on a Mac with the signing identity, notarization credentials and Sparkle
 key.
 
+The app's bundle id is registered as an App ID in Certificates, Identifiers and Profiles, which the passkey
+entitlement and the provisioning profile need.
+
 ## Contributing
 
 Issues and pull requests are welcome. Build the app as in [Building](#building) and run the tests before you open a
