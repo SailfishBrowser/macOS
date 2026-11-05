@@ -20,7 +20,9 @@ extension Engine {
     }
   }
 
-  // Searches the document and its same-site frames; another site's frame is out of a page script's reach.
+  // Searches the document, its same-site frames and the shadow roots it can see; another site's frame is out of a
+  // page script's reach, and so is a closed root on Chromium, so a focused custom element with no visible root counts
+  // as waiting.
   static let waitingScript = """
     (() => {
       const skipped = new Set(['hidden', 'submit', 'button', 'reset', 'image']);
@@ -31,12 +33,14 @@ extension Engine {
         if (field.type === 'checkbox' || field.type === 'radio') return field.checked !== field.defaultChecked;
         return field.value !== field.defaultValue;
       };
-      const waits = (doc) => {
-        const active = doc.activeElement;
-        return [...doc.querySelectorAll('input, textarea, select')].some(changed)
+      const waits = (root) => {
+        const active = root.activeElement;
+        return [...root.querySelectorAll('input, textarea, select')].some(changed)
           || (!!active && active.isContentEditable && active.textContent.trim() !== '')
-          || [...doc.querySelectorAll('audio, video')].some((m) => m.srcObject && !m.paused)
-          || [...doc.querySelectorAll('iframe')].some((f) => f.contentDocument && waits(f.contentDocument));
+          || (!!active && active.tagName.includes('-') && !active.shadowRoot)
+          || [...root.querySelectorAll('audio, video')].some((m) => m.srcObject && !m.paused)
+          || [...root.querySelectorAll('iframe')].some((f) => f.contentDocument && waits(f.contentDocument))
+          || [...root.querySelectorAll('*')].some((el) => el.shadowRoot && waits(el.shadowRoot));
       };
       return String(waits(document));
     })()
