@@ -145,7 +145,8 @@ struct SpacesFeature {
         }
         if !space.isIncognito {
           @Shared(.archive) var archive
-          let archived = space.ownTabs.map {
+          // A live folder's tabs come from its source and are not archived.
+          let archived = space.ownTabs.filter { space.takesRows($0.placement) }.map {
             ArchivedTab(id: $0.id, url: $0.url, title: $0.displayTitle, profileID: space.profileID, archivedAt: now)
           }
           $archive.withLock { $0.insert(contentsOf: archived, at: 0) }

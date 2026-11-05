@@ -190,6 +190,30 @@ struct RenameSpaceDialog: View {
   }
 }
 
+// New Live Folder…: the source's URL, a feed or a GitHub repository.
+struct NewLiveFolderDialog: View {
+  let create: (URL) -> Void
+  let dismiss: () -> Void
+  @State private var text = ""
+
+  var body: some View {
+    ConfirmModal(
+      confirm: "Create", isValid: LiveSources.url(typed: text) != nil,
+      // The field as it is when Create is pressed, which can be ahead of the last drawn body.
+      onConfirm: {
+        guard let url = LiveSources.url(typed: text) else { return }
+        create(url)
+        dismiss()
+      },
+      onCancel: dismiss
+    ) {
+      Text("New Live Folder").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+      ModalField(placeholder: "URL", text: $text).padding(.top, 20)
+    }
+    .frame(width: 450)
+  }
+}
+
 // The Spaces > Change Profile dialog: the space's profile in a pop-up, with the data that changes with it.
 struct ChangeProfileDialog: View {
   let space: String
