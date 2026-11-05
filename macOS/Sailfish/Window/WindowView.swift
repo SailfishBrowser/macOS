@@ -201,11 +201,13 @@ struct WindowView: View {
         }
         .overlay(alignment: .topTrailing) {
           if let find = store.scope(state: \.find, action: \.find.presented) {
-            // Shot 51: 10 pt below the developer toolbar, not over it.
+            // Shot 51: 10 pt below the developer toolbar, not over it. The same below the URL toolbar.
             let space = store.spaces.selected
-            let isUnderToolbar =
-              space.selectedTab.map { $0.url.isDeveloperPage && space.split(of: $0.id) == nil } == true
-            FindBar(store: find).padding(10).padding(.top, isUnderToolbar ? DeveloperBar.height : 0)
+            let toolbar = space.selectedTab.flatMap { tab in
+              space.split(of: tab.id) != nil
+                ? nil : tab.url.isDeveloperPage ? DeveloperBar.height : store.showsURLToolbar ? URLToolbar.height : nil
+            }
+            FindBar(store: find).padding(10).padding(.top, toolbar ?? 0)
           }
         }
         .padding([.top, .bottom, .trailing], isPageFullScreen ? 0 : 10)

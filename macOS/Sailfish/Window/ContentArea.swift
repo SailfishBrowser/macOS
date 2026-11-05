@@ -177,11 +177,13 @@ private struct Pane: View {
         }
       )
       .clipShape(UnevenRoundedRectangle(topLeadingRadius: 6, topTrailingRadius: 6))
+    } else if let tab, store.showsURLToolbar, !isFullScreen {
+      URLToolbar(url: tab.url) { store.send(.editSelectedTab) }
     }
   }
 
   @ViewBuilder private var page: some View {
-    let hasBar = tab.map { isSplit || $0.url.isDeveloperPage && !isFullScreen } ?? false
+    let hasBar = tab.map { isSplit || ($0.url.isDeveloperPage || store.showsURLToolbar) && !isFullScreen } ?? false
     ZStack {
       if let tab, let view = Engine.shared.view(tab.id) {
         WebView(view: view, roundsTop: !hasBar, cornerRadius: isFullScreen ? 0 : 6, onMouseDown: { select() })
