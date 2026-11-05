@@ -120,14 +120,9 @@ enum Theme {
   static func disabledAccentText(_ theme: SpaceTheme) -> Color {
     isLight(theme) ? shade(theme, saturation: 0.15, brightness: 0.9) : shade(theme, saturation: 0.55, brightness: 0.78)
   }
-  // A favorite's tint from its favicon's color, laid over the tile's fill.
-  static func favoriteTint(_ color: Color, isSelected: Bool) -> Color {
-    color.opacity(isSelected ? 0.35 : 0.2)
-  }
-  // A selected favorite: on a light theme a dark wash of the space's primary color, darker than the tiles around it, so
-  // a white or grey icon stays legible on it; on a dark theme the selected row's fill.
-  static func favoriteSelection(_ theme: SpaceTheme) -> Color {
-    isLight(theme) ? tint(theme.gradient[0], saturation: 0.5, brightness: 0.5).opacity(0.3) : rowSelection(theme)
+  // A selected favorite's color when its favicon has none: the space's primary color, as a selected row is lit with it.
+  static func favoriteFallback(_ theme: SpaceTheme) -> Color {
+    tint(theme.gradient[0], saturation: 0.5, brightness: 1)
   }
   // A selected tab row, lit with the space's primary color: a light tint of it on light themes, a
   // translucent one on dark themes (white at 19% takes the color of the sidebar under it).
@@ -180,6 +175,9 @@ enum Theme {
   static let rowShadow = adaptive(.clear, .black.opacity(0.12))
   static let fill = adaptive(.white.opacity(0.1), .black.opacity(0.05))
   static let fillHover = adaptive(.white.opacity(0.14), .black.opacity(0.09))
+  // A selected favorite under the wash of its favicon's colors: lighter than the tiles around it on a dark theme (Arc's
+  // reads as white at about 0.45), darker on a light one so a white or grey icon stays legible.
+  static let favoriteSelection = adaptive(.white.opacity(0.4), .black.opacity(0.2))
   // The space editor's name field, focused or not: white 8% on the default dark theme, 60% on a light one (shots 31, 32, 36).
   static let field = adaptive(.white.opacity(0.08), .white.opacity(0.6))
   // The half of a row a dragged tab will split into, and its flash on release (a 6% accent tint, then solid).
