@@ -12,6 +12,7 @@ struct GeneralPane: View {
   @Shared(.warnBeforeQuitting) private var warnBeforeQuitting
   @Shared(.blocksAds) private var blocksAds
   @Shared(.fingerprintingProtection) private var fingerprintingProtection
+  @Shared(.httpsOnly) private var httpsOnly
   @Shared(.tidyDownloads) private var tidyDownloads
   @State private var isDefaultBrowser = Shell.isDefaultBrowser
 
@@ -25,6 +26,9 @@ struct GeneralPane: View {
         Divider().padding(.horizontal, 10)
         SettingsToggle("Fingerprinting protection", isOn: $fingerprintingProtection)
           .onChange(of: fingerprintingProtection) { Engine.shared.fingerprintingDidChange() }
+        Divider().padding(.horizontal, 10)
+        SettingsToggle("Always use secure connections", isOn: $httpsOnly)
+          .onChange(of: httpsOnly) { Engine.shared.httpsOnlyDidChange() }
         Divider().padding(.horizontal, 10)
         SettingsToggle("Tidy Downloads", isOn: $tidyDownloads)
         if !isDefaultBrowser {
