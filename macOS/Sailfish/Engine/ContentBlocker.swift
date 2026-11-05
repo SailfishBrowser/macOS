@@ -13,7 +13,7 @@ import WebKit
 // in the background.
 @MainActor enum ContentBlocker {
   // Part of the record's stamp; raising it when the converter's output changes converts the lists again.
-  nonisolated fileprivate static let converterVersion = 2
+  nonisolated fileprivate static let converterVersion = 4
   nonisolated private static let identifierPrefix = "ContentBlocker"
   // The lists compiled so far, on every live WebKit page while the setting is on.
   private(set) static var ruleLists: [WKContentRuleList] = [] {
@@ -159,6 +159,7 @@ import WebKit
     for identifier in stored where identifier.hasPrefix(identifierPrefix + ".") && !kept.contains(identifier) {
       try? await store.removeContentRuleList(forIdentifier: identifier)
     }
+    FilterLists.removeUnkeptFiles()
     lists.record(identifiers: chunks.map(\.identifier))
   }
 
@@ -250,14 +251,14 @@ struct ContentRule: Hashable, Sendable {
   }
 }
 
-// The default filter lists: each list's last fetched copy in URL.dataDirectory/ContentBlocker, or else the bundled
+// The kept filter lists: each list's last fetched copy in URL.dataDirectory/ContentBlocker, or else the bundled
 // uBlock Origin's, with where and how often uBlock Origin fetches it. Only the files keep the texts, which are read
 // again to compile, so a session does not hold them.
 private struct FilterLists: Sendable {
-  // The lists uBlock Origin enables by default, by their key in its assets.json.
-  private static let keys = [
+  // The lists of those uBlock Origin enables by default that WebKit pages get, by their key in its assets.json.
+  private static let kept = [
     "ublock-filters", "ublock-badware", "ublock-privacy", "ublock-quick-fixes", "ublock-unbreak", "easylist",
-    "easyprivacy", "urlhaus-1", "plowe-0",
+    "easyprivacy",
   ]
   private static let directory = URL.dataDirectory.appending(path: "ContentBlocker")
   private static let session = URLSession(configuration: .ephemeral)
@@ -349,7 +350,7 @@ private struct FilterLists: Sendable {
   ) throws -> [(key: String, url: URL, isSaved: Bool, urls: [URL], updateAfter: Double)] {
     let assets = try JSONDecoder().decode(
       [String: Asset].self, from: Data(contentsOf: root.appending(path: "assets/assets.json")))
-    return keys.compactMap { key in
+    return kept.compactMap { key in
       guard let asset = assets[key] else { return nil }
       let remote = (asset.cdnURLs.isEmpty ? asset.contentURL : asset.cdnURLs).compactMap(URL.init(string:))
         .filter { $0.scheme == "https" || $0.scheme == "http" }
@@ -374,6 +375,14 @@ private struct FilterLists: Sendable {
         let values = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
         return "\(file.path) \(values.fileSize ?? 0) \(values.contentModificationDate?.timeIntervalSince1970 ?? 0)"
       }).joined(separator: "\n")
+  }
+
+  static func removeUnkeptFiles() {
+    let names = Set(kept.map { "\($0).txt" })
+    let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+    for file in files where file.pathExtension == "txt" && !names.contains(file.lastPathComponent) {
+      try? FileManager.default.removeItem(at: file)
+    }
   }
 
   private static let record = directory.appending(path: "Compiled.json")
@@ -798,7 +807,7 @@ private struct FilterSet {
 
   // A pattern as WebKit url-filters, whether it names a whole host, and the host it names; nil for a regex WebKit
   // cannot run or a pattern that is not ASCII. A final separator, which can also be the URL's end, gives two filters,
-  // one for each: as one filter with an optional group, a list of urlhaus's paths compiles twenty times slower.
+  // one for each: a long list of paths compiles twenty times slower with an optional group.
   static func urlFilters(_ pattern: Substring) -> (filters: [String], isHost: Bool, host: String?)? {
     guard pattern.allSatisfy({ $0.isASCII && !$0.isWhitespace }) else { return nil }
     if pattern.count > 2, pattern.hasPrefix("/"), pattern.hasSuffix("/") {
@@ -1001,16 +1010,20 @@ private struct FilterSet {
       case let .except(domains):
         trigger.unlessDomain = (domains + unhidden.sorted()).map { "*" + $0 }
       case let .only(domains):
-        let kept = domains.filter { !unhidden.contains($0) }
-        guard !kept.isEmpty else { continue }
-        trigger.ifDomain = kept.map { "*" + $0 }
+        for domain in domains where !unhidden.contains(domain) {
+          let page = ContentRule.Trigger(
+            urlFilter: Self.hostAnchor + domain.replacingOccurrences(of: ".", with: "\\.") + "[:/]",
+            resourceType: ["document"])
+          rules.append(ContentRule(trigger: page, action: .init(type: "css-display-none", selector: selector)))
+        }
+        continue
       }
       rules.append(ContentRule(trigger: trigger, action: .init(type: "css-display-none", selector: selector)))
     }
     let genericOff = Self.pageException(genericHidingOff)
     let allOff = Self.pageException(hidingOff)
     return Self.slices(rules.rules, leaving: genericOff.count + allOff.count).map { slice in
-      slice.filter { $0.trigger.ifDomain == nil } + genericOff + slice.filter { $0.trigger.ifDomain != nil } + allOff
+      slice.filter { $0.trigger.urlFilter == ".*" } + genericOff + slice.filter { $0.trigger.urlFilter != ".*" } + allOff
     }
   }
 }
