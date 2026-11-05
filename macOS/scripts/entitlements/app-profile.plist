@@ -3,7 +3,8 @@
 <plist version="1.0">
 <dict>
 	<!-- Exactly what the Developer ID provisioning profile grants and the app uses (iCloud for CloudKit sync). A key
-	     the embedded profile does not grant makes macOS refuse to launch the app. -->
+	     the embedded profile does not grant makes macOS refuse to launch the app. package.sh adds the passkey
+	     entitlement when the profile grants it. -->
 	<key>com.apple.application-identifier</key>
 	<string>L84BZ89TTN.com.harunkkhan.browser</string>
 	<key>com.apple.developer.team-identifier</key>
