@@ -9,7 +9,14 @@ import WebKit
 // Media Session handlers and hands them to the isolated script through DOM events. `sourceBufferOffset` and
 // `subtitleTracks` also run in the page's world.
 enum WebKitPageScript {
-  @MainActor static let world = WKContentWorld.world(name: "Sailfish")
+  @MainActor static let world: WKContentWorld = {
+    guard #available(macOS 15.4, *) else { return .world(name: "Sailfish") }
+    let configuration = (NSClassFromString("_WKContentWorldConfiguration") as! NSObject.Type).init()
+    configuration.setValue("Sailfish", forKey: "name")
+    configuration.setValue(true, forKey: "allowAccessToClosedShadowRoots")
+    return WKContentWorld.perform(NSSelectorFromString("_worldWithConfiguration:"), with: configuration)
+      .takeUnretainedValue() as! WKContentWorld
+  }()
 
   static let isolated = #"""
 (() => {
@@ -24,7 +31,7 @@ enum WebKitPageScript {
   let muted = false;
   const mutedByUs = new WeakSet();
   const mediaEvents = ["play", "playing", "pause", "ended", "volumechange", "emptied", "loadedmetadata", "seeked", "ratechange"];
-  const detached = new Set();
+  const tracked = new Set();
   const listened = new WeakSet();
   const heard = new WeakSet();
   let lastMedia = null;
@@ -33,9 +40,10 @@ enum WebKitPageScript {
   let pagePosition = null;
   const allMedia = () => {
     const list = Array.from(document.querySelectorAll("video, audio"));
-    for (const m of detached) if (!list.includes(m)) list.push(m);
+    for (const m of tracked) if (!list.includes(m)) list.push(m);
     return list;
   };
+  const videos = () => allMedia().filter((m) => m instanceof HTMLVideoElement);
   const playing = (m) => !m.paused && !m.ended;
   const audible = (m) => playing(m) && !m.muted && m.volume > 0;
   // Media the tab's mute silences still counts as sound, as a muted Chromium tab stays audible.
@@ -114,17 +122,17 @@ enum WebKitPageScript {
   };
   const track = (m) => {
     listen(m);
-    if (detached.has(m)) return;
-    if (detached.size >= 8) for (const old of detached) if (!playing(old)) {
-      detached.delete(old);
+    if (tracked.has(m)) return;
+    if (tracked.size >= 8) for (const old of tracked) if (!playing(old)) {
+      tracked.delete(old);
       break;
     }
-    detached.add(m);
+    tracked.add(m);
   };
   const onMedia = (e) => {
     const m = e.target;
     if (!(m instanceof HTMLMediaElement)) return;
-    if (!m.isConnected) track(m);
+    if (m.getRootNode() !== document) track(m);
     lastMedia = m;
     if (e.type === "play" || e.type === "playing") {
       applyMute(m);
@@ -137,7 +145,6 @@ enum WebKitPageScript {
     }
     schedule();
   };
-  for (const type of mediaEvents) document.addEventListener(type, onMedia, true);
   document.addEventListener(
     "sailfish:media-element",
     (e) => {
@@ -182,13 +189,22 @@ enum WebKitPageScript {
   addEventListener("pagehide", () => reported && post("media", null));
   addEventListener("pageshow", (e) => e.persisted && schedule());
   const pip = (on) => post("pip", { active: on });
-  document.addEventListener("enterpictureinpicture", () => pip(true), true);
-  document.addEventListener("leavepictureinpicture", () => pip(false), true);
-  document.addEventListener(
-    "webkitpresentationmodechanged",
-    (e) => e.target instanceof HTMLVideoElement && pip(e.target.webkitPresentationMode === "picture-in-picture"),
-    true,
-  );
+  const pipEvents = {
+    enterpictureinpicture: () => pip(true),
+    leavepictureinpicture: () => pip(false),
+    webkitpresentationmodechanged: (e) =>
+      e.target instanceof HTMLVideoElement && pip(e.target.webkitPresentationMode === "picture-in-picture"),
+  };
+  const listenIn = (root) => {
+    for (const type of mediaEvents) root.addEventListener(type, onMedia, true);
+    for (const [type, handler] of Object.entries(pipEvents)) root.addEventListener(type, handler, true);
+    root.addEventListener("sailfish:shadow-root", onShadowRoot, true);
+  };
+  const onShadowRoot = (e) => {
+    const root = e.relatedTarget instanceof Element && e.relatedTarget.shadowRoot;
+    if (root) listenIn(root);
+  };
+  listenIn(document);
 
   let hovered = "";
   const hover = (href) => {
@@ -574,11 +590,11 @@ enum WebKitPageScript {
     pictureInPicture(on) {
       if (!on) {
         if (document.pictureInPictureElement) document.exitPictureInPicture();
-        for (const v of document.querySelectorAll("video")) if (v.webkitPresentationMode === "picture-in-picture") v.webkitSetPresentationMode("inline");
+        for (const v of videos()) if (v.webkitPresentationMode === "picture-in-picture") v.webkitSetPresentationMode("inline");
         return true;
       }
-      const videos = Array.from(document.querySelectorAll("video"));
-      const v = videos.find((x) => !x.paused) || videos.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0];
+      const list = videos();
+      const v = list.find((x) => !x.paused) || list.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0];
       if (!v) return false;
       if (v.webkitSupportsPresentationMode && v.webkitSupportsPresentationMode("picture-in-picture")) v.webkitSetPresentationMode("picture-in-picture");
       else if (v.requestPictureInPicture) v.requestPictureInPicture();
@@ -634,6 +650,15 @@ enum WebKitPageScript {
   const now = Date.now;
   const doc = document;
   const handedOver = new WeakSet();
+  const Shadow = ShadowRoot;
+  const rootOf = Node.prototype.getRootNode;
+  const attachShadow = Element.prototype.attachShadow;
+  Element.prototype.attachShadow = function () {
+    const root = apply(attachShadow, this, arguments);
+    const top = apply(rootOf, this, []);
+    apply(dispatch, top instanceof Shadow ? top : doc, [new Mouse("sailfish:shadow-root", { relatedTarget: this })]);
+    return root;
+  };
   const mediaProto = HTMLMediaElement.prototype;
   const play = mediaProto.play;
   mediaProto.play = function () {
