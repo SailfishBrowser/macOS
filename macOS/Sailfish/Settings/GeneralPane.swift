@@ -94,6 +94,7 @@ final class QuitWarning {
     }
     method_setImplementation(method, imp_implementationWithBlock(block))
     _ = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [unowned self] event in
+      if event.isARepeat, isQuitKey(event) { return nil }
       guard let window = confirmingWindow, !isQuitKey(event) else { return event }
       switch event.keyCode {
       case 36, 76:
