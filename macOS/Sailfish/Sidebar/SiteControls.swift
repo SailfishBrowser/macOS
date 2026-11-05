@@ -13,6 +13,7 @@ struct SiteControls: View {
   @Shared(.siteEngines) private var siteEngines
   @Shared(.fingerprintingProtection) private var fingerprintingProtection
   @Shared(.fingerprintingExceptions) private var fingerprintingExceptions
+  @Environment(\.dismiss) private var dismiss
 
   var body: some View {
     let _ = revision
@@ -107,7 +108,7 @@ struct SiteControls: View {
     .foregroundStyle(.white)
     .padding(10)
     .frame(width: 236, alignment: .leading)
-    .background(DarkPopover())
+    .background(DarkPopover { dismiss() })
     .environment(\.colorScheme, .dark)
   }
 
@@ -175,16 +176,38 @@ struct SiteControls: View {
   }
 }
 
-// The popover is dark whatever the window's theme; the popover's chrome follows its window's appearance.
+// The popover is dark whatever the window's theme; the popover's chrome follows its window's appearance. Nothing in
+// it takes the keys, so Esc reaches the browser window, which ignores it; Esc there closes the popover instead.
 private struct DarkPopover: NSViewRepresentable {
-  func makeNSView(context: Context) -> DarkPopoverView { DarkPopoverView() }
+  let close: () -> Void
+  func makeNSView(context: Context) -> DarkPopoverView { DarkPopoverView(close: close) }
   func updateNSView(_ view: DarkPopoverView, context: Context) {}
 }
 
 private final class DarkPopoverView: NSView {
+  private let close: () -> Void
+  private var escapeMonitor: Any?
+
+  init(close: @escaping () -> Void) {
+    self.close = close
+    super.init(frame: .zero)
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) is not supported")
+  }
+
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     window?.appearance = NSAppearance(named: .darkAqua)
+    escapeMonitor.map(NSEvent.removeMonitor)
+    escapeMonitor = window.flatMap { popover in
+      QuitWarning.addKeyMonitor { [weak self, weak popover] event in
+        guard event.keyCode == 53, let parent = popover?.parent, event.window == parent else { return event }
+        self?.close()
+        return nil
+      }
+    }
   }
 }
 
