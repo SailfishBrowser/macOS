@@ -1,0 +1,40 @@
+From: jt914 <josephtso914@gmail.com>
+Subject: [PATCH] Open autofill settings in a tab without a browser window
+
+The autofill dropdown's "Manage Payment Methods..." entry, and its
+counterpart under address suggestions, open a settings page in the tab's
+browser, and do nothing when there is none. EngineCore's tabs have no browser, so the
+entries did nothing. Without one, the payment and address pages now open
+through the web contents as a new foreground tab, browser-initiated, which
+EngineCore's embedder places like any other new tab.
+---
+diff --git a/chrome/browser/ui/autofill/chrome_autofill_client.cc b/chrome/browser/ui/autofill/chrome_autofill_client.cc
+--- a/chrome/browser/ui/autofill/chrome_autofill_client.cc
++++ b/chrome/browser/ui/autofill/chrome_autofill_client.cc
+@@ -841,6 +841,26 @@ void ChromeAutofillClient::ShowAutofillSettings(
+         NOTREACHED();
+     }
+   }
++  // EngineCore's tabs have no browser. Their payment and address settings
++  // open in a new tab, which EngineCore's embedder places.
++  std::string_view sub_page;
++  switch (suggestion_type) {
++    case SuggestionType::kManageAddress:
++      sub_page = chrome::kContactInfoSubPage;
++      break;
++    case SuggestionType::kManageCreditCard:
++    case SuggestionType::kManageIban:
++    case SuggestionType::kManageOffers:
++      sub_page = chrome::kPaymentsSubPage;
++      break;
++    default:
++      return;
++  }
++  web_contents()->OpenURL(
++      content::OpenURLParams::CreateBrowserInitiated(
++          chrome::GetSettingsUrl(sub_page),
++          WindowOpenDisposition::NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK),
++      /*navigation_handle_callback=*/{});
+ #endif  // BUILDFLAG(IS_ANDROID)
+ }
+ 

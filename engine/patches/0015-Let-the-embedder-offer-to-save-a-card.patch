@@ -1,0 +1,76 @@
+From: jt914 <josephtso914@gmail.com>
+Subject: [PATCH] Let the embedder offer to save a card
+
+When a submitted form holds a new card, Chrome offers to keep it on this
+device through ShowSaveCreditCardLocally, whose desktop branch hands the
+offer to the save card bubble. The bubble controller finds no tab interface
+for EngineCore's web contents and returns at once, so the offer and its
+callback were dropped and no card was ever saved. EngineCore replaces the
+bubble through a callback and offers the save through its embedder, which
+answers with Chrome's own decision.
+---
+diff --git a/chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.cc b/chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.cc
+--- a/chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.cc
++++ b/chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.cc
+@@ -138,6 +138,13 @@
+ // TODO(crbug.com/407106692): Refactor for Platform-Specific Code Separation.
+ namespace autofill::payments {
+ 
++namespace {
++
++ChromePaymentsAutofillClient::ShowSaveCreditCardLocallyCallback*
++    g_show_save_credit_card_locally_callback = nullptr;
++
++}  // namespace
++
+ ChromePaymentsAutofillClient::ChromePaymentsAutofillClient(
+     ContentAutofillClient* client)
+     : content::WebContentsObserver(&client->GetWebContents()),
+@@ -322,12 +329,26 @@ void ChromePaymentsAutofillClient::ShowSaveCreditCardLocally(
+     bridge->RequestShowContent(ui_info, std::move(save_card_delegate));
+   }
+ #else   // !BUILDFLAG(IS_ANDROID)
++  // EngineCore's tabs have no tab interface, so the bubble dropped the offer
++  // and its callback. Its embedder offers the save instead.
++  if (g_show_save_credit_card_locally_callback) {
++    g_show_save_credit_card_locally_callback->Run(web_contents(), card, options,
++                                                  std::move(callback));
++    return;
++  }
+   SaveCardBubbleControllerImpl::CreateForWebContents(web_contents());
+   SaveCardBubbleControllerImpl::FromWebContents(web_contents())
+       ->OfferLocalSave(card, options, std::move(callback));
+ #endif  // BUILDFLAG(IS_ANDROID)
+ }
+ 
++// static
++void ChromePaymentsAutofillClient::SetShowSaveCreditCardLocallyCallback(
++    ShowSaveCreditCardLocallyCallback callback) {
++  g_show_save_credit_card_locally_callback =
++      new ShowSaveCreditCardLocallyCallback(std::move(callback));
++}
++
+ void ChromePaymentsAutofillClient::ShowSaveCreditCardToCloud(
+     const CreditCard& card,
+     const LegalMessageLines& legal_message_lines,
+diff --git a/chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.h b/chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.h
+--- a/chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.h
++++ b/chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.h
+@@ -101,6 +101,17 @@ class ChromePaymentsAutofillClient : public PaymentsAutofillClient,
+   static constexpr base::TimeDelta kSaveCardConfirmationSnackbarDuration =
+       base::Seconds(3);
+ 
++  // Replaces the save card bubble that ShowSaveCreditCardLocally shows on
++  // desktop. EngineCore (//engine_core) offers the save through its
++  // embedder, as its tabs have no tab interface for the bubble.
++  using ShowSaveCreditCardLocallyCallback = base::RepeatingCallback<void(
++      content::WebContents* web_contents,
++      const CreditCard& card,
++      SaveCreditCardOptions options,
++      LocalSaveCardPromptCallback callback)>;
++  static void SetShowSaveCreditCardLocallyCallback(
++      ShowSaveCreditCardLocallyCallback callback);
++
+   // RiskDataLoader:
+   void LoadRiskData(
+       base::OnceCallback<void(const std::string&)> callback) override;

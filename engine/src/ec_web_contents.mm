@@ -29,9 +29,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/chrome_security_state_util.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
+#include "chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/browser/ui/views/overlay/video_overlay_window_views.h"
 #include "chrome/common/chrome_isolated_world_ids.h"
+#include "components/autofill/content/browser/content_autofill_client.h"
+#include "components/autofill/core/browser/data_model/payments/credit_card.h"
+#include "components/autofill/core/browser/payments/payments_autofill_client.h"
 #include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -107,6 +111,11 @@
 #include "ui/base/window_open_disposition.h"
 #include "url/origin.h"
 #include "url/url_constants.h"
+
+@interface ECCardOffer ()
+- (instancetype)initWithCard:(const autofill::CreditCard&)card
+            securityCodeOnly:(BOOL)securityCodeOnly;
+@end
 
 @interface ECContextMenu ()
 - (instancetype)initWithFrame:(content::RenderFrameHost&)frame
@@ -933,7 +942,74 @@ void AskToOpenExternalApp(const GURL& url,
             }];
 }
 
+// Offers the shell a card Chrome found in a submitted form, in place of
+// Chrome's save card bubble, which needs a tab interface our tabs lack
+// (patches/0015). An offer Chrome would show only as an icon, one from a page
+// that is not secure, and one the shell cannot take are dropped unanswered,
+// which Chrome records as nothing.
+void OfferToSaveCard(
+    content::WebContents* web_contents,
+    const autofill::CreditCard& card,
+    autofill::payments::PaymentsAutofillClient::SaveCreditCardOptions options,
+    autofill::payments::PaymentsAutofillClient::LocalSaveCardPromptCallback
+        callback) {
+  using Client = autofill::payments::PaymentsAutofillClient;
+  ECWebContents* owner = [ECWebContents fromContents:web_contents];
+  if (!options.show_prompt ||
+      !autofill::ContentAutofillClient::FromWebContents(web_contents)
+           ->IsContextSecure() ||
+      ![owner.delegate respondsToSelector:@selector
+                       (webContents:offersToSaveCard:completionHandler:)]) {
+    return;
+  }
+  ECCardOffer* offer = [[ECCardOffer alloc]
+          initWithCard:card
+      securityCodeOnly:options.card_save_type ==
+                       Client::CardSaveType::kCvcSaveOnly];
+  // Taken by the first answer; Ignore destroys it unrun.
+  auto decision =
+      std::make_shared<Client::LocalSaveCardPromptCallback>(std::move(callback));
+  [owner.delegate webContents:owner
+             offersToSaveCard:offer
+            completionHandler:^(ECCardOfferAnswer answer) {
+              if (!*decision) {
+                return;
+              }
+              switch (answer) {
+                case ECCardOfferAnswerSave:
+                  std::move(*decision).Run(
+                      Client::SaveCardOfferUserDecision::kAccepted);
+                  break;
+                case ECCardOfferAnswerDecline:
+                  std::move(*decision).Run(
+                      Client::SaveCardOfferUserDecision::kDeclined);
+                  break;
+                case ECCardOfferAnswerIgnore:
+                  decision->Reset();
+                  break;
+              }
+            }];
+}
+
 }  // namespace
+
+@implementation ECCardOffer
+
+@synthesize network = _network;
+@synthesize lastFourDigits = _lastFourDigits;
+@synthesize securityCodeOnly = _securityCodeOnly;
+
+- (instancetype)initWithCard:(const autofill::CreditCard&)card
+            securityCodeOnly:(BOOL)securityCodeOnly {
+  if ((self = [super init])) {
+    _network = base::SysUTF16ToNSString(card.NetworkForDisplay());
+    _lastFourDigits = base::SysUTF16ToNSString(card.LastFourDigits());
+    _securityCodeOnly = securityCodeOnly;
+  }
+  return self;
+}
+
+@end
 
 @implementation ECContextMenu {
   content::GlobalRenderFrameHostId _frame;
@@ -1124,6 +1200,9 @@ void AskToOpenExternalApp(const GURL& url,
     SetEngineCoreNavigationThrottles(&AddNavigationThrottles);
     ExternalProtocolHandler::SetShowDialogCallback(
         base::BindRepeating(&AskToOpenExternalApp));
+    autofill::payments::ChromePaymentsAutofillClient::
+        SetShowSaveCreditCardLocallyCallback(
+            base::BindRepeating(&OfferToSaveCard));
   }
 }
 

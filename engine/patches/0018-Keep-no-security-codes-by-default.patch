@@ -1,0 +1,26 @@
+From: jt914 <josephtso914@gmail.com>
+Subject: [PATCH] Keep no security codes by default
+
+Chrome keeps a card's security code with the card by default and says so
+in its save bubble. EngineCore's embedder offers the save in a one-line
+prompt with no room to say it, and a stored code makes the saved card a
+complete card-not-present credential, so the code would be kept silently.
+The "Save security codes" setting now defaults to off. With it off, a
+saved card's code is cleared and no code-only offer is made; the switch on
+the Payment methods page turns it back on.
+---
+diff --git a/components/autofill/core/common/autofill_prefs.cc b/components/autofill/core/common/autofill_prefs.cc
+--- a/components/autofill/core/common/autofill_prefs.cc
++++ b/components/autofill/core/common/autofill_prefs.cc
+@@ -75,8 +75,10 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterBooleanPref(
+       kAutofillCreditCardEnabled, true,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
++  // EngineCore keeps no security code unless the user turns this on: its
++  // save prompt has no room to say it would keep one.
+   registry->RegisterBooleanPref(
+-      kAutofillPaymentCvcStorage, true,
++      kAutofillPaymentCvcStorage, false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+   registry->RegisterBooleanPref(
+       kAutofillPaymentCardBenefits, true,

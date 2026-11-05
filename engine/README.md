@@ -53,6 +53,28 @@ Upstream changes (`patches/`):
    `MacNotificationProviderImpl::BindNotificationService` at launch in the app
    and in "Chromium Helper (Alerts)", and usernoted asked for permission at
    that first connection, once for every new bundle id.
+9. Keep the key for saved passwords and cookies in a keychain item named
+   for this app, not the shared "Chromium Safe Storage", so differently
+   signed builds stop asking for it at every launch; the key of an existing
+   Chromium item is carried over once.
+10. Cancel a passkey (WebAuthn) request that reaches a dialog step without a
+    web-modal host, so the page gets NotAllowedError instead of crashing the
+    browser.
+11. Present macOS's passkey sheet on the tab's own window, which has no
+    views widget.
+12. Replace the "Open <app>?" external protocol dialog with a callback that
+    asks the embedder (see Page UI).
+13. Run EngineCore's main-world scripts and message objects in every frame,
+    through `components/js_injection` (see Main-world scripts).
+14. Let `chrome.tabs.captureVisibleTab` find the active tab through a window
+    controller without a browser.
+15. Hand a local save card offer to the embedder through a callback in place
+    of Chrome's save card bubble (see Page UI).
+16. Offer no "Save card for faster checkout" entry without a tab, since its
+    dialog needs one.
+17. Open autofill settings (payment methods, addresses) in a new tab when
+    there is no browser window.
+18. Register "Save security codes" off by default.
 
 ## Tabs
 
@@ -171,6 +193,17 @@ denied or cancelled (permissions stay pending, Chrome's context menu shows).
   site that asked, and launches it once allowed (patches/0012). Chrome's
   "Open app?" dialog is web-modal and our tabs have no host for one, so it
   crashed. Without the delegate method the app is not opened.
+- Cards: a submitted form holding a new card makes Chrome offer to keep it
+  on this Mac, and the bridge hands the offer to the shell with the card's
+  network and last four digits (patches/0015), in place of Chrome's save
+  card bubble, which needs a tab interface our tabs lack. The shell answers
+  Save, Decline or Ignore, which Chrome receives as accepted, declined or
+  nothing at all. Offers Chrome would show only as an icon and offers from a
+  page that is not secure are dropped unanswered. The dropdown's "Save card
+  for faster checkout" entry, whose dialog crashed without a tab, is not
+  offered (patches/0016), "Manage Payment Methods..." opens the Payments
+  settings page as a new tab (patches/0017), and security codes are kept
+  only once the user turns on "Save security codes" (patches/0018).
 - Built-in extensions: `loadBuiltInExtensionAtPath:` registers an unpacked
   extension with the profile's `ComponentLoader` (`AddOrReplace`, the one
   entry that skips the component allowlist), so it loads for the session, in

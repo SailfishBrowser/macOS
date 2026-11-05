@@ -389,6 +389,29 @@ EC_EXPORT
 - (void)setWritingDirection:(NSWritingDirection)direction;
 @end
 
+// How the user answered a card offer.
+typedef NS_ENUM(NSInteger, ECCardOfferAnswer) {
+  // Keep the card on this Mac.
+  ECCardOfferAnswerSave,
+  // The user said no. Chrome counts it against the card and offers it less,
+  // and for a security-code-only offer stops offering that code.
+  ECCardOfferAnswerDecline,
+  // The offer went unanswered. Chrome records nothing.
+  ECCardOfferAnswerIgnore,
+};
+
+// A card a page's submitted form held, which Chrome offers to keep on this
+// Mac (encrypted, never uploaded).
+EC_EXPORT
+@interface ECCardOffer : NSObject
+- (instancetype)init NS_UNAVAILABLE;
+// The card network as Chrome names it for display, e.g. "Visa".
+@property(readonly) NSString* network;
+@property(readonly) NSString* lastFourDigits;
+// The card is saved already; only its security code is offered.
+@property(readonly, getter=isSecurityCodeOnly) BOOL securityCodeOnly;
+@end
+
 @protocol ECWebContentsDelegate <NSObject>
 - (void)webContentsDidUpdate:(ECWebContents*)contents;
 - (void)webContents:(ECWebContents*)contents
@@ -523,6 +546,13 @@ EC_EXPORT
     inApplicationNamed:(NSString*)appName
             fromOrigin:(nullable NSURL*)origin
      completionHandler:(void (^)(BOOL allow))completionHandler;
+// A form submitted on a secure page held a card Chrome offers to keep. Answer
+// Save to keep it, Decline only when the user says no, and Ignore whenever
+// the offer ends otherwise (it timed out, was replaced, or its tab or window
+// closed). Without this method the offer is ignored.
+- (void)webContents:(ECWebContents*)contents
+     offersToSaveCard:(ECCardOffer*)card
+    completionHandler:(void (^)(ECCardOfferAnswer answer))completionHandler;
 @end
 
 // A page in a web contents' history, as of when it was read.

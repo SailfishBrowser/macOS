@@ -1,0 +1,25 @@
+From: jt914 <josephtso914@gmail.com>
+Subject: [PATCH] Offer no save-and-fill dialog without a tab
+
+On a card form while no card is saved, Chrome's autofill dropdown offers
+"Save card for faster checkout", whose dialog, SaveAndFillViewDesktop,
+CHECKs for the tab interface of its web contents. EngineCore's tabs have
+none, so choosing the entry crashed the browser. The save and fill manager
+is now null for a web contents without a tab interface, as it is on
+Android, and every caller already reads null as "do not offer".
+---
+diff --git a/chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.cc b/chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.cc
+--- a/chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.cc
++++ b/chrome/browser/ui/autofill/payments/chrome_payments_autofill_client.cc
+@@ -1198,6 +1198,11 @@ SaveAndFillManager* ChromePaymentsAutofillClient::GetSaveAndFillManager() {
+ #if BUILDFLAG(IS_ANDROID)
+   return nullptr;
+ #else
++  // The save and fill dialog needs the tab interface, which EngineCore's
++  // tabs lack. Without a manager the entry is not offered.
++  if (!tabs::TabInterface::MaybeGetFromContents(web_contents())) {
++    return nullptr;
++  }
+   return save_and_fill_manager_.get();
+ #endif  // BUILDFLAG(IS_ANDROID)
+ }
