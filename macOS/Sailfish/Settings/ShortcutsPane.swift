@@ -98,7 +98,7 @@ struct ShortcutsPane: View {
     resignObserver = NotificationCenter.default.addObserver(
       forName: NSWindow.didResignKeyNotification, object: window, queue: .main
     ) { _ in MainActor.assumeIsolated { stopRecording() } }
-    monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+    monitor = QuitWarning.addKeyMonitor { event in
       guard recording == id, event.window === window else { return event }
       if event.keyCode == 53 {
         stopRecording()

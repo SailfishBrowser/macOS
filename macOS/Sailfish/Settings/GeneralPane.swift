@@ -68,6 +68,7 @@ struct GeneralPane: View {
 final class QuitWarning {
   enum Prompt: Equatable { case none, downloads, confirm }
 
+  private static var shared: QuitWarning!
   @Shared(.warnBeforeQuitting) private var isEnabled
   // Set when Sparkle quits to install an update and relaunch.
   var bypass = false
@@ -86,7 +87,14 @@ final class QuitWarning {
     return isEnabled ? .confirm : .none
   }
 
+  static func addKeyMonitor(_ handler: @escaping @MainActor (NSEvent) -> NSEvent?) -> Any? {
+    NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+      shared.confirmingWindow == nil ? handler(event) : event
+    }
+  }
+
   func install() {
+    Self.shared = self
     let selector = #selector(NSApplication.terminate(_:))
     let method = class_getInstanceMethod(object_getClass(NSApp), selector)!
     typealias Terminate = @convention(c) (NSApplication, Selector, Any?) -> Void

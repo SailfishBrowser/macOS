@@ -131,8 +131,8 @@ final class WindowController: NSWindowController, NSWindowDelegate {
       return nil
     }
     // Esc closes Peek even while its page has focus, which a menu key equivalent would not reach.
-    escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-      guard let self, event.window == window, !store.isConfirmingQuit else { return event }
+    escapeMonitor = QuitWarning.addKeyMonitor { [weak self] event in
+      guard let self, event.window == window else { return event }
       // One Esc leaves a page's element full screen.
       if event.keyCode == 53, let page = shownFullScreenPage?.page {
         page.exitFullscreen(resizingView: true)

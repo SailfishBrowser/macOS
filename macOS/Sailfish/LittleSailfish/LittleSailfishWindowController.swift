@@ -49,7 +49,7 @@ final class LittleSailfishWindowController: NSWindowController, NSWindowDelegate
     levelToken = observe { [weak self, weak window] in
       window?.level = self?.staysOnTop == true ? .floating : .normal
     }
-    escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak window] event in
+    escapeMonitor = QuitWarning.addKeyMonitor { [weak window] event in
       guard event.window == window, event.keyCode == 53, store.isOpenInMenuShown else { return event }
       store.send(.setOpenInMenu(false))
       return nil
