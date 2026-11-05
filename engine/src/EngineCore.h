@@ -134,6 +134,9 @@ EC_EXPORT
 // engine for suggestions, saved in its preferences.
 @property(copy) NSURL* downloadDirectory;
 @property BOOL searchSuggestEnabled;
+// Chrome's "Always use secure connections", which an incognito context reads
+// from its profile.
+@property BOOL httpsOnlyModeEnabled;
 @property(weak, nullable) id<ECExtensionsDelegate> extensionsDelegate;
 // Changes to cookies under these registrable domains (the domain itself or
 // any subdomain) are reported to cookieDelegate, on the main thread. Empty,
