@@ -33,9 +33,15 @@ struct Feed: LiveSource {
       guard tag.contains(/application\/(rss|atom)\+xml/.ignoresCase()),
         let href = tag.firstMatch(of: /href\s*=\s*["']([^"']+)["']/.ignoresCase())
       else { continue }
-      return URL(string: href.1.replacingOccurrences(of: "&amp;", with: "&"), relativeTo: base)?.absoluteURL
+      return webURL(href.1.replacingOccurrences(of: "&amp;", with: "&"), relativeTo: base)
     }
     return nil
+  }
+
+  // Only a web address is fetched or opened; a feed may name file or javascript links.
+  static func webURL(_ string: String, relativeTo base: URL) -> URL? {
+    let url = URL(string: string, relativeTo: base)?.absoluteURL
+    return ["http", "https"].contains(url?.scheme?.lowercased()) ? url : nil
   }
 }
 
@@ -78,7 +84,7 @@ private final class FeedParser: NSObject, XMLParserDelegate {
       item = Item()
     // Atom's link is an attribute; an entry's page is its alternate link, the one without a rel.
     case "link" where item != nil && (attributes["rel"] ?? "alternate") == "alternate":
-      if let href = attributes["href"] { item?.link = URL(string: href, relativeTo: base)?.absoluteURL }
+      if let href = attributes["href"] { item?.link = Feed.webURL(href, relativeTo: base) }
     default:
       break
     }
@@ -103,7 +109,7 @@ private final class FeedParser: NSObject, XMLParserDelegate {
       title = value
     // RSS's link is the element's text.
     case "link" where item != nil && item?.link == nil && !value.isEmpty:
-      item?.link = URL(string: value, relativeTo: base)?.absoluteURL
+      item?.link = Feed.webURL(value, relativeTo: base)
     case "item", "entry":
       if let item, let link = item.link {
         links.append(LiveLink(url: link, title: item.title.isEmpty ? link.absoluteString : item.title))
