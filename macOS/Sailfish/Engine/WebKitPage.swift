@@ -265,10 +265,13 @@ import WebKit
     ["http", "https", "about", "blob", "data", "file"].contains(url.scheme?.lowercased())
   }
 
+  // A main-frame navigation the page goes on with sets the fingerprinting protection of its site; one cancelled
+  // leaves the shown page's fonts as they are.
   func webView(
-    _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
-    decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
+    _ webView: WKWebView, decidePolicyFor action: WKNavigationAction, preferences: WKWebpagePreferences,
+    decisionHandler handler: @escaping @MainActor (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
   ) {
+    let decisionHandler = { (policy: WKNavigationActionPolicy) in handler(policy, preferences) }
     if WebKitDownloads.isDownload(action) {
       return decisionHandler(.download)
     }
@@ -313,6 +316,7 @@ import WebKit
         return
       }
     }
+    Fingerprinting.apply(to: preferences, of: webView, for: url)
     navigationType = action.navigationType
     decisionHandler(.allowWithoutTryingAppLink)
   }

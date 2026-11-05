@@ -1,0 +1,75 @@
+From: jt914 <josephtso914@gmail.com>
+Subject: [PATCH] Let EngineCore hide user-installed fonts from pages
+
+A page can list the fonts a user installed by measuring text in each font it
+asks for, which is enough to tell most people apart. With the renderer switch
+--hide-user-installed-fonts, Blink's Mac font cache refuses a font that
+CoreText marks with its private user-installed attribute, the attribute WebKit
+reads to hide those fonts in Safari, so pages see only the fonts macOS ships.
+Chrome copies the switch from the browser's command line to its renderers;
+EngineCore's embedder passes it at launch while fingerprinting protection is
+on.
+---
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -3227,6 +3227,7 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+         switches::kForceAppMode,
+ #endif
+         switches::kForceUIDirection,
++        "hide-user-installed-fonts",  // EngineCore, see font_cache_mac.mm.
+         switches::kIgnoreGooglePortNumbers,
+         switches::kJavaScriptHarmony,
+         switches::kEnableExperimentalWebAssemblyFeatures,
+diff --git a/third_party/blink/renderer/platform/fonts/mac/font_cache_mac.mm b/third_party/blink/renderer/platform/fonts/mac/font_cache_mac.mm
+--- a/third_party/blink/renderer/platform/fonts/mac/font_cache_mac.mm
++++ b/third_party/blink/renderer/platform/fonts/mac/font_cache_mac.mm
+@@ -39,6 +39,7 @@
+ #include "base/apple/bridging.h"
+ #include "base/apple/foundation_util.h"
+ #include "base/apple/scoped_cftyperef.h"
++#include "base/command_line.h"
+ #include "base/location.h"
+ #include "base/metrics/histogram_macros.h"
+ #include "base/timer/elapsed_timer.h"
+@@ -63,6 +64,10 @@ using base::apple::CFToNSPtrCast;
+ using base::apple::NSToCFPtrCast;
+ using base::apple::ScopedCFTypeRef;
+ 
++// CoreText's private attribute marking a font the user installed, which WebKit
++// reads to hide such fonts from pages.
++extern "C" const CFStringRef kCTFontUserInstalledAttribute;
++
+ namespace blink {
+ 
+ namespace {
+@@ -71,6 +76,20 @@ const float kCTNormalWeightValue = 0.0;
+ CTFontSymbolicTraits TraitsMask = kCTFontTraitItalic | kCTFontTraitBold |
+                                   kCTFontTraitCondensed | kCTFontTraitExpanded;
+ 
++// With --hide-user-installed-fonts (EngineCore), pages see only the fonts that
++// come with macOS, as in Safari.
++bool IsHiddenFont(CTFontRef font) {
++  static const bool hides_user_fonts =
++      base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "hide-user-installed-fonts");
++  if (!hides_user_fonts) {
++    return false;
++  }
++  ScopedCFTypeRef<CFTypeRef> user_installed(
++      CTFontCopyAttribute(font, kCTFontUserInstalledAttribute));
++  return user_installed && CFEqual(user_installed.get(), kCFBooleanTrue);
++}
++
+ ScopedCFTypeRef<CTFontRef> CreateCopyWithTraitsAndWeightFromFont(
+     CTFontRef font,
+     CTFontSymbolicTraits traits,
+@@ -414,7 +433,7 @@ const FontPlatformData* FontCache::CreateFontPlatformData(
+         creation_params.Family(), font_description.Weight(),
+         font_description.Style(), font_description.Stretch(), size);
+   }
+-  if (!matched_font)
++  if (!matched_font || IsHiddenFont(matched_font.get()))
+     return nullptr;
+ 
+   CTFontSymbolicTraits matched_font_traits =

@@ -11,6 +11,7 @@ struct GeneralPane: View {
   let importData: () -> Void
   @Shared(.warnBeforeQuitting) private var warnBeforeQuitting
   @Shared(.blocksAds) private var blocksAds
+  @Shared(.fingerprintingProtection) private var fingerprintingProtection
   @Shared(.tidyDownloads) private var tidyDownloads
   @State private var isDefaultBrowser = Shell.isDefaultBrowser
 
@@ -21,6 +22,9 @@ struct GeneralPane: View {
         Divider().padding(.horizontal, 10)
         SettingsToggle("Block ads and trackers with uBlock Origin", isOn: $blocksAds)
           .onChange(of: blocksAds) { Engine.shared.adBlockingDidChange() }
+        Divider().padding(.horizontal, 10)
+        SettingsToggle("Fingerprinting protection", isOn: $fingerprintingProtection)
+          .onChange(of: fingerprintingProtection) { Engine.shared.fingerprintingDidChange() }
         Divider().padding(.horizontal, 10)
         SettingsToggle("Tidy Downloads", isOn: $tidyDownloads)
         if !isDefaultBrowser {

@@ -75,6 +75,8 @@ Upstream changes (`patches/`):
 17. Open autofill settings (payment methods, addresses) in a new tab when
     there is no browser window.
 18. Register "Save security codes" off by default.
+19. Hide user-installed fonts from pages with `--hide-user-installed-fonts`
+    (see User-installed fonts).
 
 ## Tabs
 
@@ -416,6 +418,18 @@ navigation on.
   local origins `null`, which reaches the delegate as a nil origin. String
   messages are posted to the main queue and dropped if the web contents
   closed meanwhile; other payloads are dropped.
+
+## User-installed fonts
+
+With the renderer switch `--hide-user-installed-fonts` (patches/0019),
+Blink's Mac font cache refuses a font that CoreText marks with its private
+`kCTFontUserInstalledAttribute`, the attribute WebKit reads to hide such
+fonts in Safari, so pages see only the fonts macOS ships and cannot list the
+user's own by measuring text. Chrome copies the switch from the browser's
+command line to each renderer; the host app passes it at launch while
+fingerprinting protection is on. The rest of that protection is the host
+app's main-world script (see Main-world scripts), since Chromium 156 has no
+fingerprinting protection left to turn on.
 
 ## How the host app hands control to Chromium
 
