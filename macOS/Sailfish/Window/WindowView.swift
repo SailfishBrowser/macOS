@@ -59,7 +59,7 @@ struct WindowView: View {
             }
             store.send(.toastAction(action))
           },
-          close: { store.send(.dismissToast(toast.id)) }
+          close: { store.send(.closeToast(toast.id)) }
         )
         // The top-right pill sits over the page's corner, clear of the window's controls.
         .padding(.bottom, toast.placement == .bottom ? 18 : 0)
