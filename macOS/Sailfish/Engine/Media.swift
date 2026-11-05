@@ -62,7 +62,8 @@ enum PictureInPicture {
   }
 }
 
-// A tab's volume is the volume of the page's own audio and video elements, read from the one playing.
+// A tab's volume is the volume of the page's own audio and video elements, read from the one playing. In a WebKit
+// page it is read in the frame whose media the tab shows and set in every frame that reported media.
 enum MediaVolume {
   static let read = """
     (() => {
@@ -88,12 +89,18 @@ enum MediaVolume {
 
 extension Engine {
   func mediaVolume(_ tab: UUID, _ done: @escaping @MainActor (Double) -> Void) {
+    if let page = page(tab) as? WebKitPage {
+      return page.mediaVolume(done)
+    }
     page(tab)?.evaluateJavaScript(MediaVolume.read) { result in
       MainActor.assumeIsolated { result.flatMap(Double.init).map(done) }
     }
   }
 
   func setMediaVolume(_ tab: UUID, _ volume: Double) {
+    if let page = page(tab) as? WebKitPage {
+      return page.setMediaVolume(volume)
+    }
     page(tab)?.evaluateJavaScript(MediaVolume.set(volume)) { _ in }
   }
 

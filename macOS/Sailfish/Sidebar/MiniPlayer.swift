@@ -2,8 +2,8 @@ import ComposableArchitecture
 import SwiftUI
 
 extension WindowFeature {
-  // Leaving a tab whose video plays moves the video into Picture in Picture, and leaving one that plays
-  // only sound shows its controls at the foot of the sidebar. Showing the tab again ends either.
+  // Leaving a tab that plays, video or sound, shows its controls at the foot of the sidebar. Showing the tab again
+  // hides them and brings back its video from Picture in Picture.
   func miniPlayerFollows(_ state: inout State, shown: Tab.ID?, selected: Tab.ID?) -> Effect<Action> {
     func media(_ id: Tab.ID) -> PageMedia? {
       state.spaces.spaces.lazy.compactMap { $0.tabs[id: id] }.first?.media
@@ -15,20 +15,16 @@ extension WindowFeature {
     if let selected, media(selected)?.isInPictureInPicture == true {
       effects.append(.run { _ in await engine.media(selected, .exitPictureInPicture) })
     }
-    if let shown, shown != selected, let left = media(shown), left.isPlaying {
-      if !left.hasVideo {
-        state.miniPlayer = shown
-      } else if !left.isInPictureInPicture {
-        effects.append(.run { _ in await engine.media(shown, .enterPictureInPicture) })
-      }
+    if let shown, shown != selected, media(shown)?.isPlaying == true {
+      state.miniPlayer = shown
     }
     return .merge(effects)
   }
 }
 
-// The mini player: a tab's favicon (back to the tab), previous, play or pause, next and the tab's volume. Hovering it
-// shows the tab's title and a close button above; the speaker opens a volume slider below until the pointer leaves.
-// It goes once the page has no media.
+// The mini player, on the favorites tile's fill and radius: a tab's favicon (back to the tab), previous, play or pause,
+// next and the tab's volume. Hovering it shows the tab's title, Picture in Picture and a close button above; the
+// speaker opens a volume slider below until the pointer leaves. It goes once the page has no media.
 struct MiniPlayer: View {
   let store: StoreOf<WindowFeature>
   @State private var isHovering = false
@@ -42,12 +38,22 @@ struct MiniPlayer: View {
       VStack(spacing: 0) {
         if isHovering {
           HStack(spacing: 0) {
-            Text(tab.displayTitle).font(.system(size: 13)).foregroundStyle(Color(hex: 0xCDCDD4)).lineLimit(1)
+            Text(tab.displayTitle).font(.system(size: 13)).foregroundStyle(Theme.rowText).lineLimit(1)
             Spacer(minLength: 8)
+            control(
+              media.isInPictureInPicture ? "pip.exit" : "pip.enter",
+              media.isInPictureInPicture ? "Exit Picture in Picture" : "Picture in Picture",
+              isSelected: media.isInPictureInPicture
+            ) {
+              PictureInPicture.perform(
+                media.isInPictureInPicture ? .exitPictureInPicture : .enterPictureInPicture, on: id)
+            }
+            .frame(width: 26)
             control("xmark", "Close Mini Player") { store.send(.closeMiniPlayer) }
-              .frame(width: 40)
+              .frame(width: 26)
           }
           .padding(.leading, 14)
+          .padding(.trailing, 9)
           .frame(height: 33)
           .transition(.opacity)
         }
@@ -83,8 +89,7 @@ struct MiniPlayer: View {
             .transition(.opacity)
         }
       }
-      .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: 0x050627)))
-      .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(hex: 0x1E1F3D), lineWidth: 0.5))
+      .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
       .padding(.horizontal, 8)
       .hoverRegion { hovering in
         withAnimation(Motion.row) {
@@ -101,8 +106,9 @@ struct MiniPlayer: View {
   ) -> some View {
     Button(action: action) {
       Image(systemName: symbol)
-        .font(.system(size: 14))
-        .foregroundStyle(isEnabled ? Color(hex: 0xB0B1BB) : Color(hex: 0x3B3C55))
+        .font(.system(size: 15))
+        .foregroundStyle(Theme.icon)
+        .opacity(isEnabled ? 1 : 0.42)
         .frame(width: 24, height: 24)
         .contentShape(Rectangle())
     }
@@ -121,8 +127,7 @@ private struct MiniPlayerButtonStyle: ButtonStyle {
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .background(
-        RoundedRectangle(cornerRadius: 6).fill(.white.opacity((isHovering || isSelected) && isEnabled ? 0.08 : 0)))
+      .background((isHovering || isSelected) && isEnabled ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 6))
       .hoverRegion { isHovering = $0 }
   }
 }
@@ -136,9 +141,9 @@ private struct VolumeSlider: View {
     GeometryReader { proxy in
       let travel = proxy.size.width - 20
       ZStack(alignment: .leading) {
-        Capsule().fill(Color(hex: 0x282A4B)).frame(height: 3.5)
-        Capsule().fill(Color(hex: 0x6C6C7A)).frame(width: 10 + travel * value, height: 3.5)
-        Circle().fill(Color(hex: 0x9495A2)).frame(width: 20, height: 20).offset(x: travel * value)
+        Capsule().fill(Theme.divider).frame(height: 3.5)
+        Capsule().fill(Theme.secondaryText).frame(width: 10 + travel * value, height: 3.5)
+        Circle().fill(Theme.icon).frame(width: 20, height: 20).offset(x: travel * value)
       }
       .frame(maxHeight: .infinity)
       .contentShape(Rectangle())

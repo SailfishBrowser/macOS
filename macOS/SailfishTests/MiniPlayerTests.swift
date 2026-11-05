@@ -49,14 +49,13 @@ final class MiniPlayerTests: XCTestCase {
     XCTAssertEqual(commands.value, [])
   }
 
-  func testLeavingATabPlayingVideoMovesItIntoPictureInPicture() async {
+  func testLeavingATabPlayingVideoShowsItsControls() async {
     let commands = LockIsolated<[MediaCommand]>([])
     let store = store([tab(10, media: media(video: true)), tab(11)], commands: commands)
 
-    await store.send(.tab(.select(UUID(11)), in: UUID(1)))
+    await store.send(.tab(.select(UUID(11)), in: UUID(1))) { $0.miniPlayer = UUID(10) }
     await store.finish()
-    XCTAssertNil(store.state.miniPlayer)
-    XCTAssertEqual(commands.value, [.enterPictureInPicture])
+    XCTAssertEqual(commands.value, [])
   }
 
   func testShowingATabInPictureInPictureEndsIt() async {
@@ -79,13 +78,14 @@ final class MiniPlayerTests: XCTestCase {
     XCTAssertEqual(commands.value, [])
   }
 
-  func testClosingTheMiniPlayerLeavesTheTabPlaying() async {
+  func testClosingTheMiniPlayerPausesTheTab() async {
     let commands = LockIsolated<[MediaCommand]>([])
     let store = store([tab(10, media: media()), tab(11)], commands: commands)
 
     await store.send(.tab(.select(UUID(11)), in: UUID(1))) { $0.miniPlayer = UUID(10) }
     await store.send(.closeMiniPlayer) { $0.miniPlayer = nil }
-    XCTAssertEqual(commands.value, [])
+    await store.finish()
+    XCTAssertEqual(commands.value, [.pause])
   }
 
   func testTheSpeakerShowsTheTabsVolumeAsArcsDoes() {
