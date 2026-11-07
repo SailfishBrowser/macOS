@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -65,6 +66,8 @@
 #include "components/zoom/page_zoom.h"
 #include "components/zoom/zoom_controller.h"
 #include "components/zoom/zoom_observer.h"
+#include "content/browser/media/media_web_contents_observer.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/context_menu_params.h"
@@ -90,6 +93,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/isolated_world_ids.h"
 #import "engine_core/ec_browser_context_private.h"
+#include "media/mojo/mojom/media_player.mojom.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/apple/url_conversions.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
@@ -388,18 +392,35 @@ class WebContentsDelegateBridge : public content::WebContentsDelegate,
 
   void MediaStartedPlaying(const MediaPlayerInfo& video_type,
                            const content::MediaPlayerId& id) override {
+    player_ = id;
+    player_has_video_ = video_type.has_video;
+    player_playing_ = true;
     ReportMediaChange();
   }
 
   void MediaStoppedPlaying(const MediaPlayerInfo& video_type,
                            const content::MediaPlayerId& id,
                            MediaStoppedReason reason) override {
+    if (player_ == id) {
+      player_playing_ = false;
+    }
     ReportMediaChange();
   }
 
   void MediaDestroyed(const content::MediaPlayerId& id) override {
+    if (player_ == id) {
+      player_.reset();
+    }
     ReportMediaChange();
   }
+
+  // The player that last started playing, whether it has video and whether it
+  // plays. The media session leaves out a player that never played sound and
+  // one in a muted tab, so the page's media is this player while the session
+  // has none.
+  std::optional<content::MediaPlayerId> player_;
+  bool player_has_video_ = false;
+  bool player_playing_ = false;
 
   void MediaPictureInPictureChanged(bool is_picture_in_picture) override {
     ReportMediaChange();
@@ -1366,13 +1387,34 @@ void OfferToSaveCard(
   return std::ranges::find(actions, action) != actions.end();
 }
 
-- (BOOL)hasMedia {
+- (BOOL)sessionHasMedia {
   auto info = [self mediaSessionInfo];
   return info && info->state !=
                      media_session::mojom::MediaSessionInfo::SessionState::kInactive;
 }
 
+// The player the media session leaves out, while the session has none and the
+// renderer still holds the player.
+- (media::mojom::MediaPlayer*)playerOutsideSession {
+  if (!_contents || [self sessionHasMedia] || !_bridge->player_) {
+    return nullptr;
+  }
+  auto* observer = static_cast<content::WebContentsImpl*>(_contents.get())
+                       ->media_web_contents_observer();
+  if (!observer->IsMediaPlayerRemoteAvailable(*_bridge->player_)) {
+    return nullptr;
+  }
+  return observer->GetMediaPlayerRemote(*_bridge->player_).get();
+}
+
+- (BOOL)hasMedia {
+  return [self sessionHasMedia] || [self playerOutsideSession];
+}
+
 - (BOOL)isPlayingMedia {
+  if ([self playerOutsideSession]) {
+    return _bridge->player_playing_;
+  }
   auto info = [self mediaSessionInfo];
   return info && info->playback_state ==
                      media_session::mojom::MediaPlaybackState::kPlaying;
@@ -1380,6 +1422,9 @@ void OfferToSaveCard(
 
 - (BOOL)mediaHasVideo {
   using media_session::mojom::MediaAudioVideoState;
+  if ([self playerOutsideSession]) {
+    return _bridge->player_has_video_;
+  }
   auto info = [self mediaSessionInfo];
   return info && info->audio_video_states &&
          std::ranges::any_of(*info->audio_video_states, [](auto state) {
@@ -1399,14 +1444,18 @@ void OfferToSaveCard(
 }
 
 - (void)playMedia {
-  if (_contents) {
+  if (auto* player = [self playerOutsideSession]) {
+    player->RequestPlay(/*triggered_by_user=*/true);
+  } else if (_contents) {
     content::MediaSession::Get(_contents.get())
         ->Resume(content::MediaSession::SuspendType::kUI);
   }
 }
 
 - (void)pauseMedia {
-  if (_contents) {
+  if (auto* player = [self playerOutsideSession]) {
+    player->RequestPause(/*triggered_by_user=*/true);
+  } else if (_contents) {
     content::MediaSession::Get(_contents.get())
         ->Suspend(content::MediaSession::SuspendType::kUI);
   }
@@ -1427,7 +1476,12 @@ void OfferToSaveCard(
 // The media session asks the page's one player to enter, as Chrome's media
 // controls do, which needs no user gesture.
 - (void)enterPictureInPicture {
-  if (_contents && !_contents->HasPictureInPictureVideo()) {
+  if (!_contents || _contents->HasPictureInPictureVideo()) {
+    return;
+  }
+  if (auto* player = [self playerOutsideSession]) {
+    player->RequestEnterPictureInPicture(std::nullopt);
+  } else {
     content::MediaSession::Get(_contents.get())->EnterPictureInPicture();
   }
 }

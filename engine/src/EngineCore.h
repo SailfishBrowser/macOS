@@ -602,10 +602,12 @@ EC_EXPORT
 // are reported to webContentsDidUpdate:.
 @property(readonly, getter=isAudible) BOOL audible;
 @property(getter=isMuted) BOOL muted;
-// The page's media as Chrome's media session sees it: whether it has any
-// (playing or paused), whether it plays, whether what plays has video, and
-// whether the page handles previous and next track. Changes are reported to
-// webContentsDidUpdate:.
+// The page's media as Chrome's media session sees it, or while the session has
+// none (a video that never played sound, any media in a muted tab), the player
+// that last started playing: whether it has any (playing or paused), whether it
+// plays, whether what plays has video, and whether the page handles previous
+// and next track. The controls below reach the same media. Changes are reported
+// to webContentsDidUpdate:.
 @property(readonly) BOOL hasMedia;
 @property(readonly, getter=isPlayingMedia) BOOL playingMedia;
 @property(readonly) BOOL mediaHasVideo;
