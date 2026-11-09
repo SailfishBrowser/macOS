@@ -49,9 +49,18 @@ final class MiniPlayerTests: XCTestCase {
     XCTAssertEqual(commands.value, [])
   }
 
-  func testLeavingATabPlayingVideoShowsItsControls() async {
+  func testLeavingATabPlayingVideoShowsItsControlsAndPutsItInPictureInPicture() async {
     let commands = LockIsolated<[MediaCommand]>([])
     let store = store([tab(10, media: media(video: true)), tab(11)], commands: commands)
+
+    await store.send(.tab(.select(UUID(11)), in: UUID(1))) { $0.miniPlayer = UUID(10) }
+    await store.finish()
+    XCTAssertEqual(commands.value, [.enterPictureInPicture])
+  }
+
+  func testLeavingAVideoAlreadyInPictureInPictureLeavesItThere() async {
+    let commands = LockIsolated<[MediaCommand]>([])
+    let store = store([tab(10, media: media(video: true, inPictureInPicture: true)), tab(11)], commands: commands)
 
     await store.send(.tab(.select(UUID(11)), in: UUID(1))) { $0.miniPlayer = UUID(10) }
     await store.finish()
