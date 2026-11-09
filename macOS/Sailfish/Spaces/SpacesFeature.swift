@@ -34,7 +34,7 @@ struct Profile: Codable, Equatable, Identifiable {
   // Favorites belong to the profile: every space of the profile shows them, and a favorite is one page
   // wherever it is shown.
   var favorites: IdentifiedArrayOf<Tab> = []
-  // Favorites in rows, each row's tiles sharing the width.
+  // The favorites' order, saved in the grid's rows; the grid lays them out again from the order alone.
   var favoriteRows: [[Tab.ID]] = []
 }
 

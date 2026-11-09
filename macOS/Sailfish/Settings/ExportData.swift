@@ -8,7 +8,7 @@ enum ExportData {
     for space in spaces {
       lines.append("## \(space.name)")
       lines.append("")
-      let favorites = space.favoriteGrid.joined()
+      let favorites = space.orderedFavorites
       if !favorites.isEmpty {
         lines.append("### Favorites")
         lines.append("")
