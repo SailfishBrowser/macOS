@@ -149,6 +149,11 @@ private struct Pane: View {
           page.frame(maxWidth: .infinity, maxHeight: .infinity).overlay(alignment: .bottomLeading) {
             if let tab { LinkBubbleOverlay(tab: tab.id, accent: accent) }
           }
+          .overlay {
+            if let tab {
+              if #available(macOS 26, *) { LinkPreviewOverlay(tab: tab.id, accent: accent) }
+            }
+          }
         }
       }
       .overlay {
