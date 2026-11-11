@@ -379,7 +379,7 @@ struct SidebarView: View {
           .padding(.top, 8)
           .padding(.horizontal, 8)
           // Tiles close up under a dropped one with the row motion, otherwise with the layout move.
-          .animation(drag?.isDropped == true ? Motion.row : Motion.layout, value: space.favoriteGrid.joined().map(\.id))
+          .animation(drag?.isDropped == true ? Motion.row : Motion.layout, value: space.orderedFavorites.map(\.id))
           .frame(maxWidth: .infinity, alignment: .top)
           // The strip is as tall as the grid on screen; another profile's grid shows past its frame while it slides.
           .frame(height: isSelected ? nil : 0, alignment: .top)
@@ -396,7 +396,7 @@ struct SidebarView: View {
 
   // The rows the arrow keys visit, in sidebar order: favorites, then every tab and group header not folded away.
   private func navigableRows(_ space: Space) -> [UUID] {
-    space.favoriteGrid.flatMap { $0 }.map(\.id)
+    space.orderedFavorites.map(\.id)
       + listItems(space).compactMap { item in
         switch item {
         case let .tab(tab, _, isFolded): isFolded ? nil : tab.id
@@ -673,15 +673,12 @@ struct SidebarView: View {
 
   @ViewBuilder private func favorites(_ space: Space) -> some View {
     if !space.tabs(in: .favorite).isEmpty {
-      // Rows of tiles sharing the width; a placeholder marks where the dragged one will go.
-      let rows = favoriteRows(space)
-      VStack(spacing: 8) {
-        ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-          placeholder(FavoriteSlot(row: index, column: nil))
-          HStack(spacing: 8) {
-            ForEach(Array(row.enumerated()), id: \.element.id) { column, tab in
-              placeholder(FavoriteSlot(row: index, column: column))
-              favoriteTile(tab, in: space)
+      // The tiles in order, wrapped by the grid; a placeholder takes the place the dragged one will go.
+      let tiles = favoriteTiles(space)
+      FavoriteGrid {
+        ForEach(Array(tiles.enumerated()), id: \.element.id) { index, tab in
+          placeholder(index)
+          favoriteTile(tab, in: space)
             .landing(isLanding(.tab(tab.id)))
             .pressDown(scale: 0.99) { send(.select(tab.id)) }
             .favoritePreview(tab) { send(.preload(tab.id)) } open: { openPreview($0, of: tab) }
@@ -693,17 +690,10 @@ struct SidebarView: View {
             .tabIconPicker(tab.icon, isPresented: isPresented($iconTab, tab.id)) { send(.setIcon(tab.id, $0)) }
             .zone(.tab(tab.id), $zones)
             .transition(.identity)
-            }
-            placeholder(FavoriteSlot(row: index, column: row.count))
-            // A short row keeps the full rows' tile width.
-            ForEach(row.count..<(rows.map(\.count).max() ?? row.count), id: \.self) { _ in
-              Color.clear.frame(maxWidth: .infinity).frame(height: 47)
-            }
-          }
         }
-        placeholder(FavoriteSlot(row: rows.count, column: nil))
+        placeholder(tiles.count)
       }
-      // The gap below takes a new last row.
+      // The gap below takes the last place too.
       .padding(.bottom, 10)
       .zone(.favorites, $zones)
       .padding(.bottom, -10)
@@ -1309,7 +1299,8 @@ struct SidebarView: View {
       switch zone {
       case let .tab(id):
         guard let tab = space.tabs[id: id] else { return }
-        let target = tab.placement == .favorite ? .favorite(slot(of: id)) : slot(below: tab)
+        let target =
+          tab.placement == .favorite ? .favorite(space.orderedFavorites.firstIndex { $0.id == id } ?? 0) : slot(below: tab)
         drag = Drag(item: .tab(id), space: space.id, frame: frame, grab: grab(value.startLocation, in: frame), target: target)
         // A drag moves one row; the multi-selection ends.
         if !space.selection.isEmpty { send(.clearSelection) }
@@ -1493,8 +1484,8 @@ struct SidebarView: View {
       switch (drag.item, drag.target) {
       case let (.tab(id), .slot(placement, before)):
         send(.move(id, placement, before: before))
-      case let (.tab(id), .favorite(slot)):
-        send(.moveFavorite(id, to: slot))
+      case let (.tab(id), .favorite(index)):
+        send(.moveFavorite(id, to: index))
       case let (.tab(id), .grouped(group, before)):
         send(.group([id], into: group, before: before))
       case let (.tab(id), .into(folder)):
@@ -1600,32 +1591,17 @@ struct SidebarView: View {
     return .grouped(group, before: index + 1 < members.count ? members[index + 1] : nil)
   }
 
-  // The favorites' rows; a dragged favorite leaves them, and they reflow around the placeholder.
-  private func favoriteRows(_ space: Space) -> [[Tab]] {
-    space.favoriteGrid.map { $0.filter { drag?.isLanding != false || drag?.item != .tab($0.id) } }.filter { !$0.isEmpty }
+  // The favorites in order; a dragged favorite leaves them, and they reflow around the placeholder.
+  private func favoriteTiles(_ space: Space) -> [Tab] {
+    space.orderedFavorites.filter { drag?.isLanding != false || drag?.item != .tab($0.id) }
   }
 
-  // A favorite's own place, among the rows left without it.
-  private func slot(of id: Tab.ID) -> FavoriteSlot {
-    let grid = space.favoriteGrid
-    let row = grid.firstIndex { $0.contains { $0.id == id } }!
-    let column = grid[row].firstIndex { $0.id == id }!
-    return grid[row].count == 1 ? FavoriteSlot(row: row, column: nil) : FavoriteSlot(row: row, column: column)
-  }
-
-  // A row's top and bottom quarters, and the gaps, make a new row; its middle goes between its tiles.
+  // The cell under the pointer, in the grid of the tiles and the placeholder; every cell takes the drop, and the
+  // tiles from there on move along one.
   private func favoriteTarget(at point: CGPoint) -> DropTarget? {
-    let rows = favoriteRows(space)
-    for (index, row) in rows.enumerated() {
-      guard let frame = row.compactMap({ zones.frames[.tab($0.id)] }).reduce(nil, { $0?.union($1) ?? $1 }) else { continue }
-      if point.y < frame.minY + frame.height / 4 { return .favorite(FavoriteSlot(row: index, column: nil)) }
-      if point.y <= frame.maxY - frame.height / 4 {
-        guard row.count < Space.favoritesPerRow else { return nil }
-        let column = row.filter { zones.frames[.tab($0.id)].map { $0.midX < point.x } ?? false }.count
-        return .favorite(FavoriteSlot(row: index, column: column))
-      }
-    }
-    return .favorite(FavoriteSlot(row: rows.count, column: nil))
+    let cells = favoriteTiles(space).count + 1
+    guard let frame = zones.frames[.favorites] else { return .favorite(cells - 1) }
+    return .favorite(FavoriteGrid.index(at: point, cells: cells, in: frame))
   }
 
   // The dropped row hides while its copy settles into its slot.
@@ -1647,8 +1623,8 @@ struct SidebarView: View {
   }
 
   // The Favorites placeholder: the dragged favicon on a light tile with a white outline.
-  @ViewBuilder private func placeholder(_ slot: FavoriteSlot) -> some View {
-    if let drag, !drag.isLanding, drag.shownTarget == .favorite(slot), let tab = dragged(drag) {
+  @ViewBuilder private func placeholder(_ index: Int) -> some View {
+    if let drag, !drag.isLanding, drag.shownTarget == .favorite(index), let tab = dragged(drag) {
       TabFavicon(tab: tab, profileID: space.profileID, isIncognito: space.isIncognito)
         .frame(maxWidth: .infinity)
         .frame(height: 46)
@@ -2070,7 +2046,8 @@ private enum DropTarget: Hashable {
   // Before a tab of a group, or at the group's end.
   case grouped(TabGroup.ID, before: Tab.ID?)
   case into(Folder.ID)
-  case favorite(FavoriteSlot)
+  // A place in the favorites' order, among the tiles left without the dragged one.
+  case favorite(Int)
   // At a pane index of the tab's row.
   case split(beside: Tab.ID, at: Int)
   case space(Space.ID)

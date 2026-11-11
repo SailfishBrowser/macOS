@@ -126,12 +126,6 @@ struct Split: Codable, Equatable, Identifiable {
   }
 }
 
-// Where a favorite goes among the rows left without it: into a row before a column, or a new row (column nil).
-struct FavoriteSlot: Hashable {
-  var row: Int
-  var column: Int?
-}
-
 // An archived tab and where it was among the space's own tabs, so that undo can put it back.
 struct ClosedTab: Equatable {
   let tab: Tab
@@ -278,23 +272,33 @@ struct TabsFeature {
       }
     }
 
-    // The limits: three favorites to a row and four panes to a split.
-    static let favoritesPerRow = 3
+    // The limits: four favorites to a row and four panes to a split.
+    static let maxFavoritesPerRow = 4
     static let maxPanes = 4
 
-    // The rows the user arranged. A favorite added without a place lays them all out again: as few
-    // rows as fit three to a row, filled evenly (4 is 2+2, 5 is 3+2).
-    var favoriteGrid: [[Tab]] {
+    // The favorites in their saved order; one added without a place goes at the end.
+    var orderedFavorites: [Tab] {
       let favorites = favorites
-      let rows = favoriteRows.map { $0.compactMap { favorites[id: $0] } }.filter { !$0.isEmpty }
-      let placed = Set(rows.joined().map(\.id))
-      let added = favorites.filter { !placed.contains($0.id) }
-      guard !added.isEmpty else { return rows }
-      let all = Array(rows.joined()) + added
-      let rowCount = (all.count + Self.favoritesPerRow - 1) / Self.favoritesPerRow
-      let perRow = (all.count + rowCount - 1) / rowCount
-      return stride(from: 0, to: all.count, by: perRow).map { Array(all[$0..<min($0 + perRow, all.count)]) }
+      let saved = favoriteRows.joined().compactMap { favorites[id: $0] }
+      let placed = Set(saved.map(\.id))
+      return saved + favorites.filter { !placed.contains($0.id) }
     }
+
+    // A grid's columns: as few rows as hold four, as even as they go (5 is 3 + 2, 7 is 4 + 3), so that the
+    // blanks are at the end of the last row.
+    static func favoriteColumns(_ count: Int) -> Int {
+      guard count > 0 else { return 1 }
+      let rows = (count + maxFavoritesPerRow - 1) / maxFavoritesPerRow
+      return (count + rows - 1) / rows
+    }
+
+    // Tiles in order, in the grid's rows.
+    static func favoriteGridRows<T>(_ tiles: [T]) -> [[T]] {
+      let columns = favoriteColumns(tiles.count)
+      return stride(from: 0, to: tiles.count, by: columns).map { Array(tiles[$0..<min($0 + columns, tiles.count)]) }
+    }
+
+    var favoriteGrid: [[Tab]] { Self.favoriteGridRows(orderedFavorites) }
 
     var selectedTab: Tab? { selectedTabID.flatMap { tabs[id: $0] } }
 
@@ -323,7 +327,7 @@ struct TabsFeature {
     }
 
     var sidebarOrder: [Tab] {
-      favoriteGrid.flatMap { $0 } + tree().compactMap { if case let .tab(tab) = $0 { tab } else { nil } } + tabs(in: .unpinned)
+      orderedFavorites + tree().compactMap { if case let .tab(tab) = $0 { tab } else { nil } } + tabs(in: .unpinned)
     }
 
     // The sidebar order without the rows folded under a collapsed pinned section or a closed folder, which the
@@ -341,7 +345,7 @@ struct TabsFeature {
         }
       }
       visit(.pinned, folded: isPinnedCollapsed)
-      return favoriteGrid.flatMap { $0 } + pinned + tabs(in: .unpinned).filter { !isFoldedInGroup($0) }
+      return orderedFavorites + pinned + tabs(in: .unpinned).filter { !isFoldedInGroup($0) }
     }
 
     // The Today tabs above and below a tab's row, which Archive Tabs Above and Below take; a split's other panes
@@ -377,7 +381,7 @@ struct TabsFeature {
           }
         }
       }
-      return favoriteGrid.flatMap { $0 } + (isPinnedCollapsed ? [] : shown(in: .pinned))
+      return orderedFavorites + (isPinnedCollapsed ? [] : shown(in: .pinned))
         + tabs(in: .unpinned).filter { !isFoldedInGroup($0) }
     }
 
@@ -429,7 +433,7 @@ struct TabsFeature {
     case muteAll(Bool)
     // Moves the tab before another row, or to the end of the placement.
     case move(Tab.ID, Placement, before: UUID?)
-    case moveFavorite(Tab.ID, to: FavoriteSlot)
+    case moveFavorite(Tab.ID, to: Int)
     // Moves the folder into the pinned section or another folder, before a row or last.
     case moveFolder(Folder.ID, Placement, before: UUID?)
     // A new folder is "Untitled" unless named in the New Folder… dialog. With tabs, it is made around them
@@ -745,23 +749,17 @@ struct TabsFeature {
         move(id, placement, before: before, &state)
         return moved(from: layout, state)
 
-      case let .moveFavorite(id, slot):
+      case let .moveFavorite(id, index):
         guard state.tabs[id: id] != nil else { return .none }
         let layout = TabLayout(state)
-        var rows = state.favoriteGrid.map { $0.map(\.id).filter { $0 != id } }.filter { !$0.isEmpty }
-        if let column = slot.column {
-          guard slot.row < rows.count, rows[slot.row].count < State.favoritesPerRow, column <= rows[slot.row].count
-          else { return .none }
-          rows[slot.row].insert(id, at: column)
-        } else {
-          guard slot.row <= rows.count else { return .none }
-          rows.insert([id], at: slot.row)
-        }
+        var order = state.orderedFavorites.map(\.id).filter { $0 != id }
+        guard (0...order.count).contains(index) else { return .none }
+        order.insert(id, at: index)
         if state.tabs[id: id]?.placement != .favorite {
           unsplit(id, &state)
           move(id, .favorite, before: nil, &state)
         }
-        state.favoriteRows = rows
+        state.favoriteRows = State.favoriteGridRows(order)
         return moved(from: layout, state)
 
       case let .moveFolder(id, placement, before):

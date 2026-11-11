@@ -41,7 +41,7 @@ extension TabsFeature.State {
 
   // The tabs of a placement in sidebar order.
   func orderedTabs(in placement: Placement) -> [Tab] {
-    if placement == .favorite { return favoriteGrid.flatMap { $0 } }
+    if placement == .favorite { return orderedFavorites }
     guard placement.isPinnedSection else { return tabs(in: placement) }
     return rows(in: placement).compactMap { if case let .tab(tab) = $0 { tab } else { nil } }
   }
