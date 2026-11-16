@@ -2742,7 +2742,7 @@ private struct SpaceDot: View {
 }
 
 // Whether the pointer is on the Library button or on the download stack it shows.
-@Observable private final class LibraryHover {
+@Observable final class LibraryHover {
   var isOnButton = false
   var isOnStack = false
 }
@@ -2766,8 +2766,10 @@ private struct Isolated<Content: View>: View {
 
 // The footer's Library button: a box glyph, with the badge of a running download over its top right, or for half
 // a minute the icon of the one that just finished, lifted clear of the glyph.
-private struct LibraryButton: View {
+struct LibraryButton: View {
   let hover: LibraryHover
+  // Where the badge sits from the top right of the 28 pt button; the footer centers it on the glyph's top right corner.
+  var badgeOffset = CGSize(width: 3, height: -4.5)
   let action: () -> Void
   @Environment(StoreOf<DownloadsFeature>.self) private var downloads
   @Environment(DownloadThrows.self) private var downloadThrows
@@ -2782,7 +2784,11 @@ private struct LibraryButton: View {
     // The stack shows it while the pointer is on the button.
     let isStackShown = hover.isOnButton || hover.isOnStack
     let finished = isStackShown ? nil : downloads.finished.flatMap { downloads.downloads[id: $0] }
-    Button(action: action) {
+    Button {
+      // The finished download's icon only says there is a new download; once the button is used it has done that.
+      downloads.send(.finishedSeen)
+      action()
+    } label: {
       LibraryGlyph()
         .foregroundStyle(Theme.icon)
         .frame(width: 28, height: 28)
@@ -2812,13 +2818,14 @@ private struct LibraryButton: View {
       .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(DownloadThrows.space)) } action: {
         downloadThrows.badge = $0
       }
-      // Centered on the glyph's top right corner, at (21, 5.5) in the 28 pt button.
-      .offset(x: 3, y: -4.5)
+      // By default centered on the glyph's top right corner, at (21, 5.5) in the 28 pt button.
+      .offset(badgeOffset)
       .allowsHitTesting(false)
     }
     .hoverRegion {
       isHovering = $0
       hover.isOnButton = $0
+      if $0 { downloads.send(.finishedSeen) }
     }
     .hoverTooltip("View Library", subtitle: "⇧⌘L")
     // Right-click: where the Library's Media comes from.

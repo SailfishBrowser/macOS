@@ -90,6 +90,8 @@ enum Motion {
     let iconPopDuration: Double
     // Where the glyph starts when the pointer is outside the window: this far in from the page's top right corner.
     let cornerInset: CGFloat
+    // How long the Library button, out on its own while the sidebar is hidden, stays after the last glyph lands.
+    let dockHold: Double
 
     // Time itself, so the path's own shape sets the motion, starting once the glyph has faded in; nil with Reduce
     // Motion, which skips the throw.
@@ -97,11 +99,13 @@ enum Motion {
     @MainActor var appear: Animation? { motion(.linear(duration: fadeIn)) }
     @MainActor var badge: Animation? { motion(.linear(duration: badgeFade)) }
     @MainActor var pop: Animation? { motion(.linear(duration: iconPopDuration)) }
+    // The docked Library button sliding away: slower than the peeked sidebar's exit, so it is seen to leave.
+    @MainActor var dockOut: Animation? { motion(.spring(duration: 0.4, bounce: 0)) }
   }
 
   static let downloadThrow = DownloadThrow(
     duration: 52.0 / 60, apexTime: 11.0 / 60, fadeIn: 3.0 / 60, startSize: 35, apexSize: 48, landedSize: 12,
-    badgeFade: 3.0 / 60, iconPop: 1.5, iconPopDuration: 1.0 / 60, cornerInset: 48)
+    badgeFade: 3.0 / 60, iconPop: 1.5, iconPopDuration: 1.0 / 60, cornerInset: 48, dockHold: 1)
 
   private static func motion(_ animation: Animation) -> Animation? {
     NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : animation

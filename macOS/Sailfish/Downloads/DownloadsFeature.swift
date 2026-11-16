@@ -45,6 +45,8 @@ struct DownloadsFeature {
     // Move to Trash, which takes the download off the lists too.
     case moveToTrash(Download.ID)
     case finishedShown(Download.ID)
+    // The Library button was hovered or clicked, so the finished download's icon has done its job.
+    case finishedSeen
     case updated(Download)
     // Tidy Downloads renamed the finished file to this.
     case renamed(Download.ID, URL)
@@ -76,6 +78,11 @@ struct DownloadsFeature {
       case let .finishedShown(id):
         if state.finished == id { state.finished = nil }
         return .none
+
+      case .finishedSeen:
+        guard state.finished != nil else { return .none }
+        state.finished = nil
+        return .cancel(id: CancelID.finished)
 
       case let .moveToTrash(id):
         guard let file = state.downloads[id: id]?.fileURL else { return .none }
@@ -120,7 +127,7 @@ struct DownloadsFeature {
 
       case let .renamed(id, file):
         guard let download = state.downloads[id: id], let old = download.fileURL else { return .none }
-        _ = state.$renamed.withLock { $0[download.hiddenKey] = file.lastPathComponent }
+        state.$renamed.withLock { $0[download.hiddenKey] = file.lastPathComponent }
         state.downloads[id: id]?.originalName = old.lastPathComponent
         state.downloads[id: id]?.fileURL = file
         return .none

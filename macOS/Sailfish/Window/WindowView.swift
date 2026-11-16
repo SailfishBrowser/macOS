@@ -78,7 +78,9 @@ struct WindowView: View {
       !store.isIncognito && Theme.isLight(theme) ? .light : .dark)
     // Above the page and the sidebar both, as a thrown download crosses from one to the other.
     .overlay {
-      DownloadThrowLayer(canThrow: (!isFloating || store.sidebar.isPeeking) && !store.isLibraryOpen)
+      DownloadThrowLayer(
+        canThrow: (!isFloating || store.sidebar.isPeeking) && !store.isLibraryOpen,
+        canDock: isFloating && !store.sidebar.isPeeking && !store.isLibraryOpen && !isPageFullScreen)
     }
     // Over all of the window, which it dims and keeps from clicks.
     .overlay {
@@ -253,6 +255,15 @@ struct WindowView: View {
           .transition(.move(edge: .leading))
           // Stays above the page while it slides out, too.
           .zIndex(1)
+      }
+      // A download thrown while the sidebar is hidden lands on the Library button, out on its own.
+      if downloadThrows.dock != .away, !store.sidebar.isPeeking, !store.isLibraryOpen {
+        LibraryDock(fill: AnyShapeStyle(background.opacity(Theme.isLight(theme) ? 0.95 : 0.8))) {
+          store.send(.toggleLibrary)
+        }
+        .frame(maxHeight: .infinity, alignment: .bottom)
+        .transition(.move(edge: .leading))
+        .zIndex(1)
       }
     }
   }

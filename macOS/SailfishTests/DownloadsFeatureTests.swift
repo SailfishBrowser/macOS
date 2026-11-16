@@ -38,6 +38,27 @@ final class DownloadsFeatureTests: XCTestCase {
     XCTAssertEqual(trashed.value, [download.fileURL!])
   }
 
+  func testHoveringOrClickingTheLibraryButtonTakesTheFinishedIconOffAtOnce() async {
+    var running = download
+    running.state = .inProgress
+    let clock = TestClock()
+    let store = TestStore(initialState: DownloadsFeature.State(downloads: [running])) {
+      DownloadsFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.tidyDownload = { _, _ in nil }
+    }
+
+    await store.send(.updated(download)) {
+      $0.downloads[id: self.download.id] = self.download
+      $0.finished = self.download.id
+    }
+    await clock.advance(by: .seconds(5))
+    // The half-minute timer goes with it, so nothing more arrives.
+    await store.send(.finishedSeen) { $0.finished = nil }
+    await clock.advance(by: .seconds(30))
+  }
+
   func testAFinishedDownloadShowsOnTheLibraryButtonForHalfAMinute() async {
     var running = download
     running.state = .inProgress
